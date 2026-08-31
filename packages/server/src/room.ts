@@ -49,6 +49,7 @@ export class Room {
   players = new Map<string, RoomPlayer>();
   game: GameState | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private deadlineAt: number | null = null;
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -151,6 +152,7 @@ export class Room {
 
   private startTimer(ms: number): void {
     this.clearTimer();
+    this.deadlineAt = Date.now() + ms;
     this.timer = setTimeout(() => this.onTimeout(), ms);
   }
 
@@ -159,6 +161,13 @@ export class Room {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    this.deadlineAt = null;
+  }
+
+  // 权威剩余时间（毫秒）供客户端渲染倒计时；无计时窗口时为 null。
+  getDeadlineMs(): number | null {
+    if (this.deadlineAt == null) return null;
+    return Math.max(0, this.deadlineAt - Date.now());
   }
 
   private onTimeout(): void {

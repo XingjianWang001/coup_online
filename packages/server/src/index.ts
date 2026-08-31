@@ -54,7 +54,7 @@ const io = new Server(httpServer);
 function broadcast(room: Room): void {
   const pub = room.getPublicState();
   if (pub) {
-    io.to(room.code).emit('publicState', { state: pub });
+    io.to(room.code).emit('publicState', { state: pub, remainingMs: room.getDeadlineMs() });
     for (const p of room.players.values()) {
       const priv = room.getPrivateState(p.id);
       if (priv) io.to(p.socketId).emit('privateState', { hand: priv.hand });

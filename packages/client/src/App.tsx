@@ -12,6 +12,7 @@ import {
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
 import { ROLE_DESC, ROLE_NAMES, RULES } from './rules.ts';
+import { describeCountdown, describePending, nameOf } from './narration.ts';
 
 const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: string }[] = [
   { type: 'income', label: '收入 +1', needsTarget: false },
@@ -49,6 +50,7 @@ export function App() {
   const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
   const [selectedKeep, setSelectedKeep] = useState<string[]>([]);
   const [leftReason, setLeftReason] = useState('');
+  const [remainingMs, setRemainingMs] = useState<number | null>(null);
 
   useEffect(() => {
     const off = onMessage(socket, (msg: ServerMessage) => {
@@ -72,6 +74,7 @@ export function App() {
           break;
         case 'publicState':
           setPublicState(msg.state);
+          setRemainingMs(msg.remainingMs);
           break;
         case 'privateState':
           setHand(msg.hand);
@@ -116,6 +119,13 @@ export function App() {
     const t = setTimeout(() => setNotice(''), 4000);
     return () => clearTimeout(t);
   }, [notice]);
+
+  // 倒计时本地递减：服务器广播的权威剩余毫秒数，每秒往下数
+  useEffect(() => {
+    if (remainingMs == null || remainingMs <= 0) return;
+    const t = setTimeout(() => setRemainingMs((v) => (v == null ? null : Math.max(0, v - 1000))), 1000);
+    return () => clearTimeout(t);
+  }, [remainingMs]);
 
   const me = identity?.playerId;
 
@@ -183,6 +193,7 @@ export function App() {
           hand={hand}
           notice={notice}
           leftReason={leftReason}
+          remainingMs={remainingMs}
           selectedAction={selectedAction}
           setSelectedAction={setSelectedAction}
           selectedKeep={selectedKeep}
@@ -276,6 +287,7 @@ interface RoomViewProps {
   onAction: (action: ActionType, targetId?: string) => void;
   socket: ReturnType<typeof connect>;
   identity: { playerId: string; name: string } | null;
+  remainingMs: number | null;
 }
 
 function RoomView(props: RoomViewProps) {
@@ -312,6 +324,7 @@ function RoomView(props: RoomViewProps) {
       hand={props.hand}
       me={me}
       notice={props.notice}
+      remainingMs={props.remainingMs}
       selectedAction={props.selectedAction}
       setSelectedAction={props.setSelectedAction}
       selectedKeep={props.selectedKeep}
@@ -342,6 +355,7 @@ function GameBoard(props: {
   setSelectedKeep: (ids: string[]) => void;
   onAction: (action: ActionType, targetId?: string) => void;
   onIntent: (i: Parameters<typeof send>[1]) => void;
+  remainingMs: number | null;
 }) {
   const { state, me } = props;
   const myView = state.players.find((p) => p.id === me);
@@ -374,6 +388,9 @@ function GameBoard(props: {
   const amLosing = state.phase === 'choosingLoss' && state.lossPlayerId === me;
   const amExchanging = state.phase === 'choosingExchange' && pending?.actorId === me;
 
+  const narration = describePending(state);
+  const countdown = describeCountdown(props.remainingMs);
+
   return (
     <div className="board">
       {props.notice && <div className="notice">{props.notice}</div>}
@@ -381,6 +398,18 @@ function GameBoard(props: {
       {state.phase === 'gameOver' && (
         <div className="notice big">🏆 {state.players.find((p) => p.id === state.winnerId)?.name} 获胜！</div>
       )}
+
+      {narration ? (
+        <div className="narration">
+          <span className="narration-text">{narration}</span>
+          {countdown && <span className="narration-timer">{countdown}</span>}
+        </div>
+      ) : isMyTurn && state.phase === 'choosingAction' && countdown ? (
+        <div className="narration">
+          <span className="narration-text">轮到你了</span>
+          <span className="narration-timer">{countdown}</span>
+        </div>
+      ) : null}
 
       <div className="table">
         {state.players.map((p) => (
@@ -464,7 +493,7 @@ function GameBoard(props: {
         )}
 
         {!isMyTurn && !canChallenge && !canBlock && !amLosing && !amExchanging && state.phase !== 'gameOver' && (
-          <div className="waiting">等待其他玩家操作…</div>
+          <div className="waiting">等待 {nameOf(state, state.currentPlayerId)} 行动…</div>
         )}
       </div>
     </div>

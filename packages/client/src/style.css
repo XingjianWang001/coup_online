@@ -198,6 +198,30 @@ input {
   padding: 20px;
 }
 
+.narration {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #243b2a;
+  border: 1px solid #f3d06055;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin: 12px 0;
+}
+
+.narration-text {
+  font-weight: bold;
+  color: #f3d060;
+}
+
+.narration-timer {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: bold;
+  color: #f3d060;
+}
+
 .overlay {
   position: fixed;
   inset: 0;
