@@ -427,3 +427,12 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# ==== coup_online (pnpm TypeScript monorepo) overrides ====
+# packages/ 是应用源码，不是 .NET NuGet 包目录
+!packages/
+!packages/**
+# 但仍需忽略依赖与构建产物（在 re-include 之后覆盖）
+node_modules/
+dist/
+
