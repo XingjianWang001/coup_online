@@ -256,8 +256,8 @@ function RoomView(props: RoomViewProps) {
           ))}
         </ul>
         {me === props.hostId && (
-          <button onClick={props.onStart} disabled={props.players.length < 3}>
-            开始游戏（需 ≥3 人）
+          <button onClick={props.onStart} disabled={props.players.length < 2}>
+            开始游戏（需 ≥2 人）
           </button>
         )}
         {props.leftReason && <div className="error">你已离开：{props.leftReason}</div>}

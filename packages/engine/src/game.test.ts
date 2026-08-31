@@ -37,9 +37,14 @@ describe('createGame', () => {
     expect(s.currentPlayerId).toBe('a');
   });
 
-  it('拒绝少于 3 人或超过 6 人', () => {
-    expect(() => createGame([P('a'), P('b')])).toThrow();
+  it('拒绝少于 2 人或超过 6 人', () => {
+    expect(() => createGame([P('a')])).toThrow();
     expect(() => createGame([P('a'), P('b'), P('c'), P('d'), P('e'), P('f'), P('g')])).toThrow();
+  });
+
+  it('允许 2 人开局', () => {
+    const s = createGame([P('a'), P('b')]);
+    expect(s.players).toHaveLength(2);
   });
 });
 

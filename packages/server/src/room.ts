@@ -103,7 +103,7 @@ export class Room {
   }
 
   startGame(): GameEvent[] {
-    if (this.players.size < 3) throw new Error('至少 3 人才能开局');
+    if (this.players.size < 2) throw new Error('至少 2 人才能开局');
     const entries = [...this.players.values()];
     this.game = createGame(entries.map((p) => ({ id: p.id, name: p.name })));
     this.repo.save(this.code, this.game);

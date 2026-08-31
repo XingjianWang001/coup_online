@@ -206,8 +206,8 @@ export function createGame(
   players: { id: string; name: string }[],
   options?: { hands?: Record<string, Role[]> },
 ): GameState {
-  if (players.length < 3 || players.length > 6) {
-    throw new Error('players must be 3-6');
+  if (players.length < 2 || players.length > 6) {
+    throw new Error('players must be 2-6');
   }
   let deck = DECK.map((role, i) => ({ id: `${role}-${i}`, role }));
   shuffle(deck);
