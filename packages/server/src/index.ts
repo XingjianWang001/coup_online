@@ -26,8 +26,9 @@ function genCode(): string {
 
 const httpServer = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
-  let path = normalize(decodeURIComponent(url.pathname));
+  let path = decodeURIComponent(url.pathname);
   if (path === '/') path = '/index.html';
+  path = normalize(path);
 
   const filePath = join(CLIENT_DIST, path);
   if (!filePath.startsWith(CLIENT_DIST) || !existsSync(filePath) || !statSync(filePath).isFile()) {
