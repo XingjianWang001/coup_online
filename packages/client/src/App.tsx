@@ -1,6 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, Card, LobbyPlayer, PublicState, Role } from '@coup/shared';
-import { connect, loadIdentity, onMessage, saveIdentity, send } from './socket.ts';
+import {
+  clearRoomCode,
+  connect,
+  loadIdentity,
+  loadRoomCode,
+  onMessage,
+  saveIdentity,
+  saveRoomCode,
+  send,
+} from './socket.ts';
 import type { ServerMessage } from './socket.ts';
 import { ROLE_DESC, ROLE_NAMES, RULES } from './rules.ts';
 
@@ -26,7 +35,9 @@ export function App() {
   const socket = useMemo(() => connect(), []);
   const [identity, setIdentity] = useState(() => loadIdentity());
   const [name, setName] = useState(() => identity?.name ?? '');
-  const [roomCode, setRoomCode] = useState('');
+  const nameRef = useRef(name);
+  nameRef.current = name;
+  const [roomCode, setRoomCode] = useState(() => loadRoomCode() ?? '');
   const [joined, setJoined] = useState<string | null>(null);
   const [hostId, setHostId] = useState('');
   const [players, setPlayers] = useState<LobbyPlayer[]>([]);
@@ -40,14 +51,15 @@ export function App() {
   const [leftReason, setLeftReason] = useState('');
 
   useEffect(() => {
-    onMessage(socket, (msg: ServerMessage) => {
+    const off = onMessage(socket, (msg: ServerMessage) => {
       switch (msg.type) {
         case 'joined':
           setJoined(msg.roomCode);
           setHostId(msg.hostId);
           setPlayers(msg.players);
-          setIdentity({ playerId: msg.playerId, name });
-          saveIdentity({ playerId: msg.playerId, name });
+          setIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
+          saveIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
+          saveRoomCode(msg.roomCode);
           setLeftReason('');
           break;
         case 'lobby':
@@ -80,18 +92,47 @@ export function App() {
           break;
       }
     });
-  }, [socket, name]);
+    return off;
+  }, [socket]);
+
+  // 重连：socket 重新连接后，若本地有身份与房间码，自动重新加入
+  useEffect(() => {
+    const onConnect = () => {
+      const id = loadIdentity();
+      const code = loadRoomCode();
+      if (id && code) {
+        send(socket, { type: 'joinRoom', roomCode: code, name: id.name, playerId: id.playerId, secret: id.secret });
+      }
+    };
+    socket.on('connect', onConnect);
+    return () => {
+      socket.off('connect', onConnect);
+    };
+  }, [socket]);
+
+  // 提示自动清除
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(''), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const me = identity?.playerId;
 
   function createRoom() {
     setError('');
-    send(socket, { type: 'createRoom', name, playerId: identity?.playerId });
+    send(socket, { type: 'createRoom', name, playerId: identity?.playerId, secret: identity?.secret });
   }
 
   function joinRoom() {
     setError('');
-    send(socket, { type: 'joinRoom', roomCode: roomCode.trim(), name, playerId: identity?.playerId });
+    send(socket, {
+      type: 'joinRoom',
+      roomCode: roomCode.trim(),
+      name,
+      playerId: identity?.playerId,
+      secret: identity?.secret,
+    });
   }
 
   function startGame() {
@@ -281,11 +322,11 @@ function RoomView(props: RoomViewProps) {
   );
 }
 
-function CardView({ card, dim }: { card: Card; dim?: boolean }) {
-  const color = ROLE_COLORS[card.role];
+function CardView({ role, dim }: { role: Role; dim?: boolean }) {
+  const color = ROLE_COLORS[role];
   return (
     <div className="card" style={{ borderColor: color, opacity: dim ? 0.6 : 1 }}>
-      <span style={{ color }}>{ROLE_NAMES[card.role]}</span>
+      <span style={{ color }}>{ROLE_NAMES[role]}</span>
     </div>
   );
 }
@@ -350,8 +391,8 @@ function GameBoard(props: {
             </div>
             <div className="coins">💰 {p.coins}</div>
             <div className="revealed">
-              {p.revealed.map((c) => (
-                <CardView key={c.id} card={c} />
+              {p.revealed.map((role, i) => (
+                <CardView key={i} role={role} />
               ))}
             </div>
             <div className="handcount">暗牌 × {p.handCount}</div>
@@ -363,7 +404,7 @@ function GameBoard(props: {
         <h3>你的暗牌</h3>
         <div className="cards">
           {props.hand.map((c) => (
-            <CardView key={c.id} card={c} />
+            <CardView key={c.id} role={c.role} />
           ))}
         </div>
       </div>
@@ -441,8 +482,13 @@ function Actions(props: {
   return (
     <div className="actions">
       {ACTIONS.map((a) => {
+        const mustCoup = props.coins >= 10;
         const disabled =
-          a.type === 'coup' ? props.coins < 7 : a.type === 'assassinate' ? props.coins < 3 : false;
+          a.type === 'coup'
+            ? props.coins < 7
+            : a.type === 'assassinate'
+              ? props.coins < 3 || mustCoup
+              : mustCoup;
         return (
           <button
             key={a.type}

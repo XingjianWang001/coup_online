@@ -82,6 +82,7 @@ function checkWin(state: GameState): GameEvent[] {
     state.challengeSubject = null;
     state.lossToResolve = null;
     state.exchangeKeepCount = null;
+    state.passed = [];
     return [{ type: 'gameOver', winnerId: al[0].id }];
   }
   return [];
@@ -129,6 +130,7 @@ function advanceTurn(state: GameState): GameEvent[] {
   state.challengeSubject = null;
   state.lossToResolve = null;
   state.exchangeKeepCount = null;
+  state.passed = [];
   return [{ type: 'turnChanged', playerId: next.id }];
 }
 
@@ -246,6 +248,7 @@ export function createGame(
     challengeSubject: null,
     lossToResolve: null,
     exchangeKeepCount: null,
+    passed: [],
     winnerId: null,
   };
 }
@@ -260,6 +263,10 @@ export function chooseAction(
   if (actorId !== state.currentPlayerId) throw new Error('not your turn');
   const actor = getPlayer(state, actorId);
   if (!actor.alive) throw new Error('actor eliminated');
+
+  if (actor.coins >= 10 && action !== 'coup') {
+    throw new Error('持有 10 枚以上金币必须发动政变');
+  }
 
   const needsTarget = action === 'coup' || action === 'assassinate' || action === 'steal';
   if (needsTarget && !targetId) throw new Error(`${action} 需要目标`);
@@ -292,6 +299,7 @@ export function chooseAction(
 
   state.pending = { type: action, actorId, targetId, claimedRole: claimedRole ?? undefined };
   state.challengeSubject = claimedRole ? 'action' : null;
+  state.passed = [];
 
   events.push({ type: 'actionChosen', actorId, action, targetId, claimedRole: claimedRole ?? undefined });
 
@@ -316,6 +324,7 @@ export function challenge(state: GameState, challengerId: string): GameEvent[] {
   const claimant = getPlayer(state, claimantId);
   const truth = claimant.hand.some((c) => c.role === claimedRole);
   state.challengeSubject = null;
+  state.passed = [];
 
   const events: GameEvent[] = [{ type: 'challenged', challengerId, targetId: claimantId }];
 
@@ -330,13 +339,46 @@ export function challenge(state: GameState, challengerId: string): GameEvent[] {
   return events;
 }
 
-export function passChallenge(state: GameState): GameEvent[] {
-  if (state.phase !== 'awaitingChallenge') throw new Error('not in awaitingChallenge phase');
+// 当前质疑窗口中有资格表态的玩家（存活且非声称者）
+function eligibleChallengers(state: GameState): string[] {
+  const pending = state.pending!;
+  const subject = state.challengeSubject!;
+  const claimantId = subject === 'action' ? pending.actorId : pending.blockById!;
+  return state.players.filter((p) => p.alive && p.id !== claimantId).map((p) => p.id);
+}
+
+// 当前阻挡窗口中有资格阻挡的玩家
+function eligibleBlockers(state: GameState): string[] {
+  const pending = state.pending!;
+  if (pending.type === 'foreignAid') {
+    // 外援可被任意存活且非行动者的玩家阻挡
+    return state.players.filter((p) => p.alive && p.id !== pending.actorId).map((p) => p.id);
+  }
+  // 暗杀/偷窃：仅目标可阻挡
+  return state.players.filter((p) => p.alive && p.id === pending.targetId).map((p) => p.id);
+}
+
+function closeChallenge(state: GameState): GameEvent[] {
   const subject = state.challengeSubject!;
   state.challengeSubject = null;
-  if (subject === 'action') return proceedAction(state);
-  // 阻挡无人质疑 → 阻挡成功，行动取消
-  return advanceTurn(state);
+  state.passed = [];
+  return subject === 'action' ? proceedAction(state) : advanceTurn(state);
+}
+
+// 玩家放弃质疑：仅记录，所有有资格者都放弃后才关闭窗口
+export function passChallenge(state: GameState, playerId: string): GameEvent[] {
+  if (state.phase !== 'awaitingChallenge') throw new Error('not in awaitingChallenge phase');
+  const eligible = eligibleChallengers(state);
+  if (!eligible.includes(playerId)) throw new Error('无权放弃质疑');
+  if (!state.passed.includes(playerId)) state.passed.push(playerId);
+  if (eligible.some((id) => !state.passed.includes(id))) return [];
+  return closeChallenge(state);
+}
+
+// 超时：强制关闭质疑窗口
+export function resolveChallengeTimeout(state: GameState): GameEvent[] {
+  if (state.phase !== 'awaitingChallenge') throw new Error('not in awaitingChallenge phase');
+  return closeChallenge(state);
 }
 
 export function block(state: GameState, blockerId: string, role: Role): GameEvent[] {
@@ -355,11 +397,25 @@ export function block(state: GameState, blockerId: string, role: Role): GameEven
   pending.blockRole = role;
   state.phase = 'awaitingChallenge';
   state.challengeSubject = 'block';
+  state.passed = [];
   return [{ type: 'blocked', blockerId, role }];
 }
 
-export function passBlock(state: GameState): GameEvent[] {
+// 玩家放弃阻挡：仅记录，所有有资格者都放弃后才结算
+export function passBlock(state: GameState, playerId: string): GameEvent[] {
   if (state.phase !== 'awaitingBlock') throw new Error('not in awaitingBlock phase');
+  const eligible = eligibleBlockers(state);
+  if (!eligible.includes(playerId)) throw new Error('无权放弃阻挡');
+  if (!state.passed.includes(playerId)) state.passed.push(playerId);
+  if (eligible.some((id) => !state.passed.includes(id))) return [];
+  state.passed = [];
+  return resolveEffect(state);
+}
+
+// 超时：强制结算
+export function resolveBlockTimeout(state: GameState): GameEvent[] {
+  if (state.phase !== 'awaitingBlock') throw new Error('not in awaitingBlock phase');
+  state.passed = [];
   return resolveEffect(state);
 }
 
@@ -372,7 +428,7 @@ export function resolveLoss(state: GameState, playerId: string, cardId: string):
 
   const [card] = p.hand.splice(i, 1);
   p.revealed.push(card);
-  const events: GameEvent[] = [{ type: 'influenceLost', playerId, card }];
+  const events: GameEvent[] = [{ type: 'influenceLost', playerId, role: card.role }];
 
   const cont = state.lossToResolve.continuation;
   state.lossToResolve = null;
@@ -405,7 +461,7 @@ export function resolveExchange(state: GameState, playerId: string, keepIds: str
   return advanceTurn(state);
 }
 
-// 断线弃权：翻开全部暗牌、淘汰。
+// 断线弃权：翻开全部暗牌、淘汰，并清理所有指向该玩家的待处理状态，避免死锁。
 export function forfeit(state: GameState, playerId: string): GameEvent[] {
   const p = getPlayer(state, playerId);
   if (!p.alive) return [];
@@ -413,7 +469,7 @@ export function forfeit(state: GameState, playerId: string): GameEvent[] {
   while (p.hand.length > 0) {
     const c = p.hand.pop()!;
     p.revealed.push(c);
-    events.push({ type: 'influenceLost', playerId, card: c });
+    events.push({ type: 'influenceLost', playerId, role: c.role });
   }
   p.alive = false;
   events.push({ type: 'eliminated', playerId });
@@ -421,9 +477,18 @@ export function forfeit(state: GameState, playerId: string): GameEvent[] {
   const win = checkWin(state);
   if (state.phase === 'gameOver') return events.concat(win);
 
-  if (state.currentPlayerId === playerId) {
-    return events.concat(advanceTurn(state));
-  }
+  // 该玩家若正处于待处理状态（当前回合 / 待失去影响力 / 待交换 / 行动相关），
+  // 作废当前行动并推进回合，避免游戏卡在无人可解的状态。
+  const involved =
+    state.currentPlayerId === playerId ||
+    state.lossToResolve?.playerId === playerId ||
+    (state.phase === 'choosingExchange' && state.pending?.actorId === playerId) ||
+    (state.pending &&
+      (state.pending.actorId === playerId ||
+        state.pending.targetId === playerId ||
+        state.pending.blockById === playerId));
+
+  if (involved) return events.concat(advanceTurn(state));
   return events;
 }
 
@@ -435,7 +500,7 @@ export function publicState(state: GameState): PublicState {
       name: p.name,
       coins: p.coins,
       handCount: p.hand.length,
-      revealed: p.revealed,
+      revealed: p.revealed.map((c) => c.role),
       alive: p.alive,
     })),
     currentPlayerId: state.currentPlayerId,
@@ -452,6 +517,7 @@ export function publicState(state: GameState): PublicState {
     challengeSubject: state.challengeSubject,
     lossPlayerId: state.lossToResolve?.playerId ?? null,
     exchangeKeepCount: state.exchangeKeepCount,
+    passed: state.passed,
     winnerId: state.winnerId,
   };
 }

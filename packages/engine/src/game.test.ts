@@ -8,6 +8,8 @@ import {
   passBlock,
   passChallenge,
   publicState,
+  resolveBlockTimeout,
+  resolveChallengeTimeout,
   resolveExchange,
   resolveLoss,
 } from './index.ts';
@@ -71,6 +73,16 @@ describe('coup', () => {
     const s = setup({ a: ['duke', 'duke'], b: ['captain', 'captain'], c: ['contessa', 'contessa'] });
     expect(() => chooseAction(s, 'a', 'coup', 'b')).toThrow();
   });
+
+  it('持有 10 枚以上金币必须发动政变', () => {
+    const s = setup({ a: ['duke', 'duke'], b: ['captain', 'captain'], c: ['contessa', 'contessa'] });
+    s.players.find((p) => p.id === 'a')!.coins = 10;
+    expect(() => chooseAction(s, 'a', 'income')).toThrow();
+    expect(() => chooseAction(s, 'a', 'tax')).toThrow();
+    // 政变本身允许
+    chooseAction(s, 'a', 'coup', 'b');
+    expect(coins(s, 'a')).toBe(3); // 10 - 7
+  });
 });
 
 describe('resolveLoss', () => {
@@ -121,9 +133,24 @@ describe('声称行动与质疑', () => {
       c: ['contessa', 'contessa'],
     });
     chooseAction(s, 'a', 'tax');
-    passChallenge(s);
+    resolveChallengeTimeout(s);
     expect(coins(s, 'a')).toBe(5);
     expect(s.currentPlayerId).toBe('b');
+  });
+
+  it('部分玩家放弃质疑不会关闭窗口，全员放弃才关闭', () => {
+    const s = setup({
+      a: ['duke', 'captain'],
+      b: ['ambassador', 'ambassador'],
+      c: ['contessa', 'contessa'],
+    });
+    chooseAction(s, 'a', 'tax');
+    // b 放弃，但 c 尚未表态 → 窗口仍开
+    passChallenge(s, 'b');
+    expect(s.phase).toBe('awaitingChallenge');
+    // c 也放弃 → 全员放弃，结算
+    passChallenge(s, 'c');
+    expect(coins(s, 'a')).toBe(5);
   });
 });
 
@@ -139,7 +166,7 @@ describe('外援与阻挡', () => {
     block(s, 'b', 'duke');
     expect(s.phase).toBe('awaitingChallenge');
     expect(s.challengeSubject).toBe('block');
-    passChallenge(s);
+    resolveChallengeTimeout(s);
     expect(coins(s, 'a')).toBe(2);
     expect(s.currentPlayerId).toBe('b');
   });
@@ -151,7 +178,7 @@ describe('外援与阻挡', () => {
       c: ['contessa', 'contessa'],
     });
     chooseAction(s, 'a', 'foreignAid');
-    passBlock(s);
+    resolveBlockTimeout(s);
     expect(coins(s, 'a')).toBe(4);
   });
 });
@@ -165,8 +192,8 @@ describe('暗杀与偷窃', () => {
     });
     s.players.find((p) => p.id === 'a')!.coins = 5;
     chooseAction(s, 'a', 'assassinate', 'b');
-    passChallenge(s);
-    passBlock(s);
+    resolveChallengeTimeout(s);
+    resolveBlockTimeout(s);
     expect(s.phase).toBe('choosingLoss');
     expect(s.lossToResolve?.playerId).toBe('b');
     expect(coins(s, 'a')).toBe(2);
@@ -180,8 +207,8 @@ describe('暗杀与偷窃', () => {
     });
     s.players.find((p) => p.id === 'b')!.coins = 5;
     chooseAction(s, 'a', 'steal', 'b');
-    passChallenge(s);
-    passBlock(s);
+    resolveChallengeTimeout(s);
+    resolveBlockTimeout(s);
     expect(coins(s, 'a')).toBe(4);
     expect(coins(s, 'b')).toBe(3);
   });
@@ -195,7 +222,7 @@ describe('大使交换', () => {
       c: ['contessa', 'contessa'],
     });
     chooseAction(s, 'a', 'exchange');
-    passChallenge(s);
+    resolveChallengeTimeout(s);
     expect(s.phase).toBe('choosingExchange');
     const a = s.players.find((p) => p.id === 'a')!;
     expect(a.hand).toHaveLength(4);

@@ -23,6 +23,8 @@ export {
   passChallenge,
   privateState,
   publicState,
+  resolveBlockTimeout,
+  resolveChallengeTimeout,
   resolveExchange,
   resolveLoss,
 } from './game.ts';

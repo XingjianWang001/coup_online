@@ -2,8 +2,8 @@ import type { ActionType, GameEvent, PublicState, PrivateState, Role, Card } fro
 
 // 客户端 → 服务器 的意图
 export type ClientIntent =
-  | { type: 'createRoom'; name: string; playerId?: string }
-  | { type: 'joinRoom'; roomCode: string; name: string; playerId?: string }
+  | { type: 'createRoom'; name: string; playerId?: string; secret?: string }
+  | { type: 'joinRoom'; roomCode: string; name: string; playerId?: string; secret?: string }
   | { type: 'startGame' }
   | { type: 'chooseAction'; action: ActionType; targetId?: string }
   | { type: 'challenge' }
@@ -24,7 +24,7 @@ export interface LobbyPlayer {
 
 // 服务器 → 客户端 的消息
 export type ServerMessage =
-  | { type: 'joined'; roomCode: string; playerId: string; players: LobbyPlayer[]; hostId: string }
+  | { type: 'joined'; roomCode: string; playerId: string; secret: string; players: LobbyPlayer[]; hostId: string }
   | { type: 'lobby'; players: LobbyPlayer[]; hostId: string }
   | { type: 'gameStarted'; turnOrder: string[] }
   | { type: 'publicState'; state: PublicState }

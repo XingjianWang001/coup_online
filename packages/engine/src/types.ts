@@ -66,6 +66,7 @@ export interface GameState {
   challengeSubject: ChallengeSubject | null;
   lossToResolve: LossToResolve | null;
   exchangeKeepCount: number | null; // 大使交换需保留的牌数
+  passed: string[]; // 当前质疑/阻挡窗口中已放弃的玩家 id
   winnerId: string | null;
 }
 
@@ -75,7 +76,7 @@ export type GameEvent =
   | { type: 'challenged'; challengerId: string; targetId: string }
   | { type: 'blocked'; blockerId: string; role: Role }
   | { type: 'challengeResolved'; truth: boolean; loserId: string; claimantId: string }
-  | { type: 'influenceLost'; playerId: string; card: Card }
+  | { type: 'influenceLost'; playerId: string; role: Role }
   | { type: 'eliminated'; playerId: string }
   | { type: 'coinsChanged'; playerId: string; coins: number }
   | { type: 'exchangeDrew'; playerId: string; count: number }
@@ -88,7 +89,7 @@ export interface PublicPlayerView {
   name: string;
   coins: number;
   handCount: number; // 暗牌数量（不暴露具体牌）
-  revealed: Card[]; // 已公开翻出的明牌
+  revealed: Role[]; // 已公开翻出的明牌（只暴露角色，不暴露副本编号）
   alive: boolean;
 }
 
@@ -107,6 +108,7 @@ export interface PublicState {
   challengeSubject: ChallengeSubject | null;
   lossPlayerId: string | null;
   exchangeKeepCount: number | null;
+  passed: string[];
   winnerId: string | null;
 }
 

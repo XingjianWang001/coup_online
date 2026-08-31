@@ -17,7 +17,11 @@ const repo = new InMemoryGameRepository();
 const rooms = new Map<string, Room>();
 
 function genCode(): string {
-  return randomBytes(3).toString('hex').toUpperCase(); // 6 位房间码
+  let code: string;
+  do {
+    code = randomBytes(3).toString('hex').toUpperCase(); // 6 位房间码
+  } while (rooms.has(code));
+  return code;
 }
 
 const httpServer = createServer((req, res) => {
@@ -92,26 +96,37 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         onBroadcast: broadcast,
         onEmpty: (r) => rooms.delete(r.code),
       });
-      const playerId = raw.playerId ?? randomBytes(8).toString('hex');
-      room.hostId = playerId;
-      room.addPlayer(playerId, raw.name, socket.id);
+      const p = room.addPlayer(raw.name, socket.id);
+      room.hostId = p.id;
       rooms.set(code, room);
       socket.join(code);
       socket.data.roomCode = code;
-      socket.data.playerId = playerId;
-      socket.emit('joined', { roomCode: code, playerId, players: room.playerList, hostId: room.hostId });
+      socket.data.playerId = p.id;
+      socket.emit('joined', {
+        roomCode: code,
+        playerId: p.id,
+        secret: p.secret,
+        players: room.playerList,
+        hostId: room.hostId,
+      });
       broadcastLobby(room);
       break;
     }
     case 'joinRoom': {
       const room = rooms.get(raw.roomCode.toUpperCase());
       if (!room) throw new Error('房间不存在');
-      const playerId = raw.playerId ?? randomBytes(8).toString('hex');
-      room.addPlayer(playerId, raw.name, socket.id);
+      const reconnect = raw.playerId && raw.secret ? { id: raw.playerId, secret: raw.secret } : undefined;
+      const p = room.addPlayer(raw.name, socket.id, reconnect);
       socket.join(room.code);
       socket.data.roomCode = room.code;
-      socket.data.playerId = playerId;
-      socket.emit('joined', { roomCode: room.code, playerId, players: room.playerList, hostId: room.hostId });
+      socket.data.playerId = p.id;
+      socket.emit('joined', {
+        roomCode: room.code,
+        playerId: p.id,
+        secret: p.secret,
+        players: room.playerList,
+        hostId: room.hostId,
+      });
       if (room.game) broadcast(room);
       else broadcastLobby(room);
       break;

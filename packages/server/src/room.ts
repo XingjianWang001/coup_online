@@ -1,4 +1,5 @@
 import type { GameState, GameEvent, Role, ActionType } from '@coup/engine';
+import { randomBytes } from 'node:crypto';
 import {
   block,
   challenge,
@@ -9,6 +10,8 @@ import {
   passChallenge,
   privateState,
   publicState,
+  resolveBlockTimeout,
+  resolveChallengeTimeout,
   resolveExchange,
   resolveLoss,
 } from '@coup/engine';
@@ -19,11 +22,20 @@ const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
 const DISCONNECT_GRACE_MS = 90_000;
 
+function genId(): string {
+  return randomBytes(8).toString('hex');
+}
+
+function genSecret(): string {
+  return randomBytes(16).toString('hex');
+}
+
 export interface RoomPlayer {
   id: string;
   name: string;
   socketId: string;
   connected: boolean;
+  secret: string; // 重连凭证，只发给本人，不对外广播
 }
 
 export interface RoomEvents {
@@ -54,17 +66,20 @@ export class Room {
     }));
   }
 
-  addPlayer(id: string, name: string, socketId: string): RoomPlayer {
-    // 重连：复用已有玩家（保持座位）
-    const existing = this.players.get(id);
-    if (existing) {
-      existing.socketId = socketId;
-      existing.connected = true;
-      if (name) existing.name = name;
-      this.clearDisconnectTimer(id);
-      return existing;
+  // 加入或重连。reconnect 提供 id + secret，匹配才复用座位，否则视为新玩家（防劫持）。
+  addPlayer(name: string, socketId: string, reconnect?: { id: string; secret: string }): RoomPlayer {
+    if (reconnect) {
+      const existing = this.players.get(reconnect.id);
+      if (existing && existing.secret === reconnect.secret) {
+        existing.socketId = socketId;
+        existing.connected = true;
+        if (name) existing.name = name;
+        this.clearDisconnectTimer(reconnect.id);
+        return existing;
+      }
     }
-    const p: RoomPlayer = { id, name, socketId, connected: true };
+    // 新玩家：服务器生成全新 id 与 secret
+    const p: RoomPlayer = { id: genId(), secret: genSecret(), name, socketId, connected: true };
     this.players.set(p.id, p);
     return p;
   }
@@ -152,9 +167,9 @@ export class Room {
       if (this.game.phase === 'choosingAction') {
         this.autoAction();
       } else if (this.game.phase === 'awaitingChallenge') {
-        this.apply((g) => passChallenge(g));
+        this.apply((g) => resolveChallengeTimeout(g));
       } else if (this.game.phase === 'awaitingBlock') {
-        this.apply((g) => passBlock(g));
+        this.apply((g) => resolveBlockTimeout(g));
       }
     } catch (e) {
       console.error('timeout error', e);
@@ -183,11 +198,11 @@ export class Room {
       case 'challenge':
         return this.apply((g) => challenge(g, playerId));
       case 'passChallenge':
-        return this.apply((g) => passChallenge(g));
+        return this.apply((g) => passChallenge(g, playerId));
       case 'block':
         return this.apply((g) => block(g, playerId, intent.role as Role));
       case 'passBlock':
-        return this.apply((g) => passBlock(g));
+        return this.apply((g) => passBlock(g, playerId));
       case 'resolveLoss':
         return this.apply((g) => resolveLoss(g, playerId, intent.cardId as string));
       case 'resolveExchange':
