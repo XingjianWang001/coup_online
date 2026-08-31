@@ -24,14 +24,6 @@ const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: s
   { type: 'exchange', label: '交换 (大使)', needsTarget: false },
 ];
 
-const ROLE_COLORS: Record<Role, string> = {
-  duke: '#8d6e63',
-  assassin: '#c62828',
-  captain: '#1565c0',
-  ambassador: '#2e7d32',
-  contessa: '#6a1b9a',
-};
-
 export function App() {
   const socket = useMemo(() => connect(), []);
   const [identity, setIdentity] = useState(() => loadIdentity());
@@ -335,12 +327,24 @@ function RoomView(props: RoomViewProps) {
   );
 }
 
-function CardView({ role, dim }: { role: Role; dim?: boolean }) {
-  const color = ROLE_COLORS[role];
+function CardView({ role }: { role: Role }) {
+  return <div className={`card card--${role}`}>{ROLE_NAMES[role]}</div>;
+}
+
+function CoinIcon() {
   return (
-    <div className="card" style={{ borderColor: color, opacity: dim ? 0.6 : 1 }}>
-      <span style={{ color }}>{ROLE_NAMES[role]}</span>
-    </div>
+    <svg className="inline-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="8" cy="8" r="3.5" fill="none" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  );
+}
+
+function CrownIcon() {
+  return (
+    <svg className="inline-icon" width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M3 14 L3 6.5 L6.6 9.5 L10 4.5 L13.4 9.5 L17 6.5 L17 14 Z" fill="currentColor" />
+    </svg>
   );
 }
 
@@ -396,7 +400,7 @@ function GameBoard(props: {
       {props.notice && <div className="notice">{props.notice}</div>}
 
       {state.phase === 'gameOver' && (
-        <div className="notice big">🏆 {state.players.find((p) => p.id === state.winnerId)?.name} 获胜！</div>
+        <div className="notice big"><CrownIcon /> {state.players.find((p) => p.id === state.winnerId)?.name} 获胜！</div>
       )}
 
       {narration ? (
@@ -418,13 +422,15 @@ function GameBoard(props: {
               {p.name}
               {p.id === me && ' (你)'}
             </div>
-            <div className="coins">💰 {p.coins}</div>
+            <div className="coins"><CoinIcon /> {p.coins}</div>
             <div className="revealed">
               {p.revealed.map((role, i) => (
                 <CardView key={i} role={role} />
               ))}
             </div>
-            <div className="handcount">暗牌 × {p.handCount}</div>
+            <div className="hand-pile">
+              <span className="card-back">暗牌 × {p.handCount}</span>
+            </div>
           </div>
         ))}
       </div>

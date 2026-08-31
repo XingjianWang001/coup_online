@@ -1,3 +1,19 @@
+:root {
+  /* 材质 */
+  --ink: #1b2a20;
+  --felt: #243b2a;
+  --panel: #15251a;
+  --gold: #f3d060;
+  --bone: #e8f0e9;
+
+  /* 角色色（材质级） */
+  --role-duke: #8d6e63;
+  --role-assassin: #c62828;
+  --role-captain: #1565c0;
+  --role-ambassador: #2e7d32;
+  --role-contessa: #6a1b9a;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -5,8 +21,8 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #1b2a20;
-  color: #e8f0e9;
+  background: var(--ink);
+  color: var(--bone);
 }
 
 .app {
@@ -23,7 +39,7 @@ body {
 
 h1 {
   font-size: 24px;
-  color: #f3d060;
+  color: var(--gold);
 }
 
 button {
@@ -49,7 +65,7 @@ button.ghost {
 }
 
 button.active {
-  outline: 3px solid #f3d060;
+  outline: 3px solid var(--gold);
 }
 
 label {
@@ -104,7 +120,7 @@ input {
 .roomcode b {
   font-size: 22px;
   letter-spacing: 2px;
-  color: #f3d060;
+  color: var(--gold);
 }
 
 .playerlist {
@@ -118,7 +134,7 @@ input {
 }
 
 .playerlist li.host {
-  color: #f3d060;
+  color: var(--gold);
 }
 
 .table {
@@ -129,14 +145,14 @@ input {
 }
 
 .seat {
-  background: #243b2a;
+  background: var(--felt);
   border-radius: 12px;
   padding: 12px;
   text-align: center;
 }
 
 .seat.current {
-  outline: 3px solid #f3d060;
+  outline: 3px solid var(--gold);
 }
 
 .seat.dead {
@@ -148,7 +164,7 @@ input {
 }
 
 .seat .coins {
-  color: #f3d060;
+  color: var(--gold);
   margin: 4px 0;
 }
 
@@ -159,9 +175,10 @@ input {
   min-height: 30px;
 }
 
-.handcount {
-  color: #aaa;
-  font-size: 13px;
+.hand-pile {
+  display: flex;
+  justify-content: center;
+  min-height: 30px;
 }
 
 .myhand .cards {
@@ -179,10 +196,34 @@ input {
   font-weight: bold;
 }
 
+.card--duke { border-color: var(--role-duke); color: var(--role-duke); }
+.card--assassin { border-color: var(--role-assassin); color: var(--role-assassin); }
+.card--captain { border-color: var(--role-captain); color: var(--role-captain); }
+.card--ambassador { border-color: var(--role-ambassador); color: var(--role-ambassador); }
+.card--contessa { border-color: var(--role-contessa); color: var(--role-contessa); }
+
+.card-back {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 4px;
+  border: 1px solid var(--gold);
+  background: repeating-linear-gradient(45deg, #2e3a2e 0 4px, #1f2b20 4px 8px);
+  color: var(--gold);
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.inline-icon {
+  display: inline-block;
+  vertical-align: -2px;
+}
+
 .controls {
   margin-top: 16px;
   padding: 16px;
-  background: #15251a;
+  background: var(--panel);
   border-radius: 12px;
 }
 
@@ -203,7 +244,7 @@ input {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: #243b2a;
+  background: var(--felt);
   border: 1px solid #f3d06055;
   border-radius: 10px;
   padding: 10px 14px;
@@ -212,14 +253,14 @@ input {
 
 .narration-text {
   font-weight: bold;
-  color: #f3d060;
+  color: var(--gold);
 }
 
 .narration-timer {
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
   font-weight: bold;
-  color: #f3d060;
+  color: var(--gold);
 }
 
 .overlay {
@@ -233,7 +274,7 @@ input {
 }
 
 .panel {
-  background: #1b2a20;
+  background: var(--ink);
   border: 1px solid #444;
   border-radius: 16px;
   padding: 20px;
