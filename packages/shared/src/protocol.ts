@@ -27,7 +27,7 @@ export type ServerMessage =
   | { type: 'joined'; roomCode: string; playerId: string; secret: string; players: LobbyPlayer[]; hostId: string }
   | { type: 'lobby'; players: LobbyPlayer[]; hostId: string }
   | { type: 'gameStarted'; turnOrder: string[] }
-  | { type: 'publicState'; state: PublicState }
+  | { type: 'publicState'; state: PublicState; remainingMs: number | null }
   | { type: 'privateState'; hand: Card[] }
   | { type: 'events'; events: GameEvent[] }
   | { type: 'error'; message: string }

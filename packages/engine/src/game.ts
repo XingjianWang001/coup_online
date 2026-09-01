@@ -277,7 +277,8 @@ export function chooseAction(
   }
 
   const claimedRole = ACTION_CLAIM[action];
-  const events: GameEvent[] = [];
+  // actionChosen 作为每回合首个事件，便于客户端按行动分组日志
+  const events: GameEvent[] = [{ type: 'actionChosen', actorId, action, targetId, claimedRole: claimedRole ?? undefined }];
 
   if (action === 'income') {
     events.push(...addCoins(state, actorId, 1));
@@ -288,7 +289,6 @@ export function chooseAction(
     if (actor.coins < COUP_COST) throw new Error('金币不足发动政变');
     events.push(...addCoins(state, actorId, -COUP_COST));
     startLoss(state, targetId!, { kind: 'endTurn' });
-    events.push({ type: 'actionChosen', actorId, action, targetId });
     return events;
   }
 
@@ -300,8 +300,6 @@ export function chooseAction(
   state.pending = { type: action, actorId, targetId, claimedRole: claimedRole ?? undefined };
   state.challengeSubject = claimedRole ? 'action' : null;
   state.passed = [];
-
-  events.push({ type: 'actionChosen', actorId, action, targetId, claimedRole: claimedRole ?? undefined });
 
   if (claimedRole) {
     state.phase = 'awaitingChallenge';

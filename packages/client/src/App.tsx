@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, Card, LobbyPlayer, PublicState, Role } from '@coup/shared';
 import {
+  clearIdentity,
   clearRoomCode,
   connect,
   loadIdentity,
@@ -12,6 +13,8 @@ import {
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
 import { ROLE_DESC, ROLE_NAMES, RULES } from './rules.ts';
+import { describeCountdown, describePending, groupLog, nameOf } from './narration.ts';
+import type { LogEntry } from './narration.ts';
 
 const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: string }[] = [
   { type: 'income', label: '收入 +1', needsTarget: false },
@@ -22,14 +25,6 @@ const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: s
   { type: 'steal', label: '偷窃 (队长)', needsTarget: true },
   { type: 'exchange', label: '交换 (大使)', needsTarget: false },
 ];
-
-const ROLE_COLORS: Record<Role, string> = {
-  duke: '#8d6e63',
-  assassin: '#c62828',
-  captain: '#1565c0',
-  ambassador: '#2e7d32',
-  contessa: '#6a1b9a',
-};
 
 export function App() {
   const socket = useMemo(() => connect(), []);
@@ -49,6 +44,10 @@ export function App() {
   const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
   const [selectedKeep, setSelectedKeep] = useState<string[]>([]);
   const [leftReason, setLeftReason] = useState('');
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [remainingMs, setRemainingMs] = useState<number | null>(null);
+  const [log, setLog] = useState<LogEntry[]>([]);
+  const logIdRef = useRef(0);
 
   useEffect(() => {
     const off = onMessage(socket, (msg: ServerMessage) => {
@@ -67,11 +66,13 @@ export function App() {
           setPlayers(msg.players);
           break;
         case 'gameStarted':
-          setPublicState((s) => (s ? s : null));
           setNotice('游戏开始！');
+          setLog([]);
+          logIdRef.current = 0;
           break;
         case 'publicState':
           setPublicState(msg.state);
+          setRemainingMs(msg.remainingMs);
           break;
         case 'privateState':
           setHand(msg.hand);
@@ -83,12 +84,27 @@ export function App() {
             if (e.type === 'challengeResolved') setNotice(e.truth ? '质疑失败' : '质疑成功');
             if (e.type === 'influenceLost') setNotice('有玩家失去影响力');
           }
+          {
+            const entries = msg.events.map((event) => ({ id: logIdRef.current++, event }));
+            setLog((prev) => [...prev, ...entries].slice(-500));
+          }
           break;
         case 'error':
           setError(msg.message);
           break;
         case 'left':
           setLeftReason(msg.reason);
+          setJoined(null);
+          clearRoomCode();
+          clearIdentity();
+          setIdentity(null);
+          setPublicState(null);
+          setHand([]);
+          setPlayers([]);
+          setHostId('');
+          setSelectedAction(null);
+          setSelectedKeep([]);
+          setConfirmLeave(false);
           break;
       }
     });
@@ -117,6 +133,13 @@ export function App() {
     return () => clearTimeout(t);
   }, [notice]);
 
+  // 倒计时本地递减：服务器广播的权威剩余毫秒数，每秒往下数
+  useEffect(() => {
+    if (remainingMs == null || remainingMs <= 0) return;
+    const t = setTimeout(() => setRemainingMs((v) => (v == null ? null : Math.max(0, v - 1000))), 1000);
+    return () => clearTimeout(t);
+  }, [remainingMs]);
+
   const me = identity?.playerId;
 
   function createRoom() {
@@ -144,6 +167,17 @@ export function App() {
     send(socket, { type: 'chooseAction', action, targetId });
   }
 
+  function leaveRoom() {
+    setConfirmLeave(false);
+    send(socket, { type: 'leaveRoom' });
+  }
+
+  // 对局中离开需确认（视为弃权）；大厅阶段直接离开。
+  function requestLeave() {
+    if (publicState) setConfirmLeave(true);
+    else leaveRoom();
+  }
+
   // 规则说明：首次进入询问
   useEffect(() => {
     if (joined && !identity && !localStorage.getItem('coup_seen_rules')) {
@@ -156,12 +190,31 @@ export function App() {
     <div className="app">
       <header className="header">
         <h1>政变 Coup</h1>
-        <button className="ghost" onClick={() => setShowRules((v) => !v)}>
-          {showRules ? '关闭规则' : '规则'}
-        </button>
+        <div className="header-actions">
+          <button className="ghost" onClick={() => setShowRules((v) => !v)}>
+            {showRules ? '关闭规则' : '规则'}
+          </button>
+          {joined && (
+            <button className="ghost" onClick={requestLeave}>
+              离开房间
+            </button>
+          )}
+        </div>
       </header>
 
       {showRules && <RulesPanel onClose={() => setShowRules(false)} />}
+
+      {confirmLeave && (
+        <div className="overlay" onClick={() => setConfirmLeave(false)}>
+          <div className="panel" onClick={(e) => e.stopPropagation()}>
+            <p>确认离开房间？对局中离开将视为弃权。</p>
+            <button onClick={leaveRoom}>确认离开</button>
+            <button className="ghost" onClick={() => setConfirmLeave(false)}>
+              取消
+            </button>
+          </div>
+        </div>
+      )}
 
       {!joined ? (
         <Lobby
@@ -183,6 +236,8 @@ export function App() {
           hand={hand}
           notice={notice}
           leftReason={leftReason}
+          remainingMs={remainingMs}
+          log={log}
           selectedAction={selectedAction}
           setSelectedAction={setSelectedAction}
           selectedKeep={selectedKeep}
@@ -238,7 +293,7 @@ function Lobby(props: {
         昵称
         <input value={props.name} onChange={(e) => props.setName(e.target.value)} placeholder="你的昵称" />
       </label>
-      <button onClick={props.onCreate} disabled={!props.name.trim()}>
+      <button className="primary" onClick={props.onCreate} disabled={!props.name.trim()}>
         创建房间
       </button>
       <div className="divider">或</div>
@@ -251,7 +306,7 @@ function Lobby(props: {
           maxLength={6}
         />
       </label>
-      <button onClick={props.onJoin} disabled={!props.name.trim() || props.roomCode.trim().length < 3}>
+      <button className="ghost" onClick={props.onJoin} disabled={!props.name.trim() || props.roomCode.trim().length < 3}>
         加入房间
       </button>
       {props.error && <div className="error">{props.error}</div>}
@@ -276,6 +331,8 @@ interface RoomViewProps {
   onAction: (action: ActionType, targetId?: string) => void;
   socket: ReturnType<typeof connect>;
   identity: { playerId: string; name: string } | null;
+  remainingMs: number | null;
+  log: LogEntry[];
 }
 
 function RoomView(props: RoomViewProps) {
@@ -297,7 +354,7 @@ function RoomView(props: RoomViewProps) {
           ))}
         </ul>
         {me === props.hostId && (
-          <button onClick={props.onStart} disabled={props.players.length < 2}>
+          <button className="primary" onClick={props.onStart} disabled={props.players.length < 2}>
             开始游戏（需 ≥2 人）
           </button>
         )}
@@ -312,6 +369,8 @@ function RoomView(props: RoomViewProps) {
       hand={props.hand}
       me={me}
       notice={props.notice}
+      remainingMs={props.remainingMs}
+      log={props.log}
       selectedAction={props.selectedAction}
       setSelectedAction={props.setSelectedAction}
       selectedKeep={props.selectedKeep}
@@ -322,12 +381,24 @@ function RoomView(props: RoomViewProps) {
   );
 }
 
-function CardView({ role, dim }: { role: Role; dim?: boolean }) {
-  const color = ROLE_COLORS[role];
+function CardView({ role }: { role: Role }) {
+  return <div className={`card card--${role}`}>{ROLE_NAMES[role]}</div>;
+}
+
+function CoinIcon() {
   return (
-    <div className="card" style={{ borderColor: color, opacity: dim ? 0.6 : 1 }}>
-      <span style={{ color }}>{ROLE_NAMES[role]}</span>
-    </div>
+    <svg className="inline-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="8" cy="8" r="3.5" fill="none" stroke="currentColor" strokeWidth="1" />
+    </svg>
+  );
+}
+
+function CrownIcon() {
+  return (
+    <svg className="inline-icon" width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M3 14 L3 6.5 L6.6 9.5 L10 4.5 L13.4 9.5 L17 6.5 L17 14 Z" fill="currentColor" />
+    </svg>
   );
 }
 
@@ -342,6 +413,8 @@ function GameBoard(props: {
   setSelectedKeep: (ids: string[]) => void;
   onAction: (action: ActionType, targetId?: string) => void;
   onIntent: (i: Parameters<typeof send>[1]) => void;
+  remainingMs: number | null;
+  log: LogEntry[];
 }) {
   const { state, me } = props;
   const myView = state.players.find((p) => p.id === me);
@@ -374,13 +447,40 @@ function GameBoard(props: {
   const amLosing = state.phase === 'choosingLoss' && state.lossPlayerId === me;
   const amExchanging = state.phase === 'choosingExchange' && pending?.actorId === me;
 
+  const narration = describePending(state);
+  const countdown = describeCountdown(props.remainingMs);
+
+  const groups = groupLog(props.log, state).reverse();
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  const toggleGroup = (id: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   return (
     <div className="board">
       {props.notice && <div className="notice">{props.notice}</div>}
 
       {state.phase === 'gameOver' && (
-        <div className="notice big">🏆 {state.players.find((p) => p.id === state.winnerId)?.name} 获胜！</div>
+        <div className="notice big"><CrownIcon /> {state.players.find((p) => p.id === state.winnerId)?.name} 获胜！</div>
       )}
+
+      {narration ? (
+        <div className="narration">
+          <span className="narration-text">{narration}</span>
+          {countdown && <span className="narration-timer">{countdown}</span>}
+        </div>
+      ) : isMyTurn && state.phase === 'choosingAction' && countdown ? (
+        <div className="narration">
+          <span className="narration-text">轮到你了</span>
+          <span className="narration-timer">{countdown}</span>
+        </div>
+      ) : null}
 
       <div className="table">
         {state.players.map((p) => (
@@ -389,13 +489,15 @@ function GameBoard(props: {
               {p.name}
               {p.id === me && ' (你)'}
             </div>
-            <div className="coins">💰 {p.coins}</div>
+            <div className="coins"><CoinIcon /> {p.coins}</div>
             <div className="revealed">
               {p.revealed.map((role, i) => (
                 <CardView key={i} role={role} />
               ))}
             </div>
-            <div className="handcount">暗牌 × {p.handCount}</div>
+            <div className="hand-pile">
+              <span className="card-back">暗牌 × {p.handCount}</span>
+            </div>
           </div>
         ))}
       </div>
@@ -432,7 +534,7 @@ function GameBoard(props: {
         {canBlock && (
           <div className="row">
             {canBlockRoles.map((r) => (
-              <button key={r} onClick={() => props.onIntent({ type: 'block', role: r })}>
+              <button key={r} className={`role-btn role--${r}`} onClick={() => props.onIntent({ type: 'block', role: r })}>
                 用{ROLE_NAMES[r]}阻挡
               </button>
             ))}
@@ -446,7 +548,11 @@ function GameBoard(props: {
           <div className="row">
             <p>请选择一张暗牌公开翻开：</p>
             {props.hand.map((c) => (
-              <button key={c.id} onClick={() => props.onIntent({ type: 'resolveLoss', cardId: c.id })}>
+              <button
+                key={c.id}
+                className={`role-btn role--${c.role}`}
+                onClick={() => props.onIntent({ type: 'resolveLoss', cardId: c.id })}
+              >
                 翻开 {ROLE_NAMES[c.role]}
               </button>
             ))}
@@ -464,9 +570,40 @@ function GameBoard(props: {
         )}
 
         {!isMyTurn && !canChallenge && !canBlock && !amLosing && !amExchanging && state.phase !== 'gameOver' && (
-          <div className="waiting">等待其他玩家操作…</div>
+          <div className="waiting">等待 {nameOf(state, state.currentPlayerId)} 行动…</div>
         )}
       </div>
+
+      {groups.length > 0 && (
+        <div className="log">
+          {groups.map((g, i) => (
+            <Fragment key={g.id}>
+              {i > 0 && <div className="log-sep" aria-hidden="true" />}
+              <div className="log-group">
+                <button
+                  className="log-header"
+                  onClick={g.entries.length ? () => toggleGroup(g.id) : undefined}
+                  aria-expanded={g.entries.length ? expanded.has(g.id) : undefined}
+                >
+                  {g.entries.length > 0 && (
+                    <span className={`log-chevron${expanded.has(g.id) ? ' open' : ''}`}>▸</span>
+                  )}
+                  <span>{g.action}</span>
+                </button>
+                {expanded.has(g.id) && g.entries.length > 0 && (
+                  <div className="log-entries">
+                    {g.entries.map((en) => (
+                      <div key={en.id} className="log-entry">
+                        {en.text}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Fragment>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -538,7 +675,11 @@ function ExchangeControl(props: {
     <div className="row">
       <p>交换：请选择保留的 {props.keepCount} 张牌</p>
       {props.hand.map((c) => (
-        <button key={c.id} className={props.selectedKeep.includes(c.id) ? 'active' : ''} onClick={() => toggle(c.id)}>
+        <button
+          key={c.id}
+          className={`role-btn role--${c.role}${props.selectedKeep.includes(c.id) ? ' active' : ''}`}
+          onClick={() => toggle(c.id)}
+        >
           {ROLE_NAMES[c.role]}
           {props.selectedKeep.includes(c.id) ? ' ✓' : ''}
         </button>

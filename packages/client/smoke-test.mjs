@@ -28,10 +28,12 @@ async function main() {
   const roomCode = joined.roomCode;
   console.log('✅ 房间创建:', roomCode, 'playerId:', joined.playerId);
 
+  const bJoined = on(clients[1], 'joined');
+  const cJoined = on(clients[2], 'joined');
   clients[1].emit('intent', { type: 'joinRoom', roomCode, name: 'Bob' });
   clients[2].emit('intent', { type: 'joinRoom', roomCode, name: 'Carol' });
-  await on(clients[1], 'joined');
-  await on(clients[2], 'joined');
+  await bJoined;
+  await cJoined;
   console.log('✅ 3 人加入');
 
   host.emit('intent', { type: 'startGame' });
@@ -40,6 +42,10 @@ async function main() {
 
   const pub1 = await on(host, 'publicState');
   console.log('✅ 当前回合玩家:', pub1.state.currentPlayerId, '金币:', pub1.state.players[0].coins);
+  if (typeof pub1.remainingMs !== 'number' || pub1.remainingMs <= 0) {
+    throw new Error('publicState 缺少权威倒计时 remainingMs');
+  }
+  console.log('✅ 权威倒计时(ms):', pub1.remainingMs);
 
   const pub2Promise = on(host, 'publicState');
   const privPromise = on(host, 'privateState');
