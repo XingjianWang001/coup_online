@@ -58,3 +58,7 @@ export function clearRoomCode(): void {
   localStorage.removeItem(ROOM_KEY);
 }
 
+export function clearIdentity(): void {
+  localStorage.removeItem(STORAGE_KEY);
+}
+

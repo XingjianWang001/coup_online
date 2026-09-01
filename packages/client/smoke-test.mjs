@@ -28,10 +28,12 @@ async function main() {
   const roomCode = joined.roomCode;
   console.log('✅ 房间创建:', roomCode, 'playerId:', joined.playerId);
 
+  const bJoined = on(clients[1], 'joined');
+  const cJoined = on(clients[2], 'joined');
   clients[1].emit('intent', { type: 'joinRoom', roomCode, name: 'Bob' });
   clients[2].emit('intent', { type: 'joinRoom', roomCode, name: 'Carol' });
-  await on(clients[1], 'joined');
-  await on(clients[2], 'joined');
+  await bJoined;
+  await cJoined;
   console.log('✅ 3 人加入');
 
   host.emit('intent', { type: 'startGame' });

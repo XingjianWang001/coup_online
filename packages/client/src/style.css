@@ -1,184 +1,426 @@
-:root {
-  /* 材质 */
-  --ink: #1b2a20;
-  --felt: #243b2a;
-  --panel: #15251a;
-  --gold: #f3d060;
-  --bone: #e8f0e9;
+/* packages/client/src/style.css */
 
-  /* 角色色（材质级） */
-  --role-duke: #8d6e63;
-  --role-assassin: #c62828;
-  --role-captain: #1565c0;
-  --role-ambassador: #2e7d32;
-  --role-contessa: #6a1b9a;
+/* ============================================================
+   政变 Coup — 视觉系统
+   世界：昏暗宫廷密室（丝绒 + 黄铜 + 象牙）。
+   色彩承载语义与氛围，非装饰；间距用 4 基数刻度。
+   ============================================================ */
+
+/* 自托管子集化衬线展示字体（标题与卡名） */
+@font-face {
+  font-family: 'Noto Serif SC';
+  font-style: normal;
+  font-weight: 600;
+  src: url('/fonts/noto-serif-sc-600.woff2') format('woff2');
+  font-display: swap;
 }
 
+/* ---------- 设计 token ---------- */
+:root {
+  /* 表面（canvas → felt → panel → panel-2，逐级抬升） */
+  --canvas:   oklch(0.16 0.018 155);  /* 页面最底：昏暗房间 */
+  --felt:     oklch(0.22 0.030 152);  /* 牌桌 / 座位 / 浮层底 */
+  --panel:    oklch(0.25 0.028 152);  /* 面板 */
+  --panel-2:  oklch(0.30 0.030 152);  /* 浮起表面 / 按钮 / 卡背 */
+  --line:     oklch(0.36 0.025 152);  /* 边框 */
+  --line-2:   oklch(0.30 0.022 152);  /* 细分隔 */
+
+  /* 文本（象牙 + 从表面色相派生的次要色，不用中性灰） */
+  --text:    oklch(0.95 0.015 92);
+  --text-2:  oklch(0.76 0.025 155);
+  --text-3:  oklch(0.70 0.020 155);
+
+  /* 强调：黄铜金（主 CTA / 金币 / 当前玩家 / 焦点） */
+  --gold:       oklch(0.83 0.140 90);
+  --gold-soft:  oklch(0.72 0.120 90);
+  --gold-dim:   oklch(0.52 0.070 90);
+
+  /* 角色色（领域约定，语义固定） */
+  --duke:       oklch(0.74 0.090 70);
+  --assassin:   oklch(0.66 0.190 22);
+  --captain:    oklch(0.72 0.120 245);
+  --ambassador: oklch(0.74 0.130 152);
+  --contessa:   oklch(0.66 0.160 315);
+
+  /* 语义 */
+  --err:  oklch(0.68 0.190 25);
+  --warn: oklch(0.80 0.140 85);
+
+  /* 间距（4 基数） */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+
+  /* 圆角 */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+}
+
+/* ---------- 基础 & 浏览器面主题化 ---------- */
 * {
   box-sizing: border-box;
 }
 
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: var(--ink);
-  color: var(--bone);
+html {
+  color-scheme: dark;
 }
 
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
+  background:
+    radial-gradient(120% 70% at 50% 0%, oklch(0.30 0.045 150 / 0.5), var(--canvas) 72%)
+      no-repeat fixed,
+    var(--canvas);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--gold);
+  color: var(--canvas);
+}
+
+:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* 滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---------- 布局骨架 ---------- */
 .app {
-  max-width: 900px;
+  max-width: 920px;
   margin: 0 auto;
-  padding: 16px;
+  padding: var(--sp-6) var(--sp-4) var(--sp-10);
 }
 
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: var(--sp-3);
+  padding-bottom: var(--sp-4);
+  margin-bottom: var(--sp-6);
+  border-bottom: 1px solid var(--line-2);
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ---------- 排版 ---------- */
 h1 {
-  font-size: 24px;
+  font-family: 'Noto Serif SC', 'Noto Serif', Georgia, serif;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--gold);
+  margin: 0;
 }
 
+h2 {
+  font-family: 'Noto Serif SC', 'Noto Serif', Georgia, serif;
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--gold);
+  margin: 0 0 var(--sp-3);
+}
+
+h3 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+  margin: 0 0 var(--sp-3);
+}
+
+/* ---------- 按钮 ---------- */
 button {
-  background: #2e7d32;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  padding: 10px 16px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 10px 18px;
   font-size: 15px;
+  line-height: 1.2;
+  font-family: inherit;
   cursor: pointer;
-  margin: 4px;
+  min-height: 44px;
+  min-width: 44px;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.06s ease;
+}
+
+button:hover:not(:disabled) {
+  background: var(--felt);
+  border-color: var(--gold-dim);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
 }
 
 button:disabled {
-  opacity: 0.4;
+  opacity: 0.45;
   cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: var(--canvas);
+  font-weight: 700;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--gold-soft);
+  border-color: var(--gold-soft);
 }
 
 button.ghost {
   background: transparent;
-  border: 1px solid #666;
-  color: #ccc;
+  border-color: var(--line);
+  color: var(--text-2);
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--panel-2);
+  color: var(--text);
 }
 
 button.active {
-  outline: 3px solid var(--gold);
-}
-
-button:focus-visible,
-input:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
 }
 
+/* 角色动作按钮：颜色即语义（用 X 阻挡 / 翻开 X / 交换） */
+.role-btn {
+  border-color: currentColor;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-weight: 600;
+}
+.role-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 22%, transparent);
+}
+.role-btn.role--duke       { color: var(--duke); }
+.role-btn.role--assassin   { color: var(--assassin); }
+.role-btn.role--captain    { color: var(--captain); }
+.role-btn.role--ambassador { color: var(--ambassador); }
+.role-btn.role--contessa   { color: var(--contessa); }
+
+/* ---------- 表单 ---------- */
 label {
   display: block;
-  margin: 12px 0;
   font-size: 14px;
-  color: #bcd;
+  color: var(--text-2);
 }
 
 input {
   display: block;
   width: 100%;
-  padding: 10px;
-  margin-top: 6px;
-  border-radius: 8px;
-  border: 1px solid #555;
-  background: #111;
-  color: #eee;
+  padding: 11px 14px;
+  margin-top: var(--sp-2);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--canvas);
+  color: var(--text);
   font-size: 16px;
+  font-family: inherit;
 }
 
+input::placeholder {
+  color: var(--text-3);
+}
+
+input:focus-visible {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 28%, transparent);
+}
+
+/* ---------- 提示 ---------- */
 .divider {
-  text-align: center;
-  color: #bcd;
-  margin: 16px 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  color: var(--text-3);
+  font-size: 13px;
+  margin: 0;
+}
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line-2);
 }
 
 .error {
-  color: #ff7b7b;
-  margin: 12px 0;
+  color: var(--err);
+  margin: var(--sp-3) 0;
+  font-size: 14px;
 }
 
 .notice {
-  background: #3a3a00;
-  color: #ffe08a;
-  padding: 10px;
-  border-radius: 8px;
-  margin: 10px 0;
+  background: color-mix(in srgb, var(--gold) 13%, var(--panel));
+  color: var(--gold);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
+  border: 1px solid var(--gold-dim);
   text-align: center;
+  font-size: 15px;
 }
 
 .notice.big {
   font-size: 20px;
-  font-weight: bold;
+  font-weight: 700;
+  font-family: 'Noto Serif SC', 'Noto Serif', Georgia, serif;
+}
+
+/* ---------- 大厅 / 房间 ---------- */
+.lobby {
+  max-width: 400px;
+  margin: var(--sp-8) auto;
+  padding: var(--sp-6);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.lobby button {
+  width: 100%;
+}
+
+.room {
+  max-width: 520px;
+  margin: 0 auto;
 }
 
 .roomcode {
-  font-size: 16px;
-  margin: 12px 0;
+  font-size: 15px;
+  color: var(--text-2);
+  margin: 0 0 var(--sp-4);
 }
 
 .roomcode b {
-  font-size: 22px;
-  letter-spacing: 2px;
+  font-size: 24px;
+  letter-spacing: 0.12em;
   color: var(--gold);
+  font-variant-numeric: tabular-nums;
+  margin: 0 var(--sp-1);
 }
 
 .playerlist {
   list-style: none;
   padding: 0;
+  margin: 0 0 var(--sp-4);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  overflow: hidden;
 }
 
 .playerlist li {
-  padding: 8px;
-  border-bottom: 1px solid #333;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--line-2);
+}
+
+.playerlist li:last-child {
+  border-bottom: none;
 }
 
 .playerlist li.host {
   color: var(--gold);
+  font-weight: 600;
+}
+
+/* ---------- 牌局 ---------- */
+.board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
 }
 
 .table {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 10px;
-  margin: 16px 0;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: var(--sp-3);
 }
 
 .seat {
   background: var(--felt);
-  border-radius: 12px;
-  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4) var(--sp-3);
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  transition: border-color 0.15s ease;
 }
 
 .seat.current {
-  outline: 3px solid var(--gold);
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px var(--gold-dim);
 }
 
 .seat.dead {
   opacity: 0.4;
+  filter: saturate(0.4);
 }
 
 .seat .name {
-  font-weight: bold;
+  font-weight: 600;
+  font-size: 15px;
 }
 
 .seat .coins {
   color: var(--gold);
-  margin: 4px 0;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
 }
 
 .revealed {
   display: flex;
   gap: 4px;
   justify-content: center;
-  min-height: 30px;
+  min-height: 34px;
 }
 
 .hand-pile {
@@ -187,38 +429,49 @@ input {
   min-height: 30px;
 }
 
+.myhand {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4);
+}
+
 .myhand .cards {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
 }
 
 .card {
   border: 2px solid;
-  border-radius: 8px;
-  padding: 12px;
-  background: #101;
-  min-width: 70px;
+  border-radius: var(--r-md);
+  padding: var(--sp-4) var(--sp-5);
+  min-width: 84px;
   text-align: center;
-  font-weight: bold;
+  font-weight: 600;
+  font-family: 'Noto Serif SC', 'Noto Serif', Georgia, serif;
+  font-size: 16px;
+  background: color-mix(in srgb, currentColor 10%, var(--canvas));
 }
 
-.card--duke { border-color: var(--role-duke); color: var(--role-duke); }
-.card--assassin { border-color: var(--role-assassin); color: var(--role-assassin); }
-.card--captain { border-color: var(--role-captain); color: var(--role-captain); }
-.card--ambassador { border-color: var(--role-ambassador); color: var(--role-ambassador); }
-.card--contessa { border-color: var(--role-contessa); color: var(--role-contessa); }
+.card--duke       { border-color: var(--duke);       color: var(--duke); }
+.card--assassin   { border-color: var(--assassin);   color: var(--assassin); }
+.card--captain    { border-color: var(--captain);    color: var(--captain); }
+.card--ambassador { border-color: var(--ambassador); color: var(--ambassador); }
+.card--contessa   { border-color: var(--contessa);   color: var(--contessa); }
 
 .card-back {
   display: inline-flex;
   align-items: center;
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 4px;
-  border: 1px solid var(--gold);
-  background: repeating-linear-gradient(45deg, #2e3a2e 0 4px, #1f2b20 4px 8px);
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--gold-dim);
+  background: repeating-linear-gradient(45deg, oklch(0.34 0.03 152) 0 5px, oklch(0.28 0.03 152) 5px 10px);
   color: var(--gold);
   font-size: 13px;
-  font-weight: bold;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .inline-icon {
@@ -226,54 +479,72 @@ input {
   vertical-align: -2px;
 }
 
+/* ---------- 行动区 ---------- */
 .controls {
-  margin-top: 16px;
-  padding: 16px;
   background: var(--panel);
-  border-radius: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: var(--sp-4);
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-2);
 }
 
 .row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.row p {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
 }
 
 .waiting {
-  color: #bcd;
+  color: var(--text-3);
   text-align: center;
-  padding: 20px;
+  padding: var(--sp-5);
+  font-size: 15px;
 }
 
+/* ---------- 叙述条 ---------- */
 .narration {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  background: var(--felt);
-  border: 1px solid #f3d06055;
-  border-radius: 10px;
-  padding: 10px 14px;
-  margin: 12px 0;
+  gap: var(--sp-3);
+  background: color-mix(in srgb, var(--gold) 8%, var(--felt));
+  border: 1px solid var(--gold-dim);
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-4);
 }
 
 .narration-text {
-  font-weight: bold;
+  font-weight: 600;
   color: var(--gold);
 }
 
 .narration-timer {
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
-  font-weight: bold;
+  font-weight: 700;
   color: var(--gold);
 }
 
+/* ---------- 记录 ---------- */
 .log {
-  margin-top: 16px;
-  padding: 12px;
+  padding: var(--sp-3);
   background: var(--panel);
-  border-radius: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
   max-height: 260px;
   overflow-y: auto;
   font-size: 14px;
@@ -281,8 +552,8 @@ input {
 
 .log-sep {
   height: 1px;
-  background: #2a352c;
-  margin: 8px 0;
+  background: var(--line-2);
+  margin: var(--sp-2) 0;
 }
 
 .log-group {
@@ -292,17 +563,18 @@ input {
 .log-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sp-2);
   width: 100%;
   background: none;
   border: none;
   border-radius: 0;
-  padding: 4px 0;
+  padding: var(--sp-1) 0;
   margin: 0;
-  color: var(--bone);
+  color: var(--text);
   font-size: 14px;
   text-align: left;
   cursor: pointer;
+  min-height: 0;
 }
 
 .log-header:hover {
@@ -322,41 +594,88 @@ input {
 
 .log-entries {
   margin-left: 20px;
-  padding-left: 10px;
-  border-left: 1px solid #2a352c;
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--line-2);
 }
 
 .log-entry {
   padding: 2px 0;
-  color: #bcd;
+  color: var(--text-2);
 }
 
+/* ---------- 浮层 ---------- */
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: oklch(0.1 0.012 155 / 0.72);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: var(--sp-4);
   z-index: 10;
 }
 
 .panel {
-  background: var(--ink);
-  border: 1px solid #444;
-  border-radius: 16px;
-  padding: 20px;
-  max-width: 600px;
+  background: var(--felt);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xl);
+  padding: var(--sp-6);
+  max-width: min(600px, 100%);
   max-height: 85vh;
   overflow-y: auto;
 }
 
+.panel.rules {
+  width: min(640px, 100%);
+}
+
+.panel button + button {
+  margin-left: var(--sp-2);
+}
+
 .rule {
-  margin-bottom: 10px;
+  margin-bottom: var(--sp-3);
+}
+
+.rule b {
+  color: var(--text);
 }
 
 .rule p {
-  margin: 4px 0 0;
-  color: #bcd;
+  margin: var(--sp-1) 0 0;
+  color: var(--text-2);
   font-size: 14px;
+  line-height: 1.6;
 }
+
+/* ---------- 移动端 ---------- */
+@media (max-width: 768px) {
+  .app {
+    padding: var(--sp-4) var(--sp-4) 220px;
+  }
+
+  h1 {
+    font-size: 24px;
+  }
+
+  .table {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+
+  .controls {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    margin: 0;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    border-bottom: none;
+    padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));
+    z-index: 5;
+    max-height: 45vh;
+    overflow-y: auto;
+    box-shadow: 0 -8px 24px oklch(0.08 0.01 155 / 0.55);
+  }
+}
+

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Server, type Socket } from 'socket.io';
 import { InMemoryGameRepository } from './repository.ts';
 import { Room } from './room.ts';
+import { forfeit } from '@coup/engine';
 import type { ClientIntent } from '@coup/shared';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -144,10 +145,17 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
     case 'leaveRoom': {
       const room = rooms.get(socket.data.roomCode);
       if (room) {
-        room.removePlayer(socket.data.playerId);
+        if (room.game) {
+          // 对局中主动离开 = 立即弃权：翻开暗牌、淘汰、推进回合，避免幽灵玩家卡死
+          const events = room.apply((g) => forfeit(g, socket.data.playerId));
+          io.to(room.code).emit('events', { events });
+          room.removePlayer(socket.data.playerId);
+          broadcast(room);
+        } else {
+          room.removePlayer(socket.data.playerId);
+          broadcastLobby(room);
+        }
         socket.leave(room.code);
-        if (room.game) broadcast(room);
-        else broadcastLobby(room);
       }
       socket.emit('left', { reason: 'left' });
       break;

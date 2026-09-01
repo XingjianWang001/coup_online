@@ -441,3 +441,10 @@ dist/
 .agent/
 PRODUCT.md
 
+
+# coup_online: developer/AI-facing docs (not committed)
+.clinerules/
+.impeccable/
+memory-bank/
+DESIGN.md
+

@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, Card, LobbyPlayer, PublicState, Role } from '@coup/shared';
 import {
+  clearIdentity,
   clearRoomCode,
   connect,
   loadIdentity,
@@ -43,6 +44,7 @@ export function App() {
   const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
   const [selectedKeep, setSelectedKeep] = useState<string[]>([]);
   const [leftReason, setLeftReason] = useState('');
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const [remainingMs, setRemainingMs] = useState<number | null>(null);
   const [log, setLog] = useState<LogEntry[]>([]);
   const logIdRef = useRef(0);
@@ -64,7 +66,6 @@ export function App() {
           setPlayers(msg.players);
           break;
         case 'gameStarted':
-          setPublicState((s) => (s ? s : null));
           setNotice('游戏开始！');
           setLog([]);
           logIdRef.current = 0;
@@ -93,6 +94,17 @@ export function App() {
           break;
         case 'left':
           setLeftReason(msg.reason);
+          setJoined(null);
+          clearRoomCode();
+          clearIdentity();
+          setIdentity(null);
+          setPublicState(null);
+          setHand([]);
+          setPlayers([]);
+          setHostId('');
+          setSelectedAction(null);
+          setSelectedKeep([]);
+          setConfirmLeave(false);
           break;
       }
     });
@@ -155,6 +167,17 @@ export function App() {
     send(socket, { type: 'chooseAction', action, targetId });
   }
 
+  function leaveRoom() {
+    setConfirmLeave(false);
+    send(socket, { type: 'leaveRoom' });
+  }
+
+  // 对局中离开需确认（视为弃权）；大厅阶段直接离开。
+  function requestLeave() {
+    if (publicState) setConfirmLeave(true);
+    else leaveRoom();
+  }
+
   // 规则说明：首次进入询问
   useEffect(() => {
     if (joined && !identity && !localStorage.getItem('coup_seen_rules')) {
@@ -167,12 +190,31 @@ export function App() {
     <div className="app">
       <header className="header">
         <h1>政变 Coup</h1>
-        <button className="ghost" onClick={() => setShowRules((v) => !v)}>
-          {showRules ? '关闭规则' : '规则'}
-        </button>
+        <div className="header-actions">
+          <button className="ghost" onClick={() => setShowRules((v) => !v)}>
+            {showRules ? '关闭规则' : '规则'}
+          </button>
+          {joined && (
+            <button className="ghost" onClick={requestLeave}>
+              离开房间
+            </button>
+          )}
+        </div>
       </header>
 
       {showRules && <RulesPanel onClose={() => setShowRules(false)} />}
+
+      {confirmLeave && (
+        <div className="overlay" onClick={() => setConfirmLeave(false)}>
+          <div className="panel" onClick={(e) => e.stopPropagation()}>
+            <p>确认离开房间？对局中离开将视为弃权。</p>
+            <button onClick={leaveRoom}>确认离开</button>
+            <button className="ghost" onClick={() => setConfirmLeave(false)}>
+              取消
+            </button>
+          </div>
+        </div>
+      )}
 
       {!joined ? (
         <Lobby
@@ -251,7 +293,7 @@ function Lobby(props: {
         昵称
         <input value={props.name} onChange={(e) => props.setName(e.target.value)} placeholder="你的昵称" />
       </label>
-      <button onClick={props.onCreate} disabled={!props.name.trim()}>
+      <button className="primary" onClick={props.onCreate} disabled={!props.name.trim()}>
         创建房间
       </button>
       <div className="divider">或</div>
@@ -264,7 +306,7 @@ function Lobby(props: {
           maxLength={6}
         />
       </label>
-      <button onClick={props.onJoin} disabled={!props.name.trim() || props.roomCode.trim().length < 3}>
+      <button className="ghost" onClick={props.onJoin} disabled={!props.name.trim() || props.roomCode.trim().length < 3}>
         加入房间
       </button>
       {props.error && <div className="error">{props.error}</div>}
@@ -312,7 +354,7 @@ function RoomView(props: RoomViewProps) {
           ))}
         </ul>
         {me === props.hostId && (
-          <button onClick={props.onStart} disabled={props.players.length < 2}>
+          <button className="primary" onClick={props.onStart} disabled={props.players.length < 2}>
             开始游戏（需 ≥2 人）
           </button>
         )}
@@ -492,7 +534,7 @@ function GameBoard(props: {
         {canBlock && (
           <div className="row">
             {canBlockRoles.map((r) => (
-              <button key={r} onClick={() => props.onIntent({ type: 'block', role: r })}>
+              <button key={r} className={`role-btn role--${r}`} onClick={() => props.onIntent({ type: 'block', role: r })}>
                 用{ROLE_NAMES[r]}阻挡
               </button>
             ))}
@@ -506,7 +548,11 @@ function GameBoard(props: {
           <div className="row">
             <p>请选择一张暗牌公开翻开：</p>
             {props.hand.map((c) => (
-              <button key={c.id} onClick={() => props.onIntent({ type: 'resolveLoss', cardId: c.id })}>
+              <button
+                key={c.id}
+                className={`role-btn role--${c.role}`}
+                onClick={() => props.onIntent({ type: 'resolveLoss', cardId: c.id })}
+              >
                 翻开 {ROLE_NAMES[c.role]}
               </button>
             ))}
@@ -629,7 +675,11 @@ function ExchangeControl(props: {
     <div className="row">
       <p>交换：请选择保留的 {props.keepCount} 张牌</p>
       {props.hand.map((c) => (
-        <button key={c.id} className={props.selectedKeep.includes(c.id) ? 'active' : ''} onClick={() => toggle(c.id)}>
+        <button
+          key={c.id}
+          className={`role-btn role--${c.role}${props.selectedKeep.includes(c.id) ? ' active' : ''}`}
+          onClick={() => toggle(c.id)}
+        >
           {ROLE_NAMES[c.role]}
           {props.selectedKeep.includes(c.id) ? ' ✓' : ''}
         </button>
