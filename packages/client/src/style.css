@@ -68,6 +68,12 @@ button.active {
   outline: 3px solid var(--gold);
 }
 
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
 label {
   display: block;
   margin: 12px 0;
@@ -89,7 +95,7 @@ input {
 
 .divider {
   text-align: center;
-  color: #888;
+  color: #bcd;
   margin: 16px 0;
 }
 
@@ -234,7 +240,7 @@ input {
 }
 
 .waiting {
-  color: #888;
+  color: #bcd;
   text-align: center;
   padding: 20px;
 }
@@ -261,6 +267,68 @@ input {
   font-variant-numeric: tabular-nums;
   font-weight: bold;
   color: var(--gold);
+}
+
+.log {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--panel);
+  border-radius: 12px;
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: 14px;
+}
+
+.log-sep {
+  height: 1px;
+  background: #2a352c;
+  margin: 8px 0;
+}
+
+.log-group {
+  padding: 2px 0;
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 4px 0;
+  margin: 0;
+  color: var(--bone);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.log-header:hover {
+  color: var(--gold);
+}
+
+.log-chevron {
+  display: inline-block;
+  width: 14px;
+  color: var(--gold);
+  transition: transform 0.15s ease;
+}
+
+.log-chevron.open {
+  transform: rotate(90deg);
+}
+
+.log-entries {
+  margin-left: 20px;
+  padding-left: 10px;
+  border-left: 1px solid #2a352c;
+}
+
+.log-entry {
+  padding: 2px 0;
+  color: #bcd;
 }
 
 .overlay {

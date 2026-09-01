@@ -59,6 +59,19 @@ describe('income & 回合流转', () => {
   });
 });
 
+describe('事件顺序', () => {
+  it('actionChosen 是每回合首个事件，income 也发出', () => {
+    const s = setup({ a: ['duke', 'duke'], b: ['captain', 'captain'], c: ['contessa', 'contessa'] });
+    const incomeEvents = chooseAction(s, 'a', 'income');
+    expect(incomeEvents[0]).toMatchObject({ type: 'actionChosen', action: 'income' });
+
+    s.players.find((p) => p.id === 'b')!.coins = 7;
+    const coupEvents = chooseAction(s, 'b', 'coup', 'c');
+    expect(coupEvents[0]).toMatchObject({ type: 'actionChosen', action: 'coup' });
+    expect(coupEvents[1].type).toBe('coinsChanged');
+  });
+});
+
 describe('coup', () => {
   it('花费 7 金币并让目标失去影响力', () => {
     const s = setup({ a: ['duke', 'duke'], b: ['captain', 'captain'], c: ['contessa', 'contessa'] });

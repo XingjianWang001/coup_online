@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionType, Card, LobbyPlayer, PublicState, Role } from '@coup/shared';
 import {
   clearRoomCode,
@@ -12,7 +12,8 @@ import {
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
 import { ROLE_DESC, ROLE_NAMES, RULES } from './rules.ts';
-import { describeCountdown, describePending, nameOf } from './narration.ts';
+import { describeCountdown, describePending, groupLog, nameOf } from './narration.ts';
+import type { LogEntry } from './narration.ts';
 
 const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: string }[] = [
   { type: 'income', label: '收入 +1', needsTarget: false },
@@ -43,6 +44,8 @@ export function App() {
   const [selectedKeep, setSelectedKeep] = useState<string[]>([]);
   const [leftReason, setLeftReason] = useState('');
   const [remainingMs, setRemainingMs] = useState<number | null>(null);
+  const [log, setLog] = useState<LogEntry[]>([]);
+  const logIdRef = useRef(0);
 
   useEffect(() => {
     const off = onMessage(socket, (msg: ServerMessage) => {
@@ -63,6 +66,8 @@ export function App() {
         case 'gameStarted':
           setPublicState((s) => (s ? s : null));
           setNotice('游戏开始！');
+          setLog([]);
+          logIdRef.current = 0;
           break;
         case 'publicState':
           setPublicState(msg.state);
@@ -77,6 +82,10 @@ export function App() {
             if (e.type === 'eliminated') setNotice('有玩家被淘汰');
             if (e.type === 'challengeResolved') setNotice(e.truth ? '质疑失败' : '质疑成功');
             if (e.type === 'influenceLost') setNotice('有玩家失去影响力');
+          }
+          {
+            const entries = msg.events.map((event) => ({ id: logIdRef.current++, event }));
+            setLog((prev) => [...prev, ...entries].slice(-500));
           }
           break;
         case 'error':
@@ -186,6 +195,7 @@ export function App() {
           notice={notice}
           leftReason={leftReason}
           remainingMs={remainingMs}
+          log={log}
           selectedAction={selectedAction}
           setSelectedAction={setSelectedAction}
           selectedKeep={selectedKeep}
@@ -280,6 +290,7 @@ interface RoomViewProps {
   socket: ReturnType<typeof connect>;
   identity: { playerId: string; name: string } | null;
   remainingMs: number | null;
+  log: LogEntry[];
 }
 
 function RoomView(props: RoomViewProps) {
@@ -317,6 +328,7 @@ function RoomView(props: RoomViewProps) {
       me={me}
       notice={props.notice}
       remainingMs={props.remainingMs}
+      log={props.log}
       selectedAction={props.selectedAction}
       setSelectedAction={props.setSelectedAction}
       selectedKeep={props.selectedKeep}
@@ -360,6 +372,7 @@ function GameBoard(props: {
   onAction: (action: ActionType, targetId?: string) => void;
   onIntent: (i: Parameters<typeof send>[1]) => void;
   remainingMs: number | null;
+  log: LogEntry[];
 }) {
   const { state, me } = props;
   const myView = state.players.find((p) => p.id === me);
@@ -394,6 +407,18 @@ function GameBoard(props: {
 
   const narration = describePending(state);
   const countdown = describeCountdown(props.remainingMs);
+
+  const groups = groupLog(props.log, state).reverse();
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  const toggleGroup = (id: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="board">
@@ -502,6 +527,37 @@ function GameBoard(props: {
           <div className="waiting">等待 {nameOf(state, state.currentPlayerId)} 行动…</div>
         )}
       </div>
+
+      {groups.length > 0 && (
+        <div className="log">
+          {groups.map((g, i) => (
+            <Fragment key={g.id}>
+              {i > 0 && <div className="log-sep" aria-hidden="true" />}
+              <div className="log-group">
+                <button
+                  className="log-header"
+                  onClick={g.entries.length ? () => toggleGroup(g.id) : undefined}
+                  aria-expanded={g.entries.length ? expanded.has(g.id) : undefined}
+                >
+                  {g.entries.length > 0 && (
+                    <span className={`log-chevron${expanded.has(g.id) ? ' open' : ''}`}>▸</span>
+                  )}
+                  <span>{g.action}</span>
+                </button>
+                {expanded.has(g.id) && g.entries.length > 0 && (
+                  <div className="log-entries">
+                    {g.entries.map((en) => (
+                      <div key={en.id} className="log-entry">
+                        {en.text}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Fragment>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
