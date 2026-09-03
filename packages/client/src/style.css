@@ -389,7 +389,7 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  transition: border-color 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
 }
 
 .seat.current {
@@ -647,6 +647,122 @@ input:focus-visible {
   color: var(--text-2);
   font-size: 14px;
   line-height: 1.6;
+}
+
+/* ---------- 动效（烛光牌桌：克制、无回弹，位移均带 reduced-motion 降级） ---------- */
+
+/* 递牌：暗牌入手 */
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.myhand .card { animation: card-in 180ms cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* 卡背计数轻微 pop（拿到牌） */
+@keyframes count-pop {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+.card-back { animation: count-pop 240ms ease; }
+
+/* 翻牌：明牌揭示（卡背→正面 + 角色色柔光，落定不可用态） */
+.revealed { perspective: 600px; }
+.revealed .card { animation: card-flip 400ms cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+@keyframes card-flip {
+  0%   { opacity: 0; transform: rotateY(90deg); filter: saturate(1); }
+  55%  { opacity: 1; box-shadow: 0 0 18px color-mix(in srgb, currentColor 55%, transparent); }
+  100% { opacity: 0.4; transform: rotateY(0deg); filter: saturate(0.4); box-shadow: 0 0 0 transparent; }
+}
+@keyframes reveal-fade {
+  from { opacity: 0; }
+  to   { opacity: 0.4; }
+}
+/* 明牌落定：不可用态（保留角色色，去饱和降亮，无交互） */
+.card.unavailable {
+  opacity: 0.4;
+  filter: saturate(0.4);
+}
+
+/* 提示条 / 叙述条 / 控制区 / 记录 入场 */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.notice { animation: rise-in 200ms cubic-bezier(0.16, 1, 0.3, 1); }
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.narration { animation: slide-in 200ms cubic-bezier(0.16, 1, 0.3, 1); }
+.controls { animation: slide-in 220ms cubic-bezier(0.16, 1, 0.3, 1); }
+.log { animation: slide-in 200ms cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* 倒计时紧迫：金 → 琥珀呼吸 */
+@keyframes urgent-pulse {
+  0%, 100% { color: var(--gold); }
+  50%      { color: var(--warn); }
+}
+.narration-timer.urgent { animation: urgent-pulse 1s ease-in-out infinite; }
+
+/* 浮层 / 模态 */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.overlay { animation: fade-in 200ms ease; }
+
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.panel { animation: panel-in 260ms cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* 换牌：选中上浮 + 角色色高亮（不打勾）；未保留牌滑回淡出 */
+.role-btn {
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease,
+    background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.role-btn.active {
+  outline: none;
+  transform: translateY(-3px);
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 60%, transparent),
+    0 6px 16px color-mix(in srgb, currentColor 30%, transparent);
+}
+@keyframes discard-out {
+  to { opacity: 0; transform: translateY(12px); }
+}
+.role-btn.discard { animation: discard-out 200ms ease forwards; }
+
+/* ---------- 减少动态效果：保留透明度/颜色反馈，去掉位移与翻转 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .myhand .card,
+  .card-back,
+  .notice,
+  .narration,
+  .controls,
+  .log,
+  .overlay,
+  .panel,
+  .role-btn.discard {
+    animation: none;
+  }
+  .notice,
+  .narration,
+  .controls,
+  .log,
+  .overlay,
+  .panel {
+    animation: fade-in 120ms linear;
+  }
+  .revealed .card { animation: reveal-fade 200ms linear; }
+  .narration-timer.urgent { animation: none; }
+  .role-btn { transition: none; }
+  .role-btn.active {
+    transform: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 60%, transparent);
+  }
 }
 
 /* ---------- 移动端 ---------- */

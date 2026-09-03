@@ -381,8 +381,8 @@ function RoomView(props: RoomViewProps) {
   );
 }
 
-function CardView({ role }: { role: Role }) {
-  return <div className={`card card--${role}`}>{ROLE_NAMES[role]}</div>;
+function CardView({ role, unavailable }: { role: Role; unavailable?: boolean }) {
+  return <div className={`card card--${role}${unavailable ? ' unavailable' : ''}`}>{ROLE_NAMES[role]}</div>;
 }
 
 function CoinIcon() {
@@ -449,6 +449,16 @@ function GameBoard(props: {
 
   const narration = describePending(state);
   const countdown = describeCountdown(props.remainingMs);
+  const urgent = props.remainingMs != null && props.remainingMs <= 3000;
+
+  // 控制区内容切换的键：变化时重挂载以触发入场动画（避免行动选项闪现）
+  let controlMode = 'waiting';
+  if (state.phase === 'choosingAction' && isMyTurn) controlMode = 'action';
+  else if (canChallenge) controlMode = 'challenge';
+  else if (canBlock) controlMode = 'block';
+  else if (amLosing) controlMode = 'loss';
+  else if (amExchanging) controlMode = 'exchange';
+  const controlKey = `${controlMode}:${state.currentPlayerId ?? ''}:${pending?.actorId ?? ''}:${state.lossPlayerId ?? ''}`;
 
   const groups = groupLog(props.log, state).reverse();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -464,7 +474,11 @@ function GameBoard(props: {
 
   return (
     <div className="board">
-      {props.notice && <div className="notice">{props.notice}</div>}
+      {props.notice && (
+        <div className="notice" key={props.notice}>
+          {props.notice}
+        </div>
+      )}
 
       {state.phase === 'gameOver' && (
         <div className="notice big"><CrownIcon /> {state.players.find((p) => p.id === state.winnerId)?.name} 获胜！</div>
@@ -473,12 +487,14 @@ function GameBoard(props: {
       {narration ? (
         <div className="narration">
           <span className="narration-text">{narration}</span>
-          {countdown && <span className="narration-timer">{countdown}</span>}
+          {countdown && (
+            <span className={`narration-timer${urgent ? ' urgent' : ''}`}>{countdown}</span>
+          )}
         </div>
       ) : isMyTurn && state.phase === 'choosingAction' && countdown ? (
         <div className="narration">
           <span className="narration-text">轮到你了</span>
-          <span className="narration-timer">{countdown}</span>
+          <span className={`narration-timer${urgent ? ' urgent' : ''}`}>{countdown}</span>
         </div>
       ) : null}
 
@@ -492,11 +508,13 @@ function GameBoard(props: {
             <div className="coins"><CoinIcon /> {p.coins}</div>
             <div className="revealed">
               {p.revealed.map((role, i) => (
-                <CardView key={i} role={role} />
+                <CardView key={i} role={role} unavailable />
               ))}
             </div>
             <div className="hand-pile">
-              <span className="card-back">暗牌 × {p.handCount}</span>
+              <span key={p.handCount} className="card-back">
+                暗牌 × {p.handCount}
+              </span>
             </div>
           </div>
         ))}
@@ -511,7 +529,7 @@ function GameBoard(props: {
         </div>
       </div>
 
-      <div className="controls">
+      <div className="controls" key={controlKey}>
         {state.phase === 'choosingAction' && isMyTurn && (
           <Actions
             coins={myView?.coins ?? 0}
@@ -664,6 +682,7 @@ function ExchangeControl(props: {
   setSelectedKeep: (ids: string[]) => void;
   onConfirm: (ids: string[]) => void;
 }) {
+  const [confirming, setConfirming] = useState(false);
   const toggle = (id: string) => {
     if (props.selectedKeep.includes(id)) {
       props.setSelectedKeep(props.selectedKeep.filter((x) => x !== id));
@@ -671,20 +690,30 @@ function ExchangeControl(props: {
       props.setSelectedKeep([...props.selectedKeep, id]);
     }
   };
+  const confirm = (ids: string[]) => {
+    setConfirming(true);
+    props.onConfirm(ids);
+  };
   return (
     <div className="row">
       <p>交换：请选择保留的 {props.keepCount} 张牌</p>
-      {props.hand.map((c) => (
-        <button
-          key={c.id}
-          className={`role-btn role--${c.role}${props.selectedKeep.includes(c.id) ? ' active' : ''}`}
-          onClick={() => toggle(c.id)}
-        >
-          {ROLE_NAMES[c.role]}
-          {props.selectedKeep.includes(c.id) ? ' ✓' : ''}
-        </button>
-      ))}
-      <button disabled={props.selectedKeep.length !== props.keepCount} onClick={() => props.onConfirm(props.selectedKeep)}>
+      {props.hand.map((c) => {
+        const keep = props.selectedKeep.includes(c.id);
+        return (
+          <button
+            key={c.id}
+            className={`role-btn role--${c.role}${keep ? ' active' : ''}${confirming && !keep ? ' discard' : ''}`}
+            onClick={() => toggle(c.id)}
+            disabled={confirming}
+          >
+            {ROLE_NAMES[c.role]}
+          </button>
+        );
+      })}
+      <button
+        disabled={props.selectedKeep.length !== props.keepCount || confirming}
+        onClick={() => confirm(props.selectedKeep)}
+      >
         确认保留
       </button>
     </div>
