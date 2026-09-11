@@ -26,19 +26,34 @@ const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: s
   { type: 'exchange', label: '交换 (大使)', needsTarget: false },
 ];
 
+// 加入链接的 ?room= 参数：仅首次加载读取一次，读后从 URL 清除，避免刷新时重复触发。
+const LINK_ROOM = (() => {
+  const params = new URLSearchParams(window.location.search);
+  const room = params.get('room')?.toUpperCase() ?? null;
+  if (room) {
+    params.delete('room');
+    const qs = params.toString();
+    const clean = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState(null, '', clean);
+  }
+  return room;
+})();
+
 export function App() {
   const socket = useMemo(() => connect(), []);
   const [identity, setIdentity] = useState(() => loadIdentity());
   const [name, setName] = useState(() => identity?.name ?? '');
   const nameRef = useRef(name);
   nameRef.current = name;
-  const [roomCode, setRoomCode] = useState(() => loadRoomCode() ?? '');
+  const [roomCode, setRoomCode] = useState(() => LINK_ROOM ?? loadRoomCode() ?? '');
   const [joined, setJoined] = useState<string | null>(null);
   const [hostId, setHostId] = useState('');
   const [players, setPlayers] = useState<LobbyPlayer[]>([]);
   const [publicState, setPublicState] = useState<PublicState | null>(null);
   const [hand, setHand] = useState<Card[]>([]);
   const [error, setError] = useState('');
+  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
+  const [tunnelLoading, setTunnelLoading] = useState(false);
   const [notice, setNotice] = useState('');
   const [showRules, setShowRules] = useState(false);
   const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
@@ -56,6 +71,7 @@ export function App() {
           setJoined(msg.roomCode);
           setHostId(msg.hostId);
           setPlayers(msg.players);
+          setTunnelUrl(msg.tunnelUrl ?? null);
           setIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveRoomCode(msg.roomCode);
@@ -91,6 +107,11 @@ export function App() {
           break;
         case 'error':
           setError(msg.message);
+          setTunnelLoading(false);
+          break;
+        case 'tunnelUrl':
+          setTunnelUrl(msg.url);
+          setTunnelLoading(false);
           break;
         case 'left':
           setLeftReason(msg.reason);
@@ -102,6 +123,8 @@ export function App() {
           setHand([]);
           setPlayers([]);
           setHostId('');
+          setTunnelUrl(null);
+          setTunnelLoading(false);
           setSelectedAction(null);
           setSelectedKeep([]);
           setConfirmLeave(false);
@@ -114,6 +137,7 @@ export function App() {
   // 重连：socket 重新连接后，若本地有身份与房间码，自动重新加入
   useEffect(() => {
     const onConnect = () => {
+      if (LINK_ROOM) return; // 链接指定了房间：仅预填，不自动重连旧房间
       const id = loadIdentity();
       const code = loadRoomCode();
       if (id && code) {
@@ -160,6 +184,12 @@ export function App() {
 
   function startGame() {
     send(socket, { type: 'startGame' });
+  }
+
+  function startTunnel() {
+    setTunnelLoading(true);
+    setError('');
+    send(socket, { type: 'startTunnel' });
   }
 
   function chooseAction(action: ActionType, targetId?: string) {
@@ -246,6 +276,9 @@ export function App() {
           onAction={chooseAction}
           socket={socket}
           identity={identity}
+          tunnelUrl={tunnelUrl}
+          tunnelLoading={tunnelLoading}
+          onStartTunnel={startTunnel}
         />
       )}
     </div>
@@ -314,6 +347,64 @@ function Lobby(props: {
   );
 }
 
+function execCommandCopy(text: string): boolean {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function copyToClipboard(text: string): Promise<boolean> {
+  // 优先异步剪贴板 API；失败或不可用（非安全上下文）时回退到 execCommand。
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text).then(
+      () => true,
+      () => execCommandCopy(text),
+    );
+  }
+  return Promise.resolve(execCommandCopy(text));
+}
+
+function InviteLink(props: { roomCode: string; url: string | null; loading: boolean; onStart: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const fullUrl = props.url ? `${props.url}?room=${props.roomCode}` : '';
+  const copy = async () => {
+    const ok = await copyToClipboard(fullUrl);
+    setCopied(ok);
+    setCopyFailed(!ok);
+    if (ok) setTimeout(() => setCopied(false), 2000);
+  };
+  if (props.url) {
+    return (
+      <div className="invite">
+        <span className="invite-label">加入链接</span>
+        <div className="row">
+          <input className="invite-input" readOnly value={fullUrl} onFocus={(e) => e.currentTarget.select()} />
+          <button onClick={copy}>{copied ? '已复制' : copyFailed ? '复制失败' : '复制'}</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="invite">
+      <button onClick={props.onStart} disabled={props.loading}>
+        {props.loading ? '正在启动隧道…' : '生成加入链接'}
+      </button>
+    </div>
+  );
+}
+
 interface RoomViewProps {
   roomCode: string;
   hostId: string;
@@ -333,16 +424,28 @@ interface RoomViewProps {
   identity: { playerId: string; name: string } | null;
   remainingMs: number | null;
   log: LogEntry[];
+  tunnelUrl: string | null;
+  tunnelLoading: boolean;
+  onStartTunnel: () => void;
 }
 
 function RoomView(props: RoomViewProps) {
   const { publicState, me } = props;
+  const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
   if (!publicState) {
     return (
       <div className="room">
         <div className="roomcode">
           房间码 <b>{props.roomCode}</b>（把此码或链接发给朋友）
         </div>
+        {me === props.hostId && isLocal && (
+          <InviteLink
+            roomCode={props.roomCode}
+            url={props.tunnelUrl}
+            loading={props.tunnelLoading}
+            onStart={props.onStartTunnel}
+          />
+        )}
         <h3>玩家（{props.players.length}）</h3>
         <ul className="playerlist">
           {props.players.map((p) => (

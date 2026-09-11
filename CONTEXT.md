@@ -17,6 +17,16 @@ _Avoid_: 大厅、牌桌
 **房主 Host**
 大厅阶段拥有「开始游戏」按钮的玩家；开局后该角色消失。
 
+### 连接
+
+**隧道 Tunnel**
+服务器 spawn 的 Cloudflare quick tunnel，把 localhost 临时暴露为 `trycloudflare.com` 域名。
+_Avoid_: 内网穿透
+
+**加入链接 Invite Link**
+房主生成的、带房间号后缀（`?room=`）的可复制链接，发给朋友即可加入。
+_Avoid_: 邀请码（那是房间码）
+
 ### 游戏
 
 **牌局 Game**

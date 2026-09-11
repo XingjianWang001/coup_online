@@ -4,6 +4,7 @@ import type { ActionType, GameEvent, PublicState, PrivateState, Role, Card } fro
 export type ClientIntent =
   | { type: 'createRoom'; name: string; playerId?: string; secret?: string }
   | { type: 'joinRoom'; roomCode: string; name: string; playerId?: string; secret?: string }
+  | { type: 'startTunnel' }
   | { type: 'startGame' }
   | { type: 'chooseAction'; action: ActionType; targetId?: string }
   | { type: 'challenge' }
@@ -24,7 +25,8 @@ export interface LobbyPlayer {
 
 // 服务器 → 客户端 的消息
 export type ServerMessage =
-  | { type: 'joined'; roomCode: string; playerId: string; secret: string; players: LobbyPlayer[]; hostId: string }
+  | { type: 'joined'; roomCode: string; playerId: string; secret: string; players: LobbyPlayer[]; hostId: string; tunnelUrl?: string }
+  | { type: 'tunnelUrl'; url: string }
   | { type: 'lobby'; players: LobbyPlayer[]; hostId: string }
   | { type: 'gameStarted'; turnOrder: string[] }
   | { type: 'publicState'; state: PublicState; remainingMs: number | null }

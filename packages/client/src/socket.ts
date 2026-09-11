@@ -13,7 +13,7 @@ export function send(socket: Socket, intent: ClientIntent): void {
 
 // 注册消息监听，返回清理函数（移除全部监听）
 export function onMessage(socket: Socket, handler: (msg: ServerMessage) => void): () => void {
-  const events = ['joined', 'lobby', 'gameStarted', 'publicState', 'privateState', 'events', 'error', 'left'] as const;
+  const events = ['joined', 'lobby', 'gameStarted', 'publicState', 'privateState', 'events', 'error', 'tunnelUrl', 'left'] as const;
   const listeners = events.map((event) => {
     const listener = (payload: Record<string, unknown>) => handler({ type: event, ...payload } as ServerMessage);
     socket.on(event, listener);
