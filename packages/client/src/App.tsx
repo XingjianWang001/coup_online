@@ -385,6 +385,10 @@ function CardView({ role, unavailable }: { role: Role; unavailable?: boolean }) 
   return <div className={`card card--${role}${unavailable ? ' unavailable' : ''}`}>{ROLE_NAMES[role]}</div>;
 }
 
+function CardBack() {
+  return <div className="card-back" role="img" aria-label="暗牌" />;
+}
+
 function CoinIcon() {
   return (
     <svg className="inline-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
@@ -506,27 +510,16 @@ function GameBoard(props: {
               {p.id === me && ' (你)'}
             </div>
             <div className="coins"><CoinIcon /> {p.coins}</div>
-            <div className="revealed">
+            <div className="cards-row">
+              {p.id === me
+                ? props.hand.map((c) => <CardView key={c.id} role={c.role} />)
+                : Array.from({ length: p.handCount }, (_, i) => <CardBack key={`back-${i}`} />)}
               {p.revealed.map((role, i) => (
-                <CardView key={i} role={role} unavailable />
+                <CardView key={`rev-${i}`} role={role} unavailable />
               ))}
-            </div>
-            <div className="hand-pile">
-              <span key={p.handCount} className="card-back">
-                暗牌 × {p.handCount}
-              </span>
             </div>
           </div>
         ))}
-      </div>
-
-      <div className="myhand">
-        <h3>你的暗牌</h3>
-        <div className="cards">
-          {props.hand.map((c) => (
-            <CardView key={c.id} role={c.role} />
-          ))}
-        </div>
       </div>
 
       <div className="controls" key={controlKey}>

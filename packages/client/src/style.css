@@ -416,42 +416,29 @@ input:focus-visible {
   gap: 4px;
 }
 
-.revealed {
-  display: flex;
-  gap: 4px;
-  justify-content: center;
-  min-height: 34px;
-}
-
-.hand-pile {
-  display: flex;
-  justify-content: center;
-  min-height: 30px;
-}
-
-.myhand {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-  padding: var(--sp-4);
-}
-
-.myhand .cards {
+.cards-row {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-3);
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  perspective: 600px;
 }
 
 .card {
-  border: 2px solid;
-  border-radius: var(--r-md);
-  padding: var(--sp-4) var(--sp-5);
-  min-width: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 90px;
   text-align: center;
   font-weight: 600;
   font-family: 'Noto Serif SC', 'Noto Serif', Georgia, serif;
   font-size: 16px;
+  line-height: 1.2;
   background: color-mix(in srgb, currentColor 10%, var(--canvas));
+  border: 2px solid;
+  border-radius: var(--r-md);
 }
 
 .card--duke       { border-color: var(--duke);       color: var(--duke); }
@@ -461,17 +448,12 @@ input:focus-visible {
 .card--contessa   { border-color: var(--contessa);   color: var(--contessa); }
 
 .card-back {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  padding: 0 var(--sp-3);
-  border-radius: var(--r-sm);
+  display: block;
+  width: 64px;
+  height: 90px;
+  border-radius: var(--r-md);
   border: 1px solid var(--gold-dim);
   background: repeating-linear-gradient(45deg, oklch(0.34 0.03 152) 0 5px, oklch(0.28 0.03 152) 5px 10px);
-  color: var(--gold);
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
 }
 
 .inline-icon {
@@ -656,9 +638,9 @@ input:focus-visible {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.myhand .card { animation: card-in 180ms cubic-bezier(0.16, 1, 0.3, 1); }
+.cards-row .card:not(.unavailable) { animation: card-in 180ms cubic-bezier(0.16, 1, 0.3, 1); }
 
-/* 卡背计数轻微 pop（拿到牌） */
+/* 牌背轻微 pop（拿到牌） */
 @keyframes count-pop {
   0%   { transform: scale(1); }
   40%  { transform: scale(1.08); }
@@ -667,8 +649,7 @@ input:focus-visible {
 .card-back { animation: count-pop 240ms ease; }
 
 /* 翻牌：明牌揭示（卡背→正面 + 角色色柔光，落定不可用态） */
-.revealed { perspective: 600px; }
-.revealed .card { animation: card-flip 400ms cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+.cards-row .card.unavailable { animation: card-flip 400ms cubic-bezier(0.16, 1, 0.3, 1) backwards; }
 @keyframes card-flip {
   0%   { opacity: 0; transform: rotateY(90deg); filter: saturate(1); }
   55%  { opacity: 1; box-shadow: 0 0 18px color-mix(in srgb, currentColor 55%, transparent); }
@@ -737,7 +718,7 @@ input:focus-visible {
 
 /* ---------- 减少动态效果：保留透明度/颜色反馈，去掉位移与翻转 ---------- */
 @media (prefers-reduced-motion: reduce) {
-  .myhand .card,
+  .cards-row .card,
   .card-back,
   .notice,
   .narration,
@@ -756,7 +737,7 @@ input:focus-visible {
   .panel {
     animation: fade-in 120ms linear;
   }
-  .revealed .card { animation: reveal-fade 200ms linear; }
+  .cards-row .card.unavailable { animation: reveal-fade 200ms linear; }
   .narration-timer.urgent { animation: none; }
   .role-btn { transition: none; }
   .role-btn.active {
@@ -777,6 +758,16 @@ input:focus-visible {
 
   .table {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  }
+
+  .card,
+  .card-back {
+    width: 54px;
+    height: 78px;
+  }
+
+  .card {
+    font-size: 14px;
   }
 
   .controls {
