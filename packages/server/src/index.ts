@@ -61,7 +61,11 @@ const io = new Server(httpServer);
 function broadcast(room: Room): void {
   const pub = room.getPublicState();
   if (pub) {
-    io.to(room.code).emit('publicState', { state: pub, remainingMs: room.getDeadlineMs() });
+    io.to(room.code).emit('publicState', {
+      state: pub,
+      remainingMs: room.getDeadlineMs(),
+      deadlineAt: room.getDeadlineAt(),
+    });
     for (const p of room.players.values()) {
       const priv = room.getPrivateState(p.id);
       if (priv) io.to(p.socketId).emit('privateState', { hand: priv.hand });
@@ -74,6 +78,10 @@ function broadcastLobby(room: Room): void {
 }
 
 io.on('connection', (socket) => {
+  socket.on('timeSync', (ack: (serverNow: number) => void) => {
+    if (typeof ack === 'function') ack(Date.now());
+  });
+
   socket.on('intent', (raw: ClientIntent) => {
     try {
       handleIntent(socket, raw);
@@ -101,7 +109,10 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
     case 'createRoom': {
       const code = genCode();
       const room = new Room(code, '', repo, {
-        onBroadcast: broadcast,
+        onBroadcast: (room, events) => {
+          io.to(room.code).emit('events', { events });
+          broadcast(room);
+        },
         onEmpty: (r) => rooms.delete(r.code),
       });
       const p = room.addPlayer(raw.name, socket.id);

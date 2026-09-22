@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PublicState } from '@coup/shared';
-import { describeAction, describeCountdown, describeEvent, describePending, groupLog } from './narration.ts';
+import { describeAction, describeCountdown, describeEvent, describePending, estimateServerOffset, groupLog, remainingSinceReceipt } from './narration.ts';
 
 function state(overrides: Partial<PublicState>): PublicState {
   return {
@@ -65,6 +65,25 @@ describe('describePending', () => {
 });
 
 describe('describeCountdown', () => {
+  it('服务器期限已到时不再显示客户端滞后的 4 秒', () => {
+    expect(describeCountdown(4000, 60_000, 60_000)).toBeNull();
+  });
+
+  it('消息延迟抵达后按服务器期限显示剩余时间', () => {
+    expect(describeCountdown(8000, 60_000, 56_000)).toBe('4s');
+  });
+
+  it('浏览器暂停回调后按实际经过时间追上倒计时', () => {
+    expect(remainingSinceReceipt(10_000, 1000, 7000)).toBe(4000);
+  });
+
+  it('两个本地时钟相差 30 秒的玩家仍看到相同倒计时', () => {
+    const aOffset = estimateServerOffset(2000, 2100, 102_050);
+    const bOffset = estimateServerOffset(32_000, 32_100, 102_050);
+    expect(describeCountdown(9000, 110_000, 6000 + aOffset)).toBe('4s');
+    expect(describeCountdown(9000, 110_000, 36_000 + bOffset)).toBe('4s');
+  });
+
   it('null 返回 null', () => {
     expect(describeCountdown(null)).toBeNull();
   });
