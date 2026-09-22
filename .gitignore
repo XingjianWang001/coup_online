@@ -439,6 +439,10 @@ dist/
 # 本地辅助工具产物（不纳入版本控制）
 .DS_Store
 .agent/
+.agents/
+.claude/
+.codex/
+skills-lock.json
 PRODUCT.md
 
 
