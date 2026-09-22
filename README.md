@@ -31,6 +31,10 @@ pnpm dev:server
 
 ## 暴露到公网（无需注册、免费、临时网址）
 
+房主创建房间后，可在本地（`localhost`）打开的大厅里点「生成加入链接」，服务器会自动启动隧道并给出带房间号的链接。
+
+也可手动运行：
+
 ```bash
 cloudflared tunnel --url http://localhost:8787
 ```

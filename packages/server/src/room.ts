@@ -79,7 +79,8 @@ export class Room {
         return existing;
       }
     }
-    // 新玩家：服务器生成全新 id 与 secret
+    // 新玩家：服务器生成全新 id 与 secret。开局后禁止新玩家加入，保证 room.players 是 game.players 的子集。
+    if (this.game) throw new Error('游戏已开始，无法加入');
     const p: RoomPlayer = { id: genId(), secret: genSecret(), name, socketId, connected: true };
     this.players.set(p.id, p);
     return p;
@@ -90,7 +91,8 @@ export class Room {
     if (!p) return;
     p.connected = false;
     const t = setTimeout(() => {
-      if (!this.game) {
+      // 游戏结束后（gameOver）断连：对局已定胜负，forfeit 无意义，直接移除玩家让房间能排空回收。
+      if (!this.game || this.game.phase === 'gameOver') {
         this.removePlayer(id);
       } else {
         this.apply(() => forfeit(this.game!, id));
@@ -226,7 +228,10 @@ export class Room {
   }
 
   getPrivateState(playerId: string) {
-    return this.game ? privateState(this.game, playerId) : null;
+    if (!this.game) return null;
+    // 防御：玩家不在对局中时返回 null 而非抛错，避免 broadcast 因脏数据拖垮服务器。
+    if (!this.game.players.some((p) => p.id === playerId)) return null;
+    return privateState(this.game, playerId);
   }
 
   private scheduleEmptyCleanup(): void {

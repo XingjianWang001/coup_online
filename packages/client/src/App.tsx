@@ -26,19 +26,34 @@ const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: s
   { type: 'exchange', label: '交换 (大使)', needsTarget: false },
 ];
 
+// 加入链接的 ?room= 参数：仅首次加载读取一次，读后从 URL 清除，避免刷新时重复触发。
+const LINK_ROOM = (() => {
+  const params = new URLSearchParams(window.location.search);
+  const room = params.get('room')?.toUpperCase() ?? null;
+  if (room) {
+    params.delete('room');
+    const qs = params.toString();
+    const clean = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState(null, '', clean);
+  }
+  return room;
+})();
+
 export function App() {
   const socket = useMemo(() => connect(), []);
   const [identity, setIdentity] = useState(() => loadIdentity());
   const [name, setName] = useState(() => identity?.name ?? '');
   const nameRef = useRef(name);
   nameRef.current = name;
-  const [roomCode, setRoomCode] = useState(() => loadRoomCode() ?? '');
+  const [roomCode, setRoomCode] = useState(() => LINK_ROOM ?? loadRoomCode() ?? '');
   const [joined, setJoined] = useState<string | null>(null);
   const [hostId, setHostId] = useState('');
   const [players, setPlayers] = useState<LobbyPlayer[]>([]);
   const [publicState, setPublicState] = useState<PublicState | null>(null);
   const [hand, setHand] = useState<Card[]>([]);
   const [error, setError] = useState('');
+  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
+  const [tunnelLoading, setTunnelLoading] = useState(false);
   const [notice, setNotice] = useState('');
   const [showRules, setShowRules] = useState(false);
   const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
@@ -56,6 +71,7 @@ export function App() {
           setJoined(msg.roomCode);
           setHostId(msg.hostId);
           setPlayers(msg.players);
+          setTunnelUrl(msg.tunnelUrl ?? null);
           setIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveRoomCode(msg.roomCode);
@@ -91,6 +107,11 @@ export function App() {
           break;
         case 'error':
           setError(msg.message);
+          setTunnelLoading(false);
+          break;
+        case 'tunnelUrl':
+          setTunnelUrl(msg.url);
+          setTunnelLoading(false);
           break;
         case 'left':
           setLeftReason(msg.reason);
@@ -102,6 +123,8 @@ export function App() {
           setHand([]);
           setPlayers([]);
           setHostId('');
+          setTunnelUrl(null);
+          setTunnelLoading(false);
           setSelectedAction(null);
           setSelectedKeep([]);
           setConfirmLeave(false);
@@ -114,6 +137,7 @@ export function App() {
   // 重连：socket 重新连接后，若本地有身份与房间码，自动重新加入
   useEffect(() => {
     const onConnect = () => {
+      if (LINK_ROOM) return; // 链接指定了房间：仅预填，不自动重连旧房间
       const id = loadIdentity();
       const code = loadRoomCode();
       if (id && code) {
@@ -160,6 +184,12 @@ export function App() {
 
   function startGame() {
     send(socket, { type: 'startGame' });
+  }
+
+  function startTunnel() {
+    setTunnelLoading(true);
+    setError('');
+    send(socket, { type: 'startTunnel' });
   }
 
   function chooseAction(action: ActionType, targetId?: string) {
@@ -246,6 +276,9 @@ export function App() {
           onAction={chooseAction}
           socket={socket}
           identity={identity}
+          tunnelUrl={tunnelUrl}
+          tunnelLoading={tunnelLoading}
+          onStartTunnel={startTunnel}
         />
       )}
     </div>
@@ -314,6 +347,64 @@ function Lobby(props: {
   );
 }
 
+function execCommandCopy(text: string): boolean {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function copyToClipboard(text: string): Promise<boolean> {
+  // 优先异步剪贴板 API；失败或不可用（非安全上下文）时回退到 execCommand。
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text).then(
+      () => true,
+      () => execCommandCopy(text),
+    );
+  }
+  return Promise.resolve(execCommandCopy(text));
+}
+
+function InviteLink(props: { roomCode: string; url: string | null; loading: boolean; onStart: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const fullUrl = props.url ? `${props.url}?room=${props.roomCode}` : '';
+  const copy = async () => {
+    const ok = await copyToClipboard(fullUrl);
+    setCopied(ok);
+    setCopyFailed(!ok);
+    if (ok) setTimeout(() => setCopied(false), 2000);
+  };
+  if (props.url) {
+    return (
+      <div className="invite">
+        <span className="invite-label">加入链接</span>
+        <div className="row">
+          <input className="invite-input" readOnly value={fullUrl} onFocus={(e) => e.currentTarget.select()} />
+          <button onClick={copy}>{copied ? '已复制' : copyFailed ? '复制失败' : '复制'}</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="invite">
+      <button onClick={props.onStart} disabled={props.loading}>
+        {props.loading ? '正在启动隧道…' : '生成加入链接'}
+      </button>
+    </div>
+  );
+}
+
 interface RoomViewProps {
   roomCode: string;
   hostId: string;
@@ -333,16 +424,28 @@ interface RoomViewProps {
   identity: { playerId: string; name: string } | null;
   remainingMs: number | null;
   log: LogEntry[];
+  tunnelUrl: string | null;
+  tunnelLoading: boolean;
+  onStartTunnel: () => void;
 }
 
 function RoomView(props: RoomViewProps) {
   const { publicState, me } = props;
+  const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
   if (!publicState) {
     return (
       <div className="room">
         <div className="roomcode">
           房间码 <b>{props.roomCode}</b>（把此码或链接发给朋友）
         </div>
+        {me === props.hostId && isLocal && (
+          <InviteLink
+            roomCode={props.roomCode}
+            url={props.tunnelUrl}
+            loading={props.tunnelLoading}
+            onStart={props.onStartTunnel}
+          />
+        )}
         <h3>玩家（{props.players.length}）</h3>
         <ul className="playerlist">
           {props.players.map((p) => (
@@ -381,8 +484,12 @@ function RoomView(props: RoomViewProps) {
   );
 }
 
-function CardView({ role }: { role: Role }) {
-  return <div className={`card card--${role}`}>{ROLE_NAMES[role]}</div>;
+function CardView({ role, unavailable }: { role: Role; unavailable?: boolean }) {
+  return <div className={`card card--${role}${unavailable ? ' unavailable' : ''}`}>{ROLE_NAMES[role]}</div>;
+}
+
+function CardBack() {
+  return <div className="card-back" role="img" aria-label="暗牌" />;
 }
 
 function CoinIcon() {
@@ -449,6 +556,16 @@ function GameBoard(props: {
 
   const narration = describePending(state);
   const countdown = describeCountdown(props.remainingMs);
+  const urgent = props.remainingMs != null && props.remainingMs <= 3000;
+
+  // 控制区内容切换的键：变化时重挂载以触发入场动画（避免行动选项闪现）
+  let controlMode = 'waiting';
+  if (state.phase === 'choosingAction' && isMyTurn) controlMode = 'action';
+  else if (canChallenge) controlMode = 'challenge';
+  else if (canBlock) controlMode = 'block';
+  else if (amLosing) controlMode = 'loss';
+  else if (amExchanging) controlMode = 'exchange';
+  const controlKey = `${controlMode}:${state.currentPlayerId ?? ''}:${pending?.actorId ?? ''}:${state.lossPlayerId ?? ''}`;
 
   const groups = groupLog(props.log, state).reverse();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -464,7 +581,11 @@ function GameBoard(props: {
 
   return (
     <div className="board">
-      {props.notice && <div className="notice">{props.notice}</div>}
+      {props.notice && (
+        <div className="notice" key={props.notice}>
+          {props.notice}
+        </div>
+      )}
 
       {state.phase === 'gameOver' && (
         <div className="notice big"><CrownIcon /> {state.players.find((p) => p.id === state.winnerId)?.name} 获胜！</div>
@@ -473,12 +594,14 @@ function GameBoard(props: {
       {narration ? (
         <div className="narration">
           <span className="narration-text">{narration}</span>
-          {countdown && <span className="narration-timer">{countdown}</span>}
+          {countdown && (
+            <span className={`narration-timer${urgent ? ' urgent' : ''}`}>{countdown}</span>
+          )}
         </div>
       ) : isMyTurn && state.phase === 'choosingAction' && countdown ? (
         <div className="narration">
           <span className="narration-text">轮到你了</span>
-          <span className="narration-timer">{countdown}</span>
+          <span className={`narration-timer${urgent ? ' urgent' : ''}`}>{countdown}</span>
         </div>
       ) : null}
 
@@ -490,28 +613,19 @@ function GameBoard(props: {
               {p.id === me && ' (你)'}
             </div>
             <div className="coins"><CoinIcon /> {p.coins}</div>
-            <div className="revealed">
+            <div className="cards-row">
+              {p.id === me
+                ? props.hand.map((c) => <CardView key={c.id} role={c.role} />)
+                : Array.from({ length: p.handCount }, (_, i) => <CardBack key={`back-${i}`} />)}
               {p.revealed.map((role, i) => (
-                <CardView key={i} role={role} />
+                <CardView key={`rev-${i}`} role={role} unavailable />
               ))}
-            </div>
-            <div className="hand-pile">
-              <span className="card-back">暗牌 × {p.handCount}</span>
             </div>
           </div>
         ))}
       </div>
 
-      <div className="myhand">
-        <h3>你的暗牌</h3>
-        <div className="cards">
-          {props.hand.map((c) => (
-            <CardView key={c.id} role={c.role} />
-          ))}
-        </div>
-      </div>
-
-      <div className="controls">
+      <div className="controls" key={controlKey}>
         {state.phase === 'choosingAction' && isMyTurn && (
           <Actions
             coins={myView?.coins ?? 0}
@@ -664,6 +778,7 @@ function ExchangeControl(props: {
   setSelectedKeep: (ids: string[]) => void;
   onConfirm: (ids: string[]) => void;
 }) {
+  const [confirming, setConfirming] = useState(false);
   const toggle = (id: string) => {
     if (props.selectedKeep.includes(id)) {
       props.setSelectedKeep(props.selectedKeep.filter((x) => x !== id));
@@ -671,20 +786,30 @@ function ExchangeControl(props: {
       props.setSelectedKeep([...props.selectedKeep, id]);
     }
   };
+  const confirm = (ids: string[]) => {
+    setConfirming(true);
+    props.onConfirm(ids);
+  };
   return (
     <div className="row">
       <p>交换：请选择保留的 {props.keepCount} 张牌</p>
-      {props.hand.map((c) => (
-        <button
-          key={c.id}
-          className={`role-btn role--${c.role}${props.selectedKeep.includes(c.id) ? ' active' : ''}`}
-          onClick={() => toggle(c.id)}
-        >
-          {ROLE_NAMES[c.role]}
-          {props.selectedKeep.includes(c.id) ? ' ✓' : ''}
-        </button>
-      ))}
-      <button disabled={props.selectedKeep.length !== props.keepCount} onClick={() => props.onConfirm(props.selectedKeep)}>
+      {props.hand.map((c) => {
+        const keep = props.selectedKeep.includes(c.id);
+        return (
+          <button
+            key={c.id}
+            className={`role-btn role--${c.role}${keep ? ' active' : ''}${confirming && !keep ? ' discard' : ''}`}
+            onClick={() => toggle(c.id)}
+            disabled={confirming}
+          >
+            {ROLE_NAMES[c.role]}
+          </button>
+        );
+      })}
+      <button
+        disabled={props.selectedKeep.length !== props.keepCount || confirming}
+        onClick={() => confirm(props.selectedKeep)}
+      >
         确认保留
       </button>
     </div>

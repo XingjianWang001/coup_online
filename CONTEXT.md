@@ -17,6 +17,16 @@ _Avoid_: 大厅、牌桌
 **房主 Host**
 大厅阶段拥有「开始游戏」按钮的玩家；开局后该角色消失。
 
+### 连接
+
+**隧道 Tunnel**
+服务器 spawn 的 Cloudflare quick tunnel，把 localhost 临时暴露为 `trycloudflare.com` 域名。
+_Avoid_: 内网穿透
+
+**加入链接 Invite Link**
+房主生成的、带房间号后缀（`?room=`）的可复制链接，发给朋友即可加入。
+_Avoid_: 邀请码（那是房间码）
+
 ### 游戏
 
 **牌局 Game**
@@ -31,6 +41,12 @@ _Avoid_: 生命、命
 
 **明牌 Revealed Card**
 因失去影响力而公开翻开的牌。
+
+**牌面 Card Face**
+牌的正面向外观，展示角色名或角色铭文。
+
+**牌背 Card Back**
+牌的面朝下外观，无角色信息，用于代表他人未翻开的暗牌。
 
 **牌堆 Deck**
 尚未发出的牌。
