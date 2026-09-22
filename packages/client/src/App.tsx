@@ -13,8 +13,9 @@ import {
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
 import { ROLE_DESC, ROLE_NAMES, RULES } from './rules.ts';
-import { describeCountdown, describePending, groupLog, nameOf } from './narration.ts';
+import { describeCountdown, describePending, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, remainingSinceReceipt } from './narration.ts';
 import type { LogEntry } from './narration.ts';
+import { copyToClipboard } from './clipboard.ts';
 
 const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: string }[] = [
   { type: 'income', label: '收入 +1', needsTarget: false },
@@ -25,6 +26,12 @@ const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: s
   { type: 'steal', label: '偷窃 (队长)', needsTarget: true },
   { type: 'exchange', label: '交换 (大使)', needsTarget: false },
 ];
+
+interface CountdownSnapshot {
+  remainingMs: number | null;
+  deadlineAt: number | null;
+  receivedAt: number;
+}
 
 // 加入链接的 ?room= 参数：仅首次加载读取一次，读后从 URL 清除，避免刷新时重复触发。
 const LINK_ROOM = (() => {
@@ -60,7 +67,9 @@ export function App() {
   const [selectedKeep, setSelectedKeep] = useState<string[]>([]);
   const [leftReason, setLeftReason] = useState('');
   const [confirmLeave, setConfirmLeave] = useState(false);
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
+  const [countdownSnapshot, setCountdownSnapshot] = useState<CountdownSnapshot | null>(null);
+  const [serverOffsetMs, setServerOffsetMs] = useState<number | null>(null);
+  const [clockTick, setClockTick] = useState(0);
   const [log, setLog] = useState<LogEntry[]>([]);
   const logIdRef = useRef(0);
 
@@ -88,7 +97,11 @@ export function App() {
           break;
         case 'publicState':
           setPublicState(msg.state);
-          setRemainingMs(msg.remainingMs);
+          setCountdownSnapshot({
+            remainingMs: msg.remainingMs,
+            deadlineAt: msg.deadlineAt,
+            receivedAt: performance.now(),
+          });
           break;
         case 'privateState':
           setHand(msg.hand);
@@ -120,6 +133,7 @@ export function App() {
           clearIdentity();
           setIdentity(null);
           setPublicState(null);
+          setCountdownSnapshot(null);
           setHand([]);
           setPlayers([]);
           setHostId('');
@@ -157,12 +171,47 @@ export function App() {
     return () => clearTimeout(t);
   }, [notice]);
 
-  // 倒计时本地递减：服务器广播的权威剩余毫秒数，每秒往下数
+  // 用一次往返估计客户端与服务器的时钟偏差，取最近几次中延迟最低的样本。
   useEffect(() => {
-    if (remainingMs == null || remainingMs <= 0) return;
-    const t = setTimeout(() => setRemainingMs((v) => (v == null ? null : Math.max(0, v - 1000))), 1000);
-    return () => clearTimeout(t);
-  }, [remainingMs]);
+    let samples: { rtt: number; offset: number }[] = [];
+    const sample = () => {
+      if (!socket.connected) return;
+      const sentAt = Date.now();
+      socket.timeout(5000).emit('timeSync', (error: Error | null, serverNow: number) => {
+        if (error || !Number.isFinite(serverNow)) return;
+        const receivedAt = Date.now();
+        const rtt = receivedAt - sentAt;
+        if (rtt < 0) return;
+        samples = [...samples.slice(-7), { rtt, offset: estimateServerOffset(sentAt, receivedAt, serverNow) }];
+        setServerOffsetMs(samples.reduce((best, current) => current.rtt < best.rtt ? current : best).offset);
+      });
+    };
+    const onConnect = () => {
+      samples = [];
+      setServerOffsetMs(null);
+      sample();
+    };
+    socket.on('connect', onConnect);
+    if (socket.connected) onConnect();
+    const interval = setInterval(sample, 10_000);
+    return () => {
+      socket.off('connect', onConnect);
+      clearInterval(interval);
+    };
+  }, [socket]);
+
+  // 浏览器暂停计时器后按实际经过时间重新计算，避免每次回调只减一秒造成滞后。
+  useEffect(() => {
+    if (countdownSnapshot?.remainingMs == null) return;
+    const interval = setInterval(() => setClockTick((value) => value + 1), 250);
+    return () => clearInterval(interval);
+  }, [countdownSnapshot]);
+
+  const remainingMs = useMemo(() => {
+    if (!countdownSnapshot) return null;
+    return remainingSinceReceipt(countdownSnapshot.remainingMs, countdownSnapshot.receivedAt, performance.now());
+  }, [countdownSnapshot, clockTick]);
+  const serverNow = serverOffsetMs == null ? null : Date.now() + serverOffsetMs;
 
   const me = identity?.playerId;
 
@@ -267,6 +316,8 @@ export function App() {
           notice={notice}
           leftReason={leftReason}
           remainingMs={remainingMs}
+          deadlineAt={countdownSnapshot?.deadlineAt ?? null}
+          serverNow={serverNow}
           log={log}
           selectedAction={selectedAction}
           setSelectedAction={setSelectedAction}
@@ -347,34 +398,6 @@ function Lobby(props: {
   );
 }
 
-function execCommandCopy(text: string): boolean {
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.left = '-9999px';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    document.body.removeChild(ta);
-    return ok;
-  } catch {
-    return false;
-  }
-}
-
-function copyToClipboard(text: string): Promise<boolean> {
-  // 优先异步剪贴板 API；失败或不可用（非安全上下文）时回退到 execCommand。
-  if (navigator.clipboard?.writeText) {
-    return navigator.clipboard.writeText(text).then(
-      () => true,
-      () => execCommandCopy(text),
-    );
-  }
-  return Promise.resolve(execCommandCopy(text));
-}
-
 function InviteLink(props: { roomCode: string; url: string | null; loading: boolean; onStart: () => void }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
@@ -423,6 +446,8 @@ interface RoomViewProps {
   socket: ReturnType<typeof connect>;
   identity: { playerId: string; name: string } | null;
   remainingMs: number | null;
+  deadlineAt: number | null;
+  serverNow: number | null;
   log: LogEntry[];
   tunnelUrl: string | null;
   tunnelLoading: boolean;
@@ -473,6 +498,8 @@ function RoomView(props: RoomViewProps) {
       me={me}
       notice={props.notice}
       remainingMs={props.remainingMs}
+      deadlineAt={props.deadlineAt}
+      serverNow={props.serverNow}
       log={props.log}
       selectedAction={props.selectedAction}
       setSelectedAction={props.setSelectedAction}
@@ -521,6 +548,8 @@ function GameBoard(props: {
   onAction: (action: ActionType, targetId?: string) => void;
   onIntent: (i: Parameters<typeof send>[1]) => void;
   remainingMs: number | null;
+  deadlineAt: number | null;
+  serverNow: number | null;
   log: LogEntry[];
 }) {
   const { state, me } = props;
@@ -555,8 +584,9 @@ function GameBoard(props: {
   const amExchanging = state.phase === 'choosingExchange' && pending?.actorId === me;
 
   const narration = describePending(state);
-  const countdown = describeCountdown(props.remainingMs);
-  const urgent = props.remainingMs != null && props.remainingMs <= 3000;
+  const countdown = describeCountdown(props.remainingMs, props.deadlineAt, props.serverNow);
+  const effectiveRemaining = effectiveRemainingMs(props.remainingMs, props.deadlineAt, props.serverNow);
+  const urgent = effectiveRemaining != null && effectiveRemaining <= 3000;
 
   // 控制区内容切换的键：变化时重挂载以触发入场动画（避免行动选项闪现）
   let controlMode = 'waiting';

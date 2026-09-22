@@ -64,3 +64,68 @@ describe('Room 加入守卫', () => {
     expect(room.getPrivateState('ghost')).toBeNull();
   });
 });
+
+describe('Room 计时结束', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('行动超时后把默认收入的事件和下一回合状态推送给所有玩家', () => {
+    vi.useFakeTimers();
+    const onBroadcast = vi.fn();
+    const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
+    const room = new Room('ABC123', '', repo, { onBroadcast, onEmpty: vi.fn() });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.startGame();
+    expect(room.getDeadlineAt()).toBe(Date.now() + 60_000);
+
+    vi.advanceTimersByTime(60_000);
+
+    expect(room.game?.players.find((p) => p.id === alice.id)?.coins).toBe(3);
+    expect(room.game?.currentPlayerId).toBe(bob.id);
+    expect(onBroadcast).toHaveBeenCalledWith(room, expect.arrayContaining([
+      expect.objectContaining({ type: 'actionChosen', actorId: alice.id, action: 'income' }),
+      expect.objectContaining({ type: 'turnChanged', playerId: bob.id }),
+    ]));
+    expect(room.getDeadlineMs()).toBe(60_000);
+  });
+
+  it('金币达到 10 时自动政变并广播目标选择失去影响力的阶段', () => {
+    vi.useFakeTimers();
+    const onBroadcast = vi.fn();
+    const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
+    const room = new Room('ABC123', '', repo, { onBroadcast, onEmpty: vi.fn() });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.startGame();
+    room.game!.players[0].coins = 10;
+
+    vi.advanceTimersByTime(60_000);
+
+    expect(room.game?.phase).toBe('choosingLoss');
+    expect(room.getPublicState()?.lossPlayerId).toBe(bob.id);
+    expect(onBroadcast).toHaveBeenCalledWith(room, expect.arrayContaining([
+      expect.objectContaining({ type: 'actionChosen', actorId: alice.id, action: 'coup', targetId: bob.id }),
+    ]));
+    expect(room.getDeadlineMs()).toBeNull();
+  });
+
+  it('阻挡窗口超时后广播结算事件和下一回合状态', () => {
+    vi.useFakeTimers();
+    const onBroadcast = vi.fn();
+    const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
+    const room = new Room('ABC123', '', repo, { onBroadcast, onEmpty: vi.fn() });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.startGame();
+    room.dispatch(alice.id, { type: 'chooseAction', action: 'foreignAid' });
+
+    vi.advanceTimersByTime(20_000);
+
+    expect(room.game?.players.find((p) => p.id === alice.id)?.coins).toBe(4);
+    expect(room.game?.currentPlayerId).toBe(bob.id);
+    expect(onBroadcast).toHaveBeenCalledWith(room, expect.arrayContaining([
+      expect.objectContaining({ type: 'coinsChanged', playerId: alice.id, coins: 4 }),
+      expect.objectContaining({ type: 'turnChanged', playerId: bob.id }),
+    ]));
+  });
+});

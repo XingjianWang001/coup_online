@@ -29,7 +29,7 @@ export type ServerMessage =
   | { type: 'tunnelUrl'; url: string }
   | { type: 'lobby'; players: LobbyPlayer[]; hostId: string }
   | { type: 'gameStarted'; turnOrder: string[] }
-  | { type: 'publicState'; state: PublicState; remainingMs: number | null }
+  | { type: 'publicState'; state: PublicState; remainingMs: number | null; deadlineAt: number | null }
   | { type: 'privateState'; hand: Card[] }
   | { type: 'events'; events: GameEvent[] }
   | { type: 'error'; message: string }

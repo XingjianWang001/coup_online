@@ -39,7 +39,7 @@ export interface RoomPlayer {
 }
 
 export interface RoomEvents {
-  onBroadcast(room: Room): void;
+  onBroadcast(room: Room, events: GameEvent[]): void;
   onEmpty(room: Room): void;
 }
 
@@ -172,31 +172,39 @@ export class Room {
     return Math.max(0, this.deadlineAt - Date.now());
   }
 
+  getDeadlineAt(): number | null {
+    return this.deadlineAt;
+  }
+
   private onTimeout(): void {
     if (!this.game) return;
     try {
+      let events: GameEvent[];
       if (this.game.phase === 'choosingAction') {
-        this.autoAction();
+        events = this.autoAction();
       } else if (this.game.phase === 'awaitingChallenge') {
-        this.apply((g) => resolveChallengeTimeout(g));
+        events = this.apply((g) => resolveChallengeTimeout(g));
       } else if (this.game.phase === 'awaitingBlock') {
-        this.apply((g) => resolveBlockTimeout(g));
+        events = this.apply((g) => resolveBlockTimeout(g));
+      } else {
+        return;
       }
+      this.events.onBroadcast(this, events);
     } catch (e) {
       console.error('timeout error', e);
     }
   }
 
-  private autoAction(): void {
+  private autoAction(): GameEvent[] {
     const g = this.game!;
     const cur = g.currentPlayerId!;
     const curPlayer = g.players.find((p) => p.id === cur)!;
     if (curPlayer.coins >= 10) {
       const targets = g.players.filter((p) => p.alive && p.id !== cur);
       const target = targets[Math.floor(Math.random() * targets.length)];
-      this.apply((s) => chooseAction(s, cur, 'coup', target.id));
+      return this.apply((s) => chooseAction(s, cur, 'coup', target.id));
     } else {
-      this.apply((s) => chooseAction(s, cur, 'income'));
+      return this.apply((s) => chooseAction(s, cur, 'income'));
     }
   }
 
