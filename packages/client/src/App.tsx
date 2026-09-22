@@ -13,8 +13,9 @@ import {
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
 import { ROLE_DESC, ROLE_NAMES, RULES } from './rules.ts';
-import { describeCountdown, describePending, groupLog, nameOf } from './narration.ts';
+import { describeCountdown, describePending, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, remainingSinceReceipt } from './narration.ts';
 import type { LogEntry } from './narration.ts';
+import { copyToClipboard } from './clipboard.ts';
 
 const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: string }[] = [
   { type: 'income', label: '收入 +1', needsTarget: false },
@@ -26,26 +27,49 @@ const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: s
   { type: 'exchange', label: '交换 (大使)', needsTarget: false },
 ];
 
+interface CountdownSnapshot {
+  remainingMs: number | null;
+  deadlineAt: number | null;
+  receivedAt: number;
+}
+
+// 加入链接的 ?room= 参数：仅首次加载读取一次，读后从 URL 清除，避免刷新时重复触发。
+const LINK_ROOM = (() => {
+  const params = new URLSearchParams(window.location.search);
+  const room = params.get('room')?.toUpperCase() ?? null;
+  if (room) {
+    params.delete('room');
+    const qs = params.toString();
+    const clean = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState(null, '', clean);
+  }
+  return room;
+})();
+
 export function App() {
   const socket = useMemo(() => connect(), []);
   const [identity, setIdentity] = useState(() => loadIdentity());
   const [name, setName] = useState(() => identity?.name ?? '');
   const nameRef = useRef(name);
   nameRef.current = name;
-  const [roomCode, setRoomCode] = useState(() => loadRoomCode() ?? '');
+  const [roomCode, setRoomCode] = useState(() => LINK_ROOM ?? loadRoomCode() ?? '');
   const [joined, setJoined] = useState<string | null>(null);
   const [hostId, setHostId] = useState('');
   const [players, setPlayers] = useState<LobbyPlayer[]>([]);
   const [publicState, setPublicState] = useState<PublicState | null>(null);
   const [hand, setHand] = useState<Card[]>([]);
   const [error, setError] = useState('');
+  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
+  const [tunnelLoading, setTunnelLoading] = useState(false);
   const [notice, setNotice] = useState('');
   const [showRules, setShowRules] = useState(false);
   const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
   const [selectedKeep, setSelectedKeep] = useState<string[]>([]);
   const [leftReason, setLeftReason] = useState('');
   const [confirmLeave, setConfirmLeave] = useState(false);
-  const [remainingMs, setRemainingMs] = useState<number | null>(null);
+  const [countdownSnapshot, setCountdownSnapshot] = useState<CountdownSnapshot | null>(null);
+  const [serverOffsetMs, setServerOffsetMs] = useState<number | null>(null);
+  const [clockTick, setClockTick] = useState(0);
   const [log, setLog] = useState<LogEntry[]>([]);
   const logIdRef = useRef(0);
 
@@ -56,6 +80,7 @@ export function App() {
           setJoined(msg.roomCode);
           setHostId(msg.hostId);
           setPlayers(msg.players);
+          setTunnelUrl(msg.tunnelUrl ?? null);
           setIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveRoomCode(msg.roomCode);
@@ -72,7 +97,11 @@ export function App() {
           break;
         case 'publicState':
           setPublicState(msg.state);
-          setRemainingMs(msg.remainingMs);
+          setCountdownSnapshot({
+            remainingMs: msg.remainingMs,
+            deadlineAt: msg.deadlineAt,
+            receivedAt: performance.now(),
+          });
           break;
         case 'privateState':
           setHand(msg.hand);
@@ -91,6 +120,11 @@ export function App() {
           break;
         case 'error':
           setError(msg.message);
+          setTunnelLoading(false);
+          break;
+        case 'tunnelUrl':
+          setTunnelUrl(msg.url);
+          setTunnelLoading(false);
           break;
         case 'left':
           setLeftReason(msg.reason);
@@ -99,9 +133,12 @@ export function App() {
           clearIdentity();
           setIdentity(null);
           setPublicState(null);
+          setCountdownSnapshot(null);
           setHand([]);
           setPlayers([]);
           setHostId('');
+          setTunnelUrl(null);
+          setTunnelLoading(false);
           setSelectedAction(null);
           setSelectedKeep([]);
           setConfirmLeave(false);
@@ -114,6 +151,7 @@ export function App() {
   // 重连：socket 重新连接后，若本地有身份与房间码，自动重新加入
   useEffect(() => {
     const onConnect = () => {
+      if (LINK_ROOM) return; // 链接指定了房间：仅预填，不自动重连旧房间
       const id = loadIdentity();
       const code = loadRoomCode();
       if (id && code) {
@@ -133,12 +171,47 @@ export function App() {
     return () => clearTimeout(t);
   }, [notice]);
 
-  // 倒计时本地递减：服务器广播的权威剩余毫秒数，每秒往下数
+  // 用一次往返估计客户端与服务器的时钟偏差，取最近几次中延迟最低的样本。
   useEffect(() => {
-    if (remainingMs == null || remainingMs <= 0) return;
-    const t = setTimeout(() => setRemainingMs((v) => (v == null ? null : Math.max(0, v - 1000))), 1000);
-    return () => clearTimeout(t);
-  }, [remainingMs]);
+    let samples: { rtt: number; offset: number }[] = [];
+    const sample = () => {
+      if (!socket.connected) return;
+      const sentAt = Date.now();
+      socket.timeout(5000).emit('timeSync', (error: Error | null, serverNow: number) => {
+        if (error || !Number.isFinite(serverNow)) return;
+        const receivedAt = Date.now();
+        const rtt = receivedAt - sentAt;
+        if (rtt < 0) return;
+        samples = [...samples.slice(-7), { rtt, offset: estimateServerOffset(sentAt, receivedAt, serverNow) }];
+        setServerOffsetMs(samples.reduce((best, current) => current.rtt < best.rtt ? current : best).offset);
+      });
+    };
+    const onConnect = () => {
+      samples = [];
+      setServerOffsetMs(null);
+      sample();
+    };
+    socket.on('connect', onConnect);
+    if (socket.connected) onConnect();
+    const interval = setInterval(sample, 10_000);
+    return () => {
+      socket.off('connect', onConnect);
+      clearInterval(interval);
+    };
+  }, [socket]);
+
+  // 浏览器暂停计时器后按实际经过时间重新计算，避免每次回调只减一秒造成滞后。
+  useEffect(() => {
+    if (countdownSnapshot?.remainingMs == null) return;
+    const interval = setInterval(() => setClockTick((value) => value + 1), 250);
+    return () => clearInterval(interval);
+  }, [countdownSnapshot]);
+
+  const remainingMs = useMemo(() => {
+    if (!countdownSnapshot) return null;
+    return remainingSinceReceipt(countdownSnapshot.remainingMs, countdownSnapshot.receivedAt, performance.now());
+  }, [countdownSnapshot, clockTick]);
+  const serverNow = serverOffsetMs == null ? null : Date.now() + serverOffsetMs;
 
   const me = identity?.playerId;
 
@@ -160,6 +233,12 @@ export function App() {
 
   function startGame() {
     send(socket, { type: 'startGame' });
+  }
+
+  function startTunnel() {
+    setTunnelLoading(true);
+    setError('');
+    send(socket, { type: 'startTunnel' });
   }
 
   function chooseAction(action: ActionType, targetId?: string) {
@@ -237,6 +316,8 @@ export function App() {
           notice={notice}
           leftReason={leftReason}
           remainingMs={remainingMs}
+          deadlineAt={countdownSnapshot?.deadlineAt ?? null}
+          serverNow={serverNow}
           log={log}
           selectedAction={selectedAction}
           setSelectedAction={setSelectedAction}
@@ -246,6 +327,9 @@ export function App() {
           onAction={chooseAction}
           socket={socket}
           identity={identity}
+          tunnelUrl={tunnelUrl}
+          tunnelLoading={tunnelLoading}
+          onStartTunnel={startTunnel}
         />
       )}
     </div>
@@ -314,6 +398,36 @@ function Lobby(props: {
   );
 }
 
+function InviteLink(props: { roomCode: string; url: string | null; loading: boolean; onStart: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const fullUrl = props.url ? `${props.url}?room=${props.roomCode}` : '';
+  const copy = async () => {
+    const ok = await copyToClipboard(fullUrl);
+    setCopied(ok);
+    setCopyFailed(!ok);
+    if (ok) setTimeout(() => setCopied(false), 2000);
+  };
+  if (props.url) {
+    return (
+      <div className="invite">
+        <span className="invite-label">加入链接</span>
+        <div className="row">
+          <input className="invite-input" readOnly value={fullUrl} onFocus={(e) => e.currentTarget.select()} />
+          <button onClick={copy}>{copied ? '已复制' : copyFailed ? '复制失败' : '复制'}</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="invite">
+      <button onClick={props.onStart} disabled={props.loading}>
+        {props.loading ? '正在启动隧道…' : '生成加入链接'}
+      </button>
+    </div>
+  );
+}
+
 interface RoomViewProps {
   roomCode: string;
   hostId: string;
@@ -332,17 +446,31 @@ interface RoomViewProps {
   socket: ReturnType<typeof connect>;
   identity: { playerId: string; name: string } | null;
   remainingMs: number | null;
+  deadlineAt: number | null;
+  serverNow: number | null;
   log: LogEntry[];
+  tunnelUrl: string | null;
+  tunnelLoading: boolean;
+  onStartTunnel: () => void;
 }
 
 function RoomView(props: RoomViewProps) {
   const { publicState, me } = props;
+  const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
   if (!publicState) {
     return (
       <div className="room">
         <div className="roomcode">
           房间码 <b>{props.roomCode}</b>（把此码或链接发给朋友）
         </div>
+        {me === props.hostId && isLocal && (
+          <InviteLink
+            roomCode={props.roomCode}
+            url={props.tunnelUrl}
+            loading={props.tunnelLoading}
+            onStart={props.onStartTunnel}
+          />
+        )}
         <h3>玩家（{props.players.length}）</h3>
         <ul className="playerlist">
           {props.players.map((p) => (
@@ -370,6 +498,8 @@ function RoomView(props: RoomViewProps) {
       me={me}
       notice={props.notice}
       remainingMs={props.remainingMs}
+      deadlineAt={props.deadlineAt}
+      serverNow={props.serverNow}
       log={props.log}
       selectedAction={props.selectedAction}
       setSelectedAction={props.setSelectedAction}
@@ -418,6 +548,8 @@ function GameBoard(props: {
   onAction: (action: ActionType, targetId?: string) => void;
   onIntent: (i: Parameters<typeof send>[1]) => void;
   remainingMs: number | null;
+  deadlineAt: number | null;
+  serverNow: number | null;
   log: LogEntry[];
 }) {
   const { state, me } = props;
@@ -452,8 +584,9 @@ function GameBoard(props: {
   const amExchanging = state.phase === 'choosingExchange' && pending?.actorId === me;
 
   const narration = describePending(state);
-  const countdown = describeCountdown(props.remainingMs);
-  const urgent = props.remainingMs != null && props.remainingMs <= 3000;
+  const countdown = describeCountdown(props.remainingMs, props.deadlineAt, props.serverNow);
+  const effectiveRemaining = effectiveRemainingMs(props.remainingMs, props.deadlineAt, props.serverNow);
+  const urgent = effectiveRemaining != null && effectiveRemaining <= 3000;
 
   // 控制区内容切换的键：变化时重挂载以触发入场动画（避免行动选项闪现）
   let controlMode = 'waiting';

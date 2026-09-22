@@ -37,10 +37,37 @@ export function describePending(state: PublicState): string | null {
   return text;
 }
 
+/** 收到状态后以单调时钟计算，浏览器延迟调用计时器时也能追上实际时间。 */
+export function remainingSinceReceipt(remainingMs: number | null, receivedAt: number, now: number): number | null {
+  if (remainingMs == null) return null;
+  return Math.max(0, remainingMs - (now - receivedAt));
+}
+
+/** 客户端往返时间的中点近似服务器响应时刻。 */
+export function estimateServerOffset(sentAt: number, receivedAt: number, serverNow: number): number {
+  return serverNow - (sentAt + receivedAt) / 2;
+}
+
+/** 已同步服务器时按权威截止时刻计算；同步前使用本地单调时钟推算的剩余时间。 */
+export function effectiveRemainingMs(
+  remainingMs: number | null,
+  deadlineAt?: number | null,
+  serverNow?: number | null,
+): number | null {
+  if (deadlineAt != null && serverNow != null) return Math.max(0, deadlineAt - serverNow);
+  if (remainingMs == null) return null;
+  return Math.max(0, remainingMs);
+}
+
 /** 剩余时间展示文本；null/非正数表示无需显示。 */
-export function describeCountdown(remainingMs: number | null): string | null {
-  if (remainingMs == null || remainingMs <= 0) return null;
-  const sec = Math.ceil(remainingMs / 1000);
+export function describeCountdown(
+  remainingMs: number | null,
+  deadlineAt?: number | null,
+  serverNow?: number | null,
+): string | null {
+  const effective = effectiveRemainingMs(remainingMs, deadlineAt, serverNow);
+  if (effective == null || effective <= 0) return null;
+  const sec = Math.ceil(effective / 1000);
   return `${sec}s`;
 }
 

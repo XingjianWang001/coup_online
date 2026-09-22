@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Server, type Socket } from 'socket.io';
 import { InMemoryGameRepository } from './repository.ts';
 import { Room } from './room.ts';
+import { getTunnelUrl, startTunnel, stopTunnel } from './tunnel.ts';
 import { forfeit } from '@coup/engine';
 import type { ClientIntent } from '@coup/shared';
 
@@ -23,6 +24,11 @@ function genCode(): string {
     code = randomBytes(3).toString('hex').toUpperCase(); // 6 位房间码
   } while (rooms.has(code));
   return code;
+}
+
+// 仅允许回环来源启动隧道：防止公网（经隧道）可达的客户端在主机上 spawn cloudflared。
+function isLoopback(address: string | undefined): boolean {
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 }
 
 const httpServer = createServer((req, res) => {
@@ -55,7 +61,11 @@ const io = new Server(httpServer);
 function broadcast(room: Room): void {
   const pub = room.getPublicState();
   if (pub) {
-    io.to(room.code).emit('publicState', { state: pub, remainingMs: room.getDeadlineMs() });
+    io.to(room.code).emit('publicState', {
+      state: pub,
+      remainingMs: room.getDeadlineMs(),
+      deadlineAt: room.getDeadlineAt(),
+    });
     for (const p of room.players.values()) {
       const priv = room.getPrivateState(p.id);
       if (priv) io.to(p.socketId).emit('privateState', { hand: priv.hand });
@@ -68,6 +78,10 @@ function broadcastLobby(room: Room): void {
 }
 
 io.on('connection', (socket) => {
+  socket.on('timeSync', (ack: (serverNow: number) => void) => {
+    if (typeof ack === 'function') ack(Date.now());
+  });
+
   socket.on('intent', (raw: ClientIntent) => {
     try {
       handleIntent(socket, raw);
@@ -95,7 +109,10 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
     case 'createRoom': {
       const code = genCode();
       const room = new Room(code, '', repo, {
-        onBroadcast: broadcast,
+        onBroadcast: (room, events) => {
+          io.to(room.code).emit('events', { events });
+          broadcast(room);
+        },
         onEmpty: (r) => rooms.delete(r.code),
       });
       const p = room.addPlayer(raw.name, socket.id);
@@ -110,6 +127,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         secret: p.secret,
         players: room.playerList,
         hostId: room.hostId,
+        tunnelUrl: getTunnelUrl() ?? undefined,
       });
       broadcastLobby(room);
       break;
@@ -128,9 +146,17 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         secret: p.secret,
         players: room.playerList,
         hostId: room.hostId,
+        tunnelUrl: getTunnelUrl() ?? undefined,
       });
       if (room.game) broadcast(room);
       else broadcastLobby(room);
+      break;
+    }
+    case 'startTunnel': {
+      if (!isLoopback(socket.handshake.address)) throw new Error('仅本机可启动隧道');
+      startTunnel(PORT)
+        .then((url) => socket.emit('tunnelUrl', { url }))
+        .catch((e) => socket.emit('error', { message: e instanceof Error ? e.message : '隧道启动失败' }));
       break;
     }
     case 'startGame': {
@@ -174,3 +200,13 @@ httpServer.listen(PORT, () => {
   console.log(`Coup server listening on http://localhost:${PORT}`);
   console.log('暴露到公网: cloudflared tunnel --url http://localhost:' + PORT);
 });
+
+// 服务器退出时终止 cloudflared 子进程
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    stopTunnel();
+    process.exit(0);
+  });
+}
+// 兜底：普通退出 / 未捕获异常退出时也清理子进程（SIGKILL、段错误等无法拦截）。
+process.on('exit', () => stopTunnel());

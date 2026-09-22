@@ -340,6 +340,21 @@ input:focus-visible {
   margin: 0 var(--sp-1);
 }
 
+.invite {
+  margin: 0 0 var(--sp-4);
+}
+
+.invite-label {
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.invite-input {
+  flex: 1;
+  min-width: 220px;
+  margin-top: 0;
+}
+
 .playerlist {
   list-style: none;
   padding: 0;
