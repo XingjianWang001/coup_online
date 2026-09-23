@@ -384,9 +384,47 @@ input:focus-visible {
 
 /* ---------- 牌局 ---------- */
 .board {
+  --notice-exit-duration: 180ms;
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+  transition: gap var(--notice-exit-duration) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.board:has(> .notice-region.exiting) {
+  gap: 0;
+}
+
+.board-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.notice-region {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--notice-exit-duration) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.notice-region-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.notice-region .notice {
+  transition:
+    opacity 140ms ease,
+    transform var(--notice-exit-duration) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.notice-region.exiting {
+  grid-template-rows: 0fr;
+}
+
+.notice-region.exiting .notice {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .table {
@@ -758,6 +796,18 @@ input:focus-visible {
   .role-btn.active {
     transform: none;
     box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 60%, transparent);
+  }
+  .notice-region {
+    transition: grid-template-rows 1ms linear 119ms;
+  }
+  .board {
+    transition: gap 1ms linear 119ms;
+  }
+  .notice-region .notice {
+    transition: opacity 120ms linear;
+  }
+  .notice-region.exiting .notice {
+    transform: none;
   }
 }
 

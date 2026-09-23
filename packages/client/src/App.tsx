@@ -33,6 +33,11 @@ interface CountdownSnapshot {
   receivedAt: number;
 }
 
+interface TransientNoticeState {
+  id: number;
+  message: string;
+}
+
 // 加入链接的 ?room= 参数：仅首次加载读取一次，读后从 URL 清除，避免刷新时重复触发。
 const LINK_ROOM = (() => {
   const params = new URLSearchParams(window.location.search);
@@ -61,7 +66,8 @@ export function App() {
   const [error, setError] = useState('');
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
   const [tunnelLoading, setTunnelLoading] = useState(false);
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState<TransientNoticeState | null>(null);
+  const noticeIdRef = useRef(0);
   const [showRules, setShowRules] = useState(false);
   const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
   const [selectedKeep, setSelectedKeep] = useState<string[]>([]);
@@ -72,6 +78,11 @@ export function App() {
   const [clockTick, setClockTick] = useState(0);
   const [log, setLog] = useState<LogEntry[]>([]);
   const logIdRef = useRef(0);
+
+  const showNotice = (message: string) => {
+    noticeIdRef.current += 1;
+    setNotice({ id: noticeIdRef.current, message });
+  };
 
   useEffect(() => {
     const off = onMessage(socket, (msg: ServerMessage) => {
@@ -91,7 +102,7 @@ export function App() {
           setPlayers(msg.players);
           break;
         case 'gameStarted':
-          setNotice('游戏开始！');
+          showNotice('游戏开始！');
           setLog([]);
           logIdRef.current = 0;
           break;
@@ -108,10 +119,10 @@ export function App() {
           break;
         case 'events':
           for (const e of msg.events) {
-            if (e.type === 'gameOver') setNotice('游戏结束');
-            if (e.type === 'eliminated') setNotice('有玩家被淘汰');
-            if (e.type === 'challengeResolved') setNotice(e.truth ? '质疑失败' : '质疑成功');
-            if (e.type === 'influenceLost') setNotice('有玩家失去影响力');
+            if (e.type === 'gameOver') showNotice('游戏结束');
+            if (e.type === 'eliminated') showNotice('有玩家被淘汰');
+            if (e.type === 'challengeResolved') showNotice(e.truth ? '质疑失败' : '质疑成功');
+            if (e.type === 'influenceLost') showNotice('有玩家失去影响力');
           }
           {
             const entries = msg.events.map((event) => ({ id: logIdRef.current++, event }));
@@ -167,7 +178,10 @@ export function App() {
   // 提示自动清除
   useEffect(() => {
     if (!notice) return;
-    const t = setTimeout(() => setNotice(''), 4000);
+    const noticeId = notice.id;
+    const t = setTimeout(() => {
+      setNotice((current) => current?.id === noticeId ? null : current);
+    }, 4000);
     return () => clearTimeout(t);
   }, [notice]);
 
@@ -435,7 +449,7 @@ interface RoomViewProps {
   players: LobbyPlayer[];
   publicState: PublicState | null;
   hand: Card[];
-  notice: string;
+  notice: TransientNoticeState | null;
   leftReason: string;
   selectedAction: ActionType | null;
   setSelectedAction: (a: ActionType | null) => void;
@@ -536,11 +550,49 @@ function CrownIcon() {
   );
 }
 
+function TransientNotice({ notice }: { notice: TransientNoticeState | null }) {
+  const [renderedNotice, setRenderedNotice] = useState(notice);
+  const [exiting, setExiting] = useState(false);
+
+  useEffect(() => {
+    if (notice) {
+      setRenderedNotice(notice);
+      setExiting(false);
+      return;
+    }
+    if (!renderedNotice) return;
+
+    setExiting(true);
+  }, [notice, renderedNotice]);
+
+  const visibleNotice = notice ?? renderedNotice;
+  if (!visibleNotice) return null;
+
+  return (
+    <div
+      className={`notice-region${exiting && !notice ? ' exiting' : ''}`}
+      onTransitionEnd={(event) => {
+        if (event.target !== event.currentTarget || event.propertyName !== 'grid-template-rows' || !exiting || notice) {
+          return;
+        }
+        setRenderedNotice(null);
+        setExiting(false);
+      }}
+    >
+      <div className="notice-region-inner">
+        <div className="notice" key={visibleNotice.id} role="status" aria-live="polite" aria-atomic="true">
+          {visibleNotice.message}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GameBoard(props: {
   state: PublicState;
   hand: Card[];
   me: string | undefined;
-  notice: string;
+  notice: TransientNoticeState | null;
   selectedAction: ActionType | null;
   setSelectedAction: (a: ActionType | null) => void;
   selectedKeep: string[];
@@ -611,15 +663,12 @@ function GameBoard(props: {
 
   return (
     <div className="board">
-      {props.notice && (
-        <div className="notice" key={props.notice}>
-          {props.notice}
-        </div>
-      )}
+      <TransientNotice notice={props.notice} />
 
-      {state.phase === 'gameOver' && (
-        <div className="notice big"><CrownIcon /> {state.players.find((p) => p.id === state.winnerId)?.name} 获胜！</div>
-      )}
+      <div className="board-content">
+        {state.phase === 'gameOver' && (
+          <div className="notice big"><CrownIcon /> {state.players.find((p) => p.id === state.winnerId)?.name} 获胜！</div>
+        )}
 
       {narration ? (
         <div className="narration">
@@ -718,36 +767,37 @@ function GameBoard(props: {
         )}
       </div>
 
-      {groups.length > 0 && (
-        <div className="log">
-          {groups.map((g, i) => (
-            <Fragment key={g.id}>
-              {i > 0 && <div className="log-sep" aria-hidden="true" />}
-              <div className="log-group">
-                <button
-                  className="log-header"
-                  onClick={g.entries.length ? () => toggleGroup(g.id) : undefined}
-                  aria-expanded={g.entries.length ? expanded.has(g.id) : undefined}
-                >
-                  {g.entries.length > 0 && (
-                    <span className={`log-chevron${expanded.has(g.id) ? ' open' : ''}`}>▸</span>
+        {groups.length > 0 && (
+          <div className="log">
+            {groups.map((g, i) => (
+              <Fragment key={g.id}>
+                {i > 0 && <div className="log-sep" aria-hidden="true" />}
+                <div className="log-group">
+                  <button
+                    className="log-header"
+                    onClick={g.entries.length ? () => toggleGroup(g.id) : undefined}
+                    aria-expanded={g.entries.length ? expanded.has(g.id) : undefined}
+                  >
+                    {g.entries.length > 0 && (
+                      <span className={`log-chevron${expanded.has(g.id) ? ' open' : ''}`}>▸</span>
+                    )}
+                    <span>{g.action}</span>
+                  </button>
+                  {expanded.has(g.id) && g.entries.length > 0 && (
+                    <div className="log-entries">
+                      {g.entries.map((en) => (
+                        <div key={en.id} className="log-entry">
+                          {en.text}
+                        </div>
+                      ))}
+                    </div>
                   )}
-                  <span>{g.action}</span>
-                </button>
-                {expanded.has(g.id) && g.entries.length > 0 && (
-                  <div className="log-entries">
-                    {g.entries.map((en) => (
-                      <div key={en.id} className="log-entry">
-                        {en.text}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Fragment>
-          ))}
-        </div>
-      )}
+                </div>
+              </Fragment>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
