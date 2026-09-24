@@ -1,4 +1,13 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { parseServerError } from '@coup/shared';
 import type { ActionType, Card, LobbyPlayer, PublicState, Role, ServerError } from '@coup/shared';
 import {
@@ -18,6 +27,7 @@ import { describeCountdown, describePending, effectiveRemainingMs, estimateServe
 import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { wrappedDialogFocus } from './dialog.ts';
+import { scheduleAutoDismiss } from './transient.ts';
 import {
   LANGUAGE_OPTIONS,
   loadLocale,
@@ -49,6 +59,11 @@ interface CountdownSnapshot {
 interface TransientNoticeState {
   id: number;
   descriptor: NoticeDescriptor;
+}
+
+interface TransientErrorState {
+  id: number;
+  error: ServerError;
 }
 
 // 加入链接的 ?room= 参数：仅首次加载读取一次，读后从 URL 清除，避免刷新时重复触发。
@@ -112,6 +127,16 @@ function useDialogFocus(
   }, [dialogRef, initialFocusRef, onClose]);
 }
 
+function useAutoDismiss<T extends { id: number }>(
+  value: T | null,
+  setValue: (update: (current: T | null) => T | null) => void,
+) {
+  useEffect(() => {
+    if (!value) return;
+    return scheduleAutoDismiss(value, setValue);
+  }, [setValue, value]);
+}
+
 export function App() {
   const socket = useMemo(() => connect(), []);
   const [locale, setLocale] = useState<Locale>(() =>
@@ -127,7 +152,8 @@ export function App() {
   const [players, setPlayers] = useState<LobbyPlayer[]>([]);
   const [publicState, setPublicState] = useState<PublicState | null>(null);
   const [hand, setHand] = useState<Card[]>([]);
-  const [error, setError] = useState<ServerError | null>(null);
+  const [error, setError] = useState<TransientErrorState | null>(null);
+  const errorIdRef = useRef(0);
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
   const [tunnelLoading, setTunnelLoading] = useState(false);
   const [notice, setNotice] = useState<TransientNoticeState | null>(null);
@@ -206,7 +232,8 @@ export function App() {
           }
           break;
         case 'error':
-          setError(parseServerError(msg));
+          errorIdRef.current += 1;
+          setError({ id: errorIdRef.current, error: parseServerError(msg) });
           setTunnelLoading(false);
           break;
         case 'tunnelUrl':
@@ -253,15 +280,8 @@ export function App() {
     };
   }, [socket]);
 
-  // 提示自动清除
-  useEffect(() => {
-    if (!notice) return;
-    const noticeId = notice.id;
-    const t = setTimeout(() => {
-      setNotice((current) => current?.id === noticeId ? null : current);
-    }, 4000);
-    return () => clearTimeout(t);
-  }, [notice]);
+  useAutoDismiss(error, setError);
+  useAutoDismiss(notice, setNotice);
 
   // 用一次往返估计客户端与服务器的时钟偏差，取最近几次中延迟最低的样本。
   useEffect(() => {
@@ -391,7 +411,14 @@ export function App() {
         <LeaveConfirmation locale={locale} onConfirm={leaveRoom} onClose={closeLeaveConfirmation} />
       )}
 
-      {error && <div className="error" role="alert">{localizeServerError(locale, error)}</div>}
+      <TransientMessage
+        value={error}
+        className="error"
+        regionClassName="error-region"
+        role="alert"
+        ariaLive="assertive"
+        render={(visibleError) => localizeServerError(locale, visibleError.error)}
+      />
 
       {!joined ? (
         <Lobby
@@ -738,7 +765,7 @@ function RoomView(props: RoomViewProps) {
           </button>
         )}
         {props.hasLeftRoom && (
-          <div className="error">
+          <div className="left-room-notice">
             {translate(props.locale, 'leftRoomNotice')}
           </div>
         )}
@@ -793,38 +820,51 @@ function CrownIcon() {
   );
 }
 
-function TransientNotice({ notice, locale }: { notice: TransientNoticeState | null; locale: Locale }) {
-  const [renderedNotice, setRenderedNotice] = useState(notice);
+function TransientMessage<T extends { id: number }>(props: {
+  value: T | null;
+  className: string;
+  regionClassName?: string;
+  role: 'alert' | 'status';
+  ariaLive: 'assertive' | 'polite';
+  render: (value: T) => ReactNode;
+}) {
+  const [renderedValue, setRenderedValue] = useState(props.value);
   const [exiting, setExiting] = useState(false);
 
   useEffect(() => {
-    if (notice) {
-      setRenderedNotice(notice);
+    if (props.value) {
+      setRenderedValue(props.value);
       setExiting(false);
       return;
     }
-    if (!renderedNotice) return;
+    if (!renderedValue) return;
 
     setExiting(true);
-  }, [notice, renderedNotice]);
+  }, [props.value, renderedValue]);
 
-  const visibleNotice = notice ?? renderedNotice;
-  if (!visibleNotice) return null;
+  const visibleValue = props.value ?? renderedValue;
+  if (!visibleValue) return null;
 
   return (
     <div
-      className={`notice-region${exiting && !notice ? ' exiting' : ''}`}
+      className={`notice-region${props.regionClassName ? ` ${props.regionClassName}` : ''}${exiting && !props.value ? ' exiting' : ''}`}
       onTransitionEnd={(event) => {
-        if (event.target !== event.currentTarget || event.propertyName !== 'grid-template-rows' || !exiting || notice) {
+        if (event.target !== event.currentTarget || event.propertyName !== 'grid-template-rows' || !exiting || props.value) {
           return;
         }
-        setRenderedNotice(null);
+        setRenderedValue(null);
         setExiting(false);
       }}
     >
       <div className="notice-region-inner">
-        <div className="notice" key={visibleNotice.id} role="status" aria-live="polite" aria-atomic="true">
-          {localizeNotice(locale, visibleNotice.descriptor)}
+        <div
+          className={`${props.className} transient-message`}
+          key={visibleValue.id}
+          role={props.role}
+          aria-live={props.ariaLive}
+          aria-atomic="true"
+        >
+          {props.render(visibleValue)}
         </div>
       </div>
     </div>
@@ -907,7 +947,13 @@ function GameBoard(props: {
 
   return (
     <div className="board">
-      <TransientNotice notice={props.notice} locale={props.locale} />
+      <TransientMessage
+        value={props.notice}
+        className="notice"
+        role="status"
+        ariaLive="polite"
+        render={(visibleNotice) => localizeNotice(props.locale, visibleNotice.descriptor)}
+      />
 
       <div className="board-content">
         {state.phase === 'gameOver' && (

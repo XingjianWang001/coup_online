@@ -284,6 +284,16 @@ input:focus-visible {
 }
 
 .error {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--err);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--err) 55%, var(--panel));
+  color: var(--text);
+  text-align: center;
+  font-size: 15px;
+}
+
+.left-room-notice {
   color: var(--err);
   margin: var(--sp-3) 0;
   font-size: 14px;
@@ -403,9 +413,17 @@ input:focus-visible {
 }
 
 .notice-region {
+  --notice-exit-duration: 180ms;
   display: grid;
   grid-template-rows: 1fr;
   transition: grid-template-rows var(--notice-exit-duration) cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.error-region {
+  margin-block: var(--sp-3);
+  transition:
+    grid-template-rows var(--notice-exit-duration) cubic-bezier(0.4, 0, 0.2, 1),
+    margin var(--notice-exit-duration) cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .notice-region-inner {
@@ -413,7 +431,7 @@ input:focus-visible {
   overflow: hidden;
 }
 
-.notice-region .notice {
+.notice-region .transient-message {
   transition:
     opacity 140ms ease,
     transform var(--notice-exit-duration) cubic-bezier(0.4, 0, 0.2, 1);
@@ -423,7 +441,11 @@ input:focus-visible {
   grid-template-rows: 0fr;
 }
 
-.notice-region.exiting .notice {
+.error-region.exiting {
+  margin-block: 0;
+}
+
+.notice-region.exiting .transient-message {
   opacity: 0;
   transform: translateY(-4px);
 }
@@ -721,7 +743,7 @@ input:focus-visible {
 }
 
 .language-settings legend {
-  padding: 0;
+  padding: 0 0 var(--sp-3);
   color: var(--text);
   font-size: 15px;
   font-weight: 600;
@@ -994,10 +1016,10 @@ input:focus-visible {
   .board {
     transition: gap 1ms linear 119ms;
   }
-  .notice-region .notice {
+  .notice-region .transient-message {
     transition: opacity 120ms linear;
   }
-  .notice-region.exiting .notice {
+  .notice-region.exiting .transient-message {
     transform: none;
   }
 }
