@@ -145,6 +145,7 @@ export function App() {
   const logIdRef = useRef(0);
   const closeRules = useCallback(() => setShowRules(false), []);
   const closeSettings = useCallback(() => setShowSettings(false), []);
+  const closeLeaveConfirmation = useCallback(() => setConfirmLeave(false), []);
 
   function changeLocale(nextLocale: Locale) {
     setLocale(nextLocale);
@@ -387,18 +388,10 @@ export function App() {
       )}
 
       {confirmLeave && (
-        <div className="overlay" onClick={() => setConfirmLeave(false)}>
-          <div className="panel" onClick={(e) => e.stopPropagation()}>
-            <p>{translate(locale, 'leaveConfirmation')}</p>
-            <button onClick={leaveRoom}>{translate(locale, 'confirmLeave')}</button>
-            <button className="ghost" onClick={() => setConfirmLeave(false)}>
-              {translate(locale, 'cancel')}
-            </button>
-          </div>
-        </div>
+        <LeaveConfirmation locale={locale} onConfirm={leaveRoom} onClose={closeLeaveConfirmation} />
       )}
 
-      {error && <div className="error">{localizeServerError(locale, error)}</div>}
+      {error && <div className="error" role="alert">{localizeServerError(locale, error)}</div>}
 
       {!joined ? (
         <Lobby
@@ -484,6 +477,31 @@ function SettingsPanel(props: {
             ))}
           </div>
         </fieldset>
+      </div>
+    </div>
+  );
+}
+
+function LeaveConfirmation(props: { locale: Locale; onConfirm: () => void; onClose: () => void }) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(props.onClose, dialogRef, cancelButtonRef);
+
+  return (
+    <div className="overlay" onClick={props.onClose}>
+      <div
+        ref={dialogRef}
+        className="panel"
+        role="alertdialog"
+        aria-modal="true"
+        aria-describedby="leave-confirmation-description"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <p id="leave-confirmation-description">{translate(props.locale, 'leaveConfirmation')}</p>
+        <button onClick={props.onConfirm}>{translate(props.locale, 'confirmLeave')}</button>
+        <button ref={cancelButtonRef} className="ghost" onClick={props.onClose}>
+          {translate(props.locale, 'cancel')}
+        </button>
       </div>
     </div>
   );

@@ -1,0 +1,9 @@
+# Client-owned bilingual interface
+
+Coup Online supports Simplified Chinese (`zh-CN`) and English (`en`) as complete player-facing locales. Locale is browser-local presentation state: it is detected from browser preferences on first visit, can be changed from Settings or the rules center, and is persisted in that browser. It is not part of a Player identity, Room, Invite Link, Intent, or authoritative Game state, so mixed-language Players share identical server state while selecting language independently.
+
+Player-facing interface copy lives in the typed localization module, while bilingual rule content and official Role/Action names live in the rules content module. Player-authored values such as nicknames and Room codes are never translated. The server sends stable structured error codes and raw Game events; the client localizes errors, current status, notices, accessibility labels, and the complete log at render time. Changing locale therefore updates existing presentation without reconnecting or mutating authoritative state.
+
+Settings remains reachable from the header throughout the Room lifecycle. The rules center displays one locale at a time, opens to Quick Rules, offers Full Rules, and keeps online-play procedures separate from the official tabletop base rules. Both surfaces are dialogs with keyboard focus containment, Escape dismissal, focus restoration, reduced-motion behavior, and layouts for narrow mobile and desktop viewports.
+
+**Considered Options**: A Room-wide locale was rejected because Players in one Room may prefer different languages. Localized strings in the protocol were rejected because they would couple authoritative state to presentation and prevent existing logs or notices from changing language. A general-purpose internationalization framework was rejected because two client-rendered locales do not justify the additional dependency and interface.

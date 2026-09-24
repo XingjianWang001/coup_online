@@ -28,6 +28,14 @@ async function main() {
   const roomCode = joined.roomCode;
   console.log('✅ 房间创建:', roomCode, 'playerId:', joined.playerId);
 
+  const structuredError = on(clients[2], 'error');
+  clients[2].emit('intent', { type: 'joinRoom', roomCode: 'NOPE00', name: 'Carol' });
+  const error = await structuredError;
+  if (error.code !== 'roomNotFound' || 'message' in error) {
+    throw new Error(`结构化错误信封无效: ${JSON.stringify(error)}`);
+  }
+  console.log('✅ 结构化错误信封:', error.code);
+
   const bJoined = on(clients[1], 'joined');
   const cJoined = on(clients[2], 'joined');
   clients[1].emit('intent', { type: 'joinRoom', roomCode, name: 'Bob' });
