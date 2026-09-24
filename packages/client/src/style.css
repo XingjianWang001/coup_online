@@ -662,7 +662,12 @@ input:focus-visible {
 }
 
 .panel.rules {
-  width: min(640px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+  width: min(720px, 100%);
+  max-height: calc(100dvh - var(--sp-8));
+  overflow: hidden;
 }
 
 .settings-panel {
@@ -687,6 +692,22 @@ input:focus-visible {
 
 .panel-heading button {
   flex-shrink: 0;
+}
+
+.rules-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.rules-heading-actions select {
+  min-height: 44px;
+  padding-inline: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
 }
 
 .language-settings {
@@ -751,19 +772,106 @@ input:focus-visible {
   margin-left: var(--sp-2);
 }
 
-.rule {
-  margin-bottom: var(--sp-3);
+.rules-level-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
 }
 
-.rule b {
+.rules-level-switch button {
+  min-height: 44px;
+  margin: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-2);
+}
+
+.rules-level-switch button + button {
+  margin-left: 0;
+}
+
+.rules-level-switch button:hover {
+  border-color: var(--line);
+  background: var(--panel-2);
   color: var(--text);
 }
 
-.rule p {
-  margin: var(--sp-1) 0 0;
+.rules-level-switch button.selected {
+  border-color: var(--text-2);
+  background: var(--panel-2);
+  color: var(--text);
+}
+
+.rules-body {
+  min-height: 0;
+  padding-inline: var(--sp-1) var(--sp-3);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.rule-section {
+  display: grid;
+  gap: var(--sp-2);
+  padding-block: 0 var(--sp-5);
+}
+
+.rule-section + .rule-section {
+  padding-block-start: var(--sp-5);
+  border-top: 1px solid var(--line-2);
+}
+
+.rule-section h3,
+.rule-section p,
+.rule-section ul {
+  margin: 0;
+}
+
+.rule-section h3 {
+  color: var(--text);
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.rule-section p,
+.rule-section li {
   color: var(--text-2);
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.rule-section ul {
+  display: grid;
+  gap: var(--sp-2);
+  padding-inline-start: var(--sp-5);
+}
+
+.role-reference-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--sp-6);
+}
+
+.role-reference-item {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  padding-block: var(--sp-3);
+  border-top: 1px solid var(--line-2);
+}
+
+.role-reference-item b {
+  color: var(--text);
+}
+
+.online-rules {
+  border-block-color: var(--line);
+  background: color-mix(in srgb, var(--panel) 45%, transparent);
+  padding-inline: var(--sp-3);
 }
 
 /* ---------- 动效（烛光牌桌：克制、无回弹，位移均带 reduced-motion 降级） ---------- */
@@ -921,6 +1029,43 @@ input:focus-visible {
   .settings-overlay {
     align-items: flex-end;
     padding: 0;
+  }
+
+  .rules-overlay {
+    padding: 0;
+  }
+
+  .panel.rules {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    max-height: 100dvh;
+    padding: calc(var(--sp-4) + env(safe-area-inset-top)) var(--sp-4)
+      calc(var(--sp-4) + env(safe-area-inset-bottom));
+    border: 0;
+    border-radius: 0;
+  }
+
+  .rules-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .rules-heading-actions {
+    max-width: 100%;
+  }
+
+  .rules-body {
+    padding-inline: 0 var(--sp-2);
+  }
+
+  .rule-section p,
+  .rule-section li {
+    font-size: 16px;
+  }
+
+  .role-reference-list {
+    grid-template-columns: 1fr;
   }
 
   .settings-panel {

@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { parseServerError } from '@coup/shared';
 import type { ActionType, Card, LobbyPlayer, PublicState, Role, ServerError } from '@coup/shared';
 import {
@@ -13,10 +13,11 @@ import {
   send,
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
-import { actionName, roleDescription, roleName, ROLES, rulesFor } from './rules.ts';
+import { actionName, roleDescription, roleName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
 import { describeCountdown, describePending, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, remainingSinceReceipt } from './narration.ts';
 import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
+import { wrappedDialogFocus } from './dialog.ts';
 import {
   LANGUAGE_OPTIONS,
   loadLocale,
@@ -71,6 +72,46 @@ function browserStorage(): Storage | null {
   }
 }
 
+function useDialogFocus(
+  onClose: () => void,
+  dialogRef: RefObject<HTMLDivElement>,
+  initialFocusRef: RefObject<HTMLElement>,
+) {
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable?.length) return;
+      const target = wrappedDialogFocus(
+        focusable,
+        document.activeElement instanceof HTMLElement ? document.activeElement : null,
+        event.shiftKey,
+      );
+      if (target) {
+        event.preventDefault();
+        target.focus();
+      }
+    };
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKeyDown);
+    initialFocusRef.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [dialogRef, initialFocusRef, onClose]);
+}
+
 export function App() {
   const socket = useMemo(() => connect(), []);
   const [locale, setLocale] = useState<Locale>(() =>
@@ -102,6 +143,7 @@ export function App() {
   const [clockTick, setClockTick] = useState(0);
   const [log, setLog] = useState<LogEntry[]>([]);
   const logIdRef = useRef(0);
+  const closeRules = useCallback(() => setShowRules(false), []);
   const closeSettings = useCallback(() => setShowSettings(false), []);
 
   function changeLocale(nextLocale: Locale) {
@@ -338,7 +380,7 @@ export function App() {
         </div>
       </header>
 
-      {showRules && <RulesPanel locale={locale} onClose={() => setShowRules(false)} />}
+      {showRules && <RulesPanel locale={locale} onLocaleChange={changeLocale} onClose={closeRules} />}
 
       {showSettings && (
         <SettingsPanel locale={locale} onLocaleChange={changeLocale} onClose={closeSettings} />
@@ -407,38 +449,7 @@ function SettingsPanel(props: {
 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        props.onClose();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)');
-      if (!focusable?.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.body.style.overflow = 'hidden';
-    document.addEventListener('keydown', onKeyDown);
-    closeButtonRef.current?.focus();
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', onKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, [props.onClose]);
+  useDialogFocus(props.onClose, dialogRef, closeButtonRef);
 
   return (
     <div className="overlay settings-overlay" onClick={props.onClose}>
@@ -478,27 +489,90 @@ function SettingsPanel(props: {
   );
 }
 
-function RulesPanel({ locale, onClose }: { locale: Locale; onClose: () => void }) {
+function RulesPanel({
+  locale,
+  onLocaleChange,
+  onClose,
+}: {
+  locale: Locale;
+  onLocaleChange: (locale: Locale) => void;
+  onClose: () => void;
+}) {
+  const [level, setLevel] = useState<RuleLevel>('quick');
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(onClose, dialogRef, closeButtonRef);
+
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="panel rules" onClick={(e) => e.stopPropagation()}>
-        <h2>{translate(locale, 'rulesTitle')}</h2>
-        {rulesFor(locale).map((r) => (
-          <div key={r.title} className="rule">
-            <b>{r.title}</b>
-            <p>{r.body}</p>
+    <div className="overlay rules-overlay" onClick={onClose}>
+      <div
+        ref={dialogRef}
+        className="panel rules"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rules-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="panel-heading rules-heading">
+          <h2 id="rules-title">{translate(locale, 'rulesTitle')}</h2>
+          <div className="rules-heading-actions">
+            <select
+              value={locale}
+              aria-label={translate(locale, 'language')}
+              onChange={(event) => onLocaleChange(event.currentTarget.value as Locale)}
+            >
+              {LANGUAGE_OPTIONS.map((option) => (
+                <option key={option.locale} value={option.locale}>{option.label}</option>
+              ))}
+            </select>
+            <button ref={closeButtonRef} className="ghost" onClick={onClose}>
+              {translate(locale, 'closeRules')}
+            </button>
           </div>
-        ))}
-        <h3>{translate(locale, 'rolesTitle')}</h3>
-        {ROLES.map((role) => (
-          <div key={role} className="rule">
-            <b>{roleName(locale, role)}</b>
-            <p>{roleDescription(locale, role)}</p>
-          </div>
-        ))}
-        <button className="ghost" onClick={onClose}>
-          {translate(locale, 'closeRules')}
-        </button>
+        </div>
+        <div className="rules-level-switch" role="group" aria-label={translate(locale, 'rulesLevel')}>
+          {(['quick', 'full'] as const).map((option) => (
+            <button
+              key={option}
+              className={level === option ? 'selected' : ''}
+              aria-pressed={level === option}
+              onClick={() => setLevel(option)}
+            >
+              {translate(locale, option === 'quick' ? 'quickRules' : 'fullRules')}
+            </button>
+          ))}
+        </div>
+        <div className="rules-body">
+          {rulesFor(locale, level).map((section) => (
+            <Fragment key={section.id}>
+              {section.roleReferenceBefore && (
+                <section className="rule-section role-reference" aria-labelledby="rule-roles">
+                  <h3 id="rule-roles">{translate(locale, 'rolesTitle')}</h3>
+                  <div className="role-reference-list">
+                    {ROLES.map((role) => (
+                      <div key={role} className="role-reference-item">
+                        <b>{roleName(locale, role)}</b>
+                        <p>{roleDescription(locale, role)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+              <section
+                className={`rule-section${section.onlineOnly ? ' online-rules' : ''}`}
+                aria-labelledby={`rule-${section.id}`}
+              >
+                <h3 id={`rule-${section.id}`}>{section.title}</h3>
+                <p>{section.body}</p>
+                {section.items && (
+                  <ul>
+                    {section.items.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                )}
+              </section>
+            </Fragment>
+          ))}
+        </div>
       </div>
     </div>
   );
