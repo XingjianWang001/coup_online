@@ -52,7 +52,7 @@ const english = {
   offlineSuffix: ' (offline)',
   startGame: 'Start game',
   startGameRequirement: 'Requires at least 2 players',
-  leftRoomReason: 'You left: {reason}',
+  leftRoomNotice: 'You left the room.',
   errorRoomNotFound: 'Room not found.',
   errorGameAlreadyStarted: 'The game has already started.',
   errorHostOnly: 'Only the host can start the game.',
@@ -144,7 +144,7 @@ const simplifiedChinese = {
   offlineSuffix: ' (离线)',
   startGame: '开始游戏',
   startGameRequirement: '需 ≥2 人',
-  leftRoomReason: '你已离开：{reason}',
+  leftRoomNotice: '你已离开房间。',
   errorRoomNotFound: '房间不存在。',
   errorGameAlreadyStarted: '牌局已经开始。',
   errorHostOnly: '只有房主可以开始牌局。',
@@ -205,7 +205,6 @@ const dictionaries: Record<Locale, Record<MessageKey, string>> = {
 
 interface MessageValues {
   playersCount: { count: number };
-  leftRoomReason: { reason: string };
   errorMinimumPlayers: { minimum: number };
   errorRoomFull: { maximum: number };
   winner: { name: string };

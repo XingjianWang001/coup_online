@@ -48,6 +48,11 @@ describe('translate', () => {
     expect(translate('zh-CN', 'playersCount', { count: 3 })).toBe('玩家（3）');
   });
 
+  it('localizes the leave-room notice without exposing a server reason', () => {
+    expect(translate('en', 'leftRoomNotice')).toBe('You left the room.');
+    expect(translate('zh-CN', 'leftRoomNotice')).toBe('你已离开房间。');
+  });
+
   it('localizes parameterized server errors in the current locale', () => {
     const error = { code: 'roomFull', params: { maximum: 6 } } as const;
 

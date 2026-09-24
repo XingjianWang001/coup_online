@@ -136,7 +136,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
   const [selectedKeep, setSelectedKeep] = useState<string[]>([]);
-  const [leftReason, setLeftReason] = useState('');
+  const [hasLeftRoom, setHasLeftRoom] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [countdownSnapshot, setCountdownSnapshot] = useState<CountdownSnapshot | null>(null);
   const [serverOffsetMs, setServerOffsetMs] = useState<number | null>(null);
@@ -169,7 +169,7 @@ export function App() {
           setIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveRoomCode(msg.roomCode);
-          setLeftReason('');
+          setHasLeftRoom(false);
           break;
         case 'lobby':
           setHostId(msg.hostId);
@@ -216,7 +216,7 @@ export function App() {
           break;
         case 'left':
           setError(null);
-          setLeftReason(msg.reason);
+          setHasLeftRoom(true);
           setJoined(null);
           clearRoomCode();
           clearIdentity();
@@ -412,7 +412,7 @@ export function App() {
           publicState={publicState}
           hand={hand}
           notice={notice}
-          leftReason={leftReason}
+          hasLeftRoom={hasLeftRoom}
           remainingMs={remainingMs}
           deadlineAt={countdownSnapshot?.deadlineAt ?? null}
           serverNow={serverNow}
@@ -681,7 +681,7 @@ interface RoomViewProps {
   publicState: PublicState | null;
   hand: Card[];
   notice: TransientNoticeState | null;
-  leftReason: string;
+  hasLeftRoom: boolean;
   selectedAction: ActionType | null;
   setSelectedAction: (a: ActionType | null) => void;
   selectedKeep: string[];
@@ -737,9 +737,9 @@ function RoomView(props: RoomViewProps) {
             {translate(props.locale, 'startGame')} ({translate(props.locale, 'startGameRequirement')})
           </button>
         )}
-        {props.leftReason && (
+        {props.hasLeftRoom && (
           <div className="error">
-            {translate(props.locale, 'leftRoomReason', { reason: props.leftReason })}
+            {translate(props.locale, 'leftRoomNotice')}
           </div>
         )}
       </div>
