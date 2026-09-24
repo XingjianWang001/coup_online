@@ -61,6 +61,46 @@ const english = {
   errorGameNotStarted: 'The game has not started yet.',
   errorRoomFull: 'This room is full (maximum {maximum} players).',
   errorUnexpected: 'Something went wrong. Please try again.',
+  gameStarted: 'Game started!',
+  gameEnded: 'Game over',
+  playerEliminated: 'A player was eliminated',
+  challengeFailed: 'Challenge failed',
+  challengeSucceeded: 'Challenge succeeded',
+  influenceLostNotice: 'A player lost influence',
+  winner: '{name} wins!',
+  yourTurn: 'Your turn',
+  waitingForAction: 'Waiting for {name} to act…',
+  selfMarker: ' (you)',
+  coinCount: '{count} coins',
+  coinCountOne: '{count} coin',
+  influenceCount: '{count} influence',
+  chooseTarget: 'Choose a target:',
+  mandatoryCoup: 'You have 10 or more coins and must Coup.',
+  challenge: 'Challenge!',
+  passChallenge: 'Do not challenge',
+  blockWith: 'Block with {role}',
+  passBlock: 'Do not block',
+  chooseInfluenceLoss: 'Choose a hidden card to reveal:',
+  revealRole: 'Reveal {role}',
+  exchangePrompt: 'Exchange: choose {count} cards to keep',
+  confirmKeep: 'Keep selected cards',
+  cardBack: 'Hidden card',
+  cardFace: '{role} card',
+  expandLog: 'Expand details for {action}',
+  collapseLog: 'Collapse details for {action}',
+  narrationAction: '{actor} uses {action}',
+  narrationClaim: '{actor} claims {role} to {action}',
+  narrationTarget: ', targeting {target}',
+  narrationBlock: '; {blocker} blocks with {role}',
+  logChallenge: '{challenger} challenges {target}',
+  logChallengeFailed: 'Challenge failed: {loser} loses influence',
+  logChallengeSucceeded: 'Challenge succeeded: {loser} loses influence',
+  logBlock: '{blocker} blocks with {role}',
+  logInfluenceLost: '{player} reveals {role}',
+  logEliminated: '{player} is eliminated',
+  logGameOver: '{winner} wins',
+  logCoinsChanged: '{player} coins → {coins}',
+  logExchangeDrew: '{player} draws {count} cards',
 } as const;
 
 type MessageKey = keyof typeof english;
@@ -110,6 +150,46 @@ const simplifiedChinese = {
   errorGameNotStarted: '牌局尚未开始。',
   errorRoomFull: '房间已满（最多 {maximum} 名玩家）。',
   errorUnexpected: '出现意外错误，请重试。',
+  gameStarted: '牌局开始！',
+  gameEnded: '牌局结束',
+  playerEliminated: '有玩家被淘汰',
+  challengeFailed: '质疑失败',
+  challengeSucceeded: '质疑成功',
+  influenceLostNotice: '有玩家失去影响力',
+  winner: '{name} 获胜！',
+  yourTurn: '轮到你了',
+  waitingForAction: '等待 {name} 行动…',
+  selfMarker: ' (你)',
+  coinCount: '{count} 金币',
+  coinCountOne: '{count} 金币',
+  influenceCount: '{count} 影响力',
+  chooseTarget: '选择目标：',
+  mandatoryCoup: '你已有 10 枚或更多金币，必须发动政变。',
+  challenge: '质疑！',
+  passChallenge: '不质疑',
+  blockWith: '用{role}阻挡',
+  passBlock: '不阻挡',
+  chooseInfluenceLoss: '请选择一张暗牌公开翻开：',
+  revealRole: '翻开 {role}',
+  exchangePrompt: '交换：请选择保留的 {count} 张牌',
+  confirmKeep: '确认保留',
+  cardBack: '暗牌',
+  cardFace: '{role}牌',
+  expandLog: '展开{action}的详情',
+  collapseLog: '收起{action}的详情',
+  narrationAction: '{actor} 发动{action}',
+  narrationClaim: '{actor} 声称【{role}】发动{action}',
+  narrationTarget: '，目标 {target}',
+  narrationBlock: '；{blocker} 用【{role}】阻挡',
+  logChallenge: '{challenger} 质疑 {target}',
+  logChallengeFailed: '质疑失败：{loser} 失去影响力',
+  logChallengeSucceeded: '质疑成功：{loser} 失去影响力',
+  logBlock: '{blocker} 用【{role}】阻挡',
+  logInfluenceLost: '{player} 翻开【{role}】',
+  logEliminated: '{player} 被淘汰',
+  logGameOver: '{winner} 获胜',
+  logCoinsChanged: '{player} 金币 → {coins}',
+  logExchangeDrew: '{player} 抽取 {count} 张牌',
 } as const satisfies Record<MessageKey, string>;
 
 const dictionaries: Record<Locale, Record<MessageKey, string>> = {
@@ -122,6 +202,30 @@ interface MessageValues {
   leftRoomReason: { reason: string };
   errorMinimumPlayers: { minimum: number };
   errorRoomFull: { maximum: number };
+  winner: { name: string };
+  waitingForAction: { name: string };
+  coinCount: { count: number };
+  coinCountOne: { count: number };
+  influenceCount: { count: number };
+  blockWith: { role: string };
+  revealRole: { role: string };
+  exchangePrompt: { count: number };
+  cardFace: { role: string };
+  expandLog: { action: string };
+  collapseLog: { action: string };
+  narrationAction: { actor: string; action: string };
+  narrationClaim: { actor: string; role: string; action: string };
+  narrationTarget: { target: string };
+  narrationBlock: { blocker: string; role: string };
+  logChallenge: { challenger: string; target: string };
+  logChallengeFailed: { loser: string };
+  logChallengeSucceeded: { loser: string };
+  logBlock: { blocker: string; role: string };
+  logInfluenceLost: { player: string; role: string };
+  logEliminated: { player: string };
+  logGameOver: { winner: string };
+  logCoinsChanged: { player: string; coins: number };
+  logExchangeDrew: { player: string; count: number };
 }
 
 type MessageArguments<Key extends MessageKey> = Key extends keyof MessageValues
@@ -188,4 +292,16 @@ export function localizeServerError(locale: Locale, value: unknown): string {
     case 'roomFull': return translate(locale, 'errorRoomFull', error.params);
     case 'unexpected': return translate(locale, 'errorUnexpected');
   }
+}
+
+export type NoticeDescriptor = {
+  key: 'gameStarted' | 'gameEnded' | 'playerEliminated' | 'challengeFailed' | 'challengeSucceeded' | 'influenceLostNotice';
+};
+
+export function localizeNotice(locale: Locale, notice: NoticeDescriptor): string {
+  return translate(locale, notice.key);
+}
+
+export function localizeCoinCount(locale: Locale, count: number): string {
+  return translate(locale, count === 1 ? 'coinCountOne' : 'coinCount', { count });
 }

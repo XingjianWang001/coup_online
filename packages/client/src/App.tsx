@@ -13,27 +13,30 @@ import {
   send,
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
-import { ROLE_DESC, ROLE_NAMES, RULES } from './rules.ts';
+import { actionName, roleDescription, roleName, ROLES, rulesFor } from './rules.ts';
 import { describeCountdown, describePending, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, remainingSinceReceipt } from './narration.ts';
 import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
 import {
   LANGUAGE_OPTIONS,
   loadLocale,
+  localizeCoinCount,
+  localizeNotice,
   localizeServerError,
   persistLocale,
   translate,
   type Locale,
+  type NoticeDescriptor,
 } from './localization.ts';
 
-const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: string }[] = [
-  { type: 'income', label: '收入 +1', needsTarget: false },
-  { type: 'foreignAid', label: '外援 +2', needsTarget: false },
-  { type: 'coup', label: '政变 (7币)', needsTarget: true, cost: '7' },
-  { type: 'tax', label: '征税 +3 (公爵)', needsTarget: false },
-  { type: 'assassinate', label: '暗杀 (3币)', needsTarget: true, cost: '3' },
-  { type: 'steal', label: '偷窃 (队长)', needsTarget: true },
-  { type: 'exchange', label: '交换 (大使)', needsTarget: false },
+const ACTIONS: { type: ActionType; needsTarget: boolean }[] = [
+  { type: 'income', needsTarget: false },
+  { type: 'foreignAid', needsTarget: false },
+  { type: 'coup', needsTarget: true },
+  { type: 'tax', needsTarget: false },
+  { type: 'assassinate', needsTarget: true },
+  { type: 'steal', needsTarget: true },
+  { type: 'exchange', needsTarget: false },
 ];
 
 interface CountdownSnapshot {
@@ -44,7 +47,7 @@ interface CountdownSnapshot {
 
 interface TransientNoticeState {
   id: number;
-  message: string;
+  descriptor: NoticeDescriptor;
 }
 
 // 加入链接的 ?room= 参数：仅首次加载读取一次，读后从 URL 清除，避免刷新时重复触发。
@@ -106,9 +109,9 @@ export function App() {
     persistLocale(browserStorage(), nextLocale);
   }
 
-  const showNotice = (message: string) => {
+  const showNotice = (descriptor: NoticeDescriptor) => {
     noticeIdRef.current += 1;
-    setNotice({ id: noticeIdRef.current, message });
+    setNotice({ id: noticeIdRef.current, descriptor });
   };
 
   useEffect(() => {
@@ -131,7 +134,7 @@ export function App() {
           break;
         case 'gameStarted':
           setError(null);
-          showNotice('游戏开始！');
+          showNotice({ key: 'gameStarted' });
           setLog([]);
           logIdRef.current = 0;
           break;
@@ -149,10 +152,10 @@ export function App() {
         case 'events':
           setError(null);
           for (const e of msg.events) {
-            if (e.type === 'gameOver') showNotice('游戏结束');
-            if (e.type === 'eliminated') showNotice('有玩家被淘汰');
-            if (e.type === 'challengeResolved') showNotice(e.truth ? '质疑失败' : '质疑成功');
-            if (e.type === 'influenceLost') showNotice('有玩家失去影响力');
+            if (e.type === 'gameOver') showNotice({ key: 'gameEnded' });
+            if (e.type === 'eliminated') showNotice({ key: 'playerEliminated' });
+            if (e.type === 'challengeResolved') showNotice({ key: e.truth ? 'challengeFailed' : 'challengeSucceeded' });
+            if (e.type === 'influenceLost') showNotice({ key: 'influenceLostNotice' });
           }
           {
             const entries = msg.events.map((event) => ({ id: logIdRef.current++, event }));
@@ -480,17 +483,17 @@ function RulesPanel({ locale, onClose }: { locale: Locale; onClose: () => void }
     <div className="overlay" onClick={onClose}>
       <div className="panel rules" onClick={(e) => e.stopPropagation()}>
         <h2>{translate(locale, 'rulesTitle')}</h2>
-        {RULES.map((r) => (
+        {rulesFor(locale).map((r) => (
           <div key={r.title} className="rule">
             <b>{r.title}</b>
             <p>{r.body}</p>
           </div>
         ))}
         <h3>{translate(locale, 'rolesTitle')}</h3>
-        {Object.entries(ROLE_NAMES).map(([role, label]) => (
+        {ROLES.map((role) => (
           <div key={role} className="rule">
-            <b>{label}</b>
-            <p>{ROLE_DESC[role as Role]}</p>
+            <b>{roleName(locale, role)}</b>
+            <p>{roleDescription(locale, role)}</p>
           </div>
         ))}
         <button className="ghost" onClick={onClose}>
@@ -667,16 +670,18 @@ function RoomView(props: RoomViewProps) {
       setSelectedKeep={props.setSelectedKeep}
       onAction={props.onAction}
       onIntent={(i) => send(props.socket, i)}
+      locale={props.locale}
     />
   );
 }
 
-function CardView({ role, unavailable }: { role: Role; unavailable?: boolean }) {
-  return <div className={`card card--${role}${unavailable ? ' unavailable' : ''}`}>{ROLE_NAMES[role]}</div>;
+function CardView({ role, locale, unavailable }: { role: Role; locale: Locale; unavailable?: boolean }) {
+  const label = roleName(locale, role);
+  return <div className={`card card--${role}${unavailable ? ' unavailable' : ''}`} aria-label={translate(locale, 'cardFace', { role: label })}>{label}</div>;
 }
 
-function CardBack() {
-  return <div className="card-back" role="img" aria-label="暗牌" />;
+function CardBack({ locale }: { locale: Locale }) {
+  return <div className="card-back" role="img" aria-label={translate(locale, 'cardBack')} />;
 }
 
 function CoinIcon() {
@@ -696,7 +701,7 @@ function CrownIcon() {
   );
 }
 
-function TransientNotice({ notice }: { notice: TransientNoticeState | null }) {
+function TransientNotice({ notice, locale }: { notice: TransientNoticeState | null; locale: Locale }) {
   const [renderedNotice, setRenderedNotice] = useState(notice);
   const [exiting, setExiting] = useState(false);
 
@@ -727,7 +732,7 @@ function TransientNotice({ notice }: { notice: TransientNoticeState | null }) {
     >
       <div className="notice-region-inner">
         <div className="notice" key={visibleNotice.id} role="status" aria-live="polite" aria-atomic="true">
-          {visibleNotice.message}
+          {localizeNotice(locale, visibleNotice.descriptor)}
         </div>
       </div>
     </div>
@@ -749,6 +754,7 @@ function GameBoard(props: {
   deadlineAt: number | null;
   serverNow: number | null;
   log: LogEntry[];
+  locale: Locale;
 }) {
   const { state, me } = props;
   const myView = state.players.find((p) => p.id === me);
@@ -781,7 +787,7 @@ function GameBoard(props: {
   const amLosing = state.phase === 'choosingLoss' && state.lossPlayerId === me;
   const amExchanging = state.phase === 'choosingExchange' && pending?.actorId === me;
 
-  const narration = describePending(state);
+  const narration = describePending(state, props.locale);
   const countdown = describeCountdown(props.remainingMs, props.deadlineAt, props.serverNow);
   const effectiveRemaining = effectiveRemainingMs(props.remainingMs, props.deadlineAt, props.serverNow);
   const urgent = effectiveRemaining != null && effectiveRemaining <= 3000;
@@ -795,7 +801,7 @@ function GameBoard(props: {
   else if (amExchanging) controlMode = 'exchange';
   const controlKey = `${controlMode}:${state.currentPlayerId ?? ''}:${pending?.actorId ?? ''}:${state.lossPlayerId ?? ''}`;
 
-  const groups = groupLog(props.log, state).reverse();
+  const groups = groupLog(props.log, state, props.locale).reverse();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const toggleGroup = (id: number) => {
@@ -809,11 +815,11 @@ function GameBoard(props: {
 
   return (
     <div className="board">
-      <TransientNotice notice={props.notice} />
+      <TransientNotice notice={props.notice} locale={props.locale} />
 
       <div className="board-content">
         {state.phase === 'gameOver' && (
-          <div className="notice big"><CrownIcon /> {state.players.find((p) => p.id === state.winnerId)?.name} 获胜！</div>
+          <div className="notice big"><CrownIcon /> {translate(props.locale, 'winner', { name: nameOf(state, state.winnerId) })}</div>
         )}
 
       {narration ? (
@@ -825,7 +831,7 @@ function GameBoard(props: {
         </div>
       ) : isMyTurn && state.phase === 'choosingAction' && countdown ? (
         <div className="narration">
-          <span className="narration-text">轮到你了</span>
+          <span className="narration-text">{translate(props.locale, 'yourTurn')}</span>
           <span className={`narration-timer${urgent ? ' urgent' : ''}`}>{countdown}</span>
         </div>
       ) : null}
@@ -835,15 +841,15 @@ function GameBoard(props: {
           <div key={p.id} className={`seat ${p.id === state.currentPlayerId ? 'current' : ''} ${!p.alive ? 'dead' : ''}`}>
             <div className="name">
               {p.name}
-              {p.id === me && ' (你)'}
+              {p.id === me && translate(props.locale, 'selfMarker')}
             </div>
-            <div className="coins"><CoinIcon /> {p.coins}</div>
-            <div className="cards-row">
+            <div className="coins"><CoinIcon /> {localizeCoinCount(props.locale, p.coins)}</div>
+            <div className="cards-row" aria-label={translate(props.locale, 'influenceCount', { count: p.handCount })}>
               {p.id === me
-                ? props.hand.map((c) => <CardView key={c.id} role={c.role} />)
-                : Array.from({ length: p.handCount }, (_, i) => <CardBack key={`back-${i}`} />)}
+                ? props.hand.map((c) => <CardView key={c.id} role={c.role} locale={props.locale} />)
+                : Array.from({ length: p.handCount }, (_, i) => <CardBack key={`back-${i}`} locale={props.locale} />)}
               {p.revealed.map((role, i) => (
-                <CardView key={`rev-${i}`} role={role} unavailable />
+                <CardView key={`rev-${i}`} role={role} locale={props.locale} unavailable />
               ))}
             </div>
           </div>
@@ -858,14 +864,15 @@ function GameBoard(props: {
             onSelect={props.setSelectedAction}
             targets={aliveOthers}
             onAction={props.onAction}
+            locale={props.locale}
           />
         )}
 
         {canChallenge && (
           <div className="row">
-            <button onClick={() => props.onIntent({ type: 'challenge' })}>质疑！</button>
+            <button onClick={() => props.onIntent({ type: 'challenge' })}>{translate(props.locale, 'challenge')}</button>
             <button className="ghost" onClick={() => props.onIntent({ type: 'passChallenge' })}>
-              不质疑
+              {translate(props.locale, 'passChallenge')}
             </button>
           </div>
         )}
@@ -874,25 +881,25 @@ function GameBoard(props: {
           <div className="row">
             {canBlockRoles.map((r) => (
               <button key={r} className={`role-btn role--${r}`} onClick={() => props.onIntent({ type: 'block', role: r })}>
-                用{ROLE_NAMES[r]}阻挡
+                {translate(props.locale, 'blockWith', { role: roleName(props.locale, r) })}
               </button>
             ))}
             <button className="ghost" onClick={() => props.onIntent({ type: 'passBlock' })}>
-              不阻挡
+              {translate(props.locale, 'passBlock')}
             </button>
           </div>
         )}
 
         {amLosing && (
           <div className="row">
-            <p>请选择一张暗牌公开翻开：</p>
+            <p>{translate(props.locale, 'chooseInfluenceLoss')}</p>
             {props.hand.map((c) => (
               <button
                 key={c.id}
                 className={`role-btn role--${c.role}`}
                 onClick={() => props.onIntent({ type: 'resolveLoss', cardId: c.id })}
               >
-                翻开 {ROLE_NAMES[c.role]}
+                {translate(props.locale, 'revealRole', { role: roleName(props.locale, c.role) })}
               </button>
             ))}
           </div>
@@ -905,11 +912,12 @@ function GameBoard(props: {
             selectedKeep={props.selectedKeep}
             setSelectedKeep={props.setSelectedKeep}
             onConfirm={(ids) => props.onIntent({ type: 'resolveExchange', keepIds: ids })}
+            locale={props.locale}
           />
         )}
 
         {!isMyTurn && !canChallenge && !canBlock && !amLosing && !amExchanging && state.phase !== 'gameOver' && (
-          <div className="waiting">等待 {nameOf(state, state.currentPlayerId)} 行动…</div>
+          <div className="waiting">{translate(props.locale, 'waitingForAction', { name: nameOf(state, state.currentPlayerId) })}</div>
         )}
       </div>
 
@@ -923,6 +931,7 @@ function GameBoard(props: {
                     className="log-header"
                     onClick={g.entries.length ? () => toggleGroup(g.id) : undefined}
                     aria-expanded={g.entries.length ? expanded.has(g.id) : undefined}
+                    aria-label={g.entries.length ? translate(props.locale, expanded.has(g.id) ? 'collapseLog' : 'expandLog', { action: g.action }) : undefined}
                   >
                     {g.entries.length > 0 && (
                       <span className={`log-chevron${expanded.has(g.id) ? ' open' : ''}`}>▸</span>
@@ -954,12 +963,26 @@ function Actions(props: {
   onSelect: (a: ActionType | null) => void;
   targets: { id: string; name: string }[];
   onAction: (a: ActionType, targetId?: string) => void;
+  locale: Locale;
 }) {
   const sel = ACTIONS.find((a) => a.type === props.selectedAction);
+  const mustCoup = props.coins >= 10;
+  const label = (action: ActionType): string => {
+    const name = actionName(props.locale, action);
+    switch (action) {
+      case 'income': return `${name} +1`;
+      case 'foreignAid': return `${name} +2`;
+      case 'coup': return `${name} (${localizeCoinCount(props.locale, 7)})`;
+      case 'tax': return `${name} +3 (${roleName(props.locale, 'duke')})`;
+      case 'assassinate': return `${name} (${localizeCoinCount(props.locale, 3)})`;
+      case 'steal': return `${name} (${roleName(props.locale, 'captain')})`;
+      case 'exchange': return `${name} (${roleName(props.locale, 'ambassador')})`;
+    }
+  };
   return (
     <div className="actions">
+      {mustCoup && <p role="status">{translate(props.locale, 'mandatoryCoup')}</p>}
       {ACTIONS.map((a) => {
-        const mustCoup = props.coins >= 10;
         const disabled =
           a.type === 'coup'
             ? props.coins < 7
@@ -976,20 +999,20 @@ function Actions(props: {
               else props.onAction(a.type);
             }}
           >
-            {a.label}
+            {label(a.type)}
           </button>
         );
       })}
       {sel?.needsTarget && (
         <div className="row">
-          <span>选择目标：</span>
+          <span>{translate(props.locale, 'chooseTarget')}</span>
           {props.targets.map((t) => (
             <button key={t.id} onClick={() => props.onAction(sel.type, t.id)}>
               {t.name}
             </button>
           ))}
           <button className="ghost" onClick={() => props.onSelect(null)}>
-            取消
+            {translate(props.locale, 'cancel')}
           </button>
         </div>
       )}
@@ -1003,6 +1026,7 @@ function ExchangeControl(props: {
   selectedKeep: string[];
   setSelectedKeep: (ids: string[]) => void;
   onConfirm: (ids: string[]) => void;
+  locale: Locale;
 }) {
   const [confirming, setConfirming] = useState(false);
   const toggle = (id: string) => {
@@ -1018,7 +1042,7 @@ function ExchangeControl(props: {
   };
   return (
     <div className="row">
-      <p>交换：请选择保留的 {props.keepCount} 张牌</p>
+      <p>{translate(props.locale, 'exchangePrompt', { count: props.keepCount })}</p>
       {props.hand.map((c) => {
         const keep = props.selectedKeep.includes(c.id);
         return (
@@ -1028,7 +1052,7 @@ function ExchangeControl(props: {
             onClick={() => toggle(c.id)}
             disabled={confirming}
           >
-            {ROLE_NAMES[c.role]}
+            {roleName(props.locale, c.role)}
           </button>
         );
       })}
@@ -1036,7 +1060,7 @@ function ExchangeControl(props: {
         disabled={props.selectedKeep.length !== props.keepCount || confirming}
         onClick={() => confirm(props.selectedKeep)}
       >
-        确认保留
+        {translate(props.locale, 'confirmKeep')}
       </button>
     </div>
   );

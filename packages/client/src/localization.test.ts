@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   detectLocale,
   loadLocale,
+  localizeNotice,
+  localizeCoinCount,
   localizeServerError,
   persistLocale,
   translate,
@@ -58,5 +60,19 @@ describe('translate', () => {
 
     expect(localizeServerError('en', unknown)).toBe('Something went wrong. Please try again.');
     expect(localizeServerError('zh-CN', unknown)).toBe('出现意外错误，请重试。');
+  });
+
+  it('formats a stable transient-notice descriptor in the current locale', () => {
+    const notice = { key: 'challengeSucceeded' } as const;
+
+    expect(localizeNotice('en', notice)).toBe('Challenge succeeded');
+    expect(localizeNotice('zh-CN', notice)).toBe('质疑成功');
+    expect(notice).toEqual({ key: 'challengeSucceeded' });
+  });
+
+  it('uses grammatical singular and plural coin displays', () => {
+    expect(localizeCoinCount('en', 1)).toBe('1 coin');
+    expect(localizeCoinCount('en', 2)).toBe('2 coins');
+    expect(localizeCoinCount('zh-CN', 1)).toBe('1 金币');
   });
 });
