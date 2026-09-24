@@ -11,6 +11,10 @@ import type {
   Role,
 } from './types.ts';
 
+export class GameRuleError extends Error {
+  override name = 'GameRuleError';
+}
+
 const ROLE_ORDER: Role[] = ['duke', 'assassin', 'captain', 'ambassador', 'contessa'];
 
 const DECK: Role[] = ROLE_ORDER.flatMap((r) => [r, r, r]); // 5 角色 × 3 = 15 张
@@ -54,7 +58,7 @@ function shuffle<T>(arr: T[]): T[] {
 
 function getPlayer(state: GameState, id: string): Player {
   const p = state.players.find((x) => x.id === id);
-  if (!p) throw new Error(`player ${id} not found`);
+  if (!p) throw new GameRuleError(`player ${id} not found`);
   return p;
 }
 
@@ -209,10 +213,10 @@ export function createGame(
   options: { startingPlayerId: string; hands?: Record<string, Role[]> },
 ): GameState {
   if (players.length < 2 || players.length > 6) {
-    throw new Error('players must be 2-6');
+    throw new GameRuleError('players must be 2-6');
   }
   const startingPlayerIndex = players.findIndex((player) => player.id === options.startingPlayerId);
-  if (startingPlayerIndex < 0) throw new Error('starting player not found');
+  if (startingPlayerIndex < 0) throw new GameRuleError('starting player not found');
   let deck = DECK.map((role, i) => ({ id: `${role}-${i}`, role }));
   shuffle(deck);
 
@@ -261,21 +265,21 @@ export function chooseAction(
   action: ActionType,
   targetId?: string,
 ): GameEvent[] {
-  if (state.phase !== 'choosingAction') throw new Error('not in choosingAction phase');
-  if (actorId !== state.currentPlayerId) throw new Error('not your turn');
+  if (state.phase !== 'choosingAction') throw new GameRuleError('not in choosingAction phase');
+  if (actorId !== state.currentPlayerId) throw new GameRuleError('not your turn');
   const actor = getPlayer(state, actorId);
-  if (!actor.alive) throw new Error('actor eliminated');
+  if (!actor.alive) throw new GameRuleError('actor eliminated');
 
   if (actor.coins >= 10 && action !== 'coup') {
-    throw new Error('持有 10 枚以上金币必须发动政变');
+    throw new GameRuleError('持有 10 枚以上金币必须发动政变');
   }
 
   const needsTarget = action === 'coup' || action === 'assassinate' || action === 'steal';
-  if (needsTarget && !targetId) throw new Error(`${action} 需要目标`);
+  if (needsTarget && !targetId) throw new GameRuleError(`${action} 需要目标`);
   if (targetId) {
     const target = getPlayer(state, targetId);
-    if (!target.alive) throw new Error('target eliminated');
-    if (targetId === actorId) throw new Error('cannot target self');
+    if (!target.alive) throw new GameRuleError('target eliminated');
+    if (targetId === actorId) throw new GameRuleError('cannot target self');
   }
 
   const claimedRole = ACTION_CLAIM[action];
@@ -288,14 +292,14 @@ export function chooseAction(
   }
 
   if (action === 'coup') {
-    if (actor.coins < COUP_COST) throw new Error('金币不足发动政变');
+    if (actor.coins < COUP_COST) throw new GameRuleError('金币不足发动政变');
     events.push(...addCoins(state, actorId, -COUP_COST));
     startLoss(state, targetId!, { kind: 'endTurn' });
     return events;
   }
 
   if (action === 'assassinate') {
-    if (actor.coins < ASSASSINATE_COST) throw new Error('金币不足发动暗杀');
+    if (actor.coins < ASSASSINATE_COST) throw new GameRuleError('金币不足发动暗杀');
     events.push(...addCoins(state, actorId, -ASSASSINATE_COST));
   }
 
@@ -313,13 +317,13 @@ export function chooseAction(
 }
 
 export function challenge(state: GameState, challengerId: string): GameEvent[] {
-  if (state.phase !== 'awaitingChallenge') throw new Error('not in awaitingChallenge phase');
+  if (state.phase !== 'awaitingChallenge') throw new GameRuleError('not in awaitingChallenge phase');
   const pending = state.pending!;
   const subject = state.challengeSubject!;
   const claimantId = subject === 'action' ? pending.actorId : pending.blockById!;
   const claimedRole = subject === 'action' ? pending.claimedRole! : pending.blockRole!;
-  if (challengerId === claimantId) throw new Error('cannot challenge self');
-  if (!getPlayer(state, challengerId).alive) throw new Error('challenger eliminated');
+  if (challengerId === claimantId) throw new GameRuleError('cannot challenge self');
+  if (!getPlayer(state, challengerId).alive) throw new GameRuleError('challenger eliminated');
 
   const claimant = getPlayer(state, claimantId);
   const truth = claimant.hand.some((c) => c.role === claimedRole);
@@ -370,9 +374,9 @@ function closeChallenge(state: GameState): GameEvent[] {
 
 // 玩家放弃质疑：仅记录，所有有资格者都放弃后才关闭窗口
 export function passChallenge(state: GameState, playerId: string): GameEvent[] {
-  if (state.phase !== 'awaitingChallenge') throw new Error('not in awaitingChallenge phase');
+  if (state.phase !== 'awaitingChallenge') throw new GameRuleError('not in awaitingChallenge phase');
   const eligible = eligibleChallengers(state);
-  if (!eligible.includes(playerId)) throw new Error('无权放弃质疑');
+  if (!eligible.includes(playerId)) throw new GameRuleError('无权放弃质疑');
   if (!state.passed.includes(playerId)) state.passed.push(playerId);
   if (eligible.some((id) => !state.passed.includes(id))) return [];
   return closeChallenge(state);
@@ -380,20 +384,20 @@ export function passChallenge(state: GameState, playerId: string): GameEvent[] {
 
 // 超时：强制关闭质疑窗口
 export function resolveChallengeTimeout(state: GameState): GameEvent[] {
-  if (state.phase !== 'awaitingChallenge') throw new Error('not in awaitingChallenge phase');
+  if (state.phase !== 'awaitingChallenge') throw new GameRuleError('not in awaitingChallenge phase');
   return closeChallenge(state);
 }
 
 export function block(state: GameState, blockerId: string, role: Role): GameEvent[] {
-  if (state.phase !== 'awaitingBlock') throw new Error('not in awaitingBlock phase');
+  if (state.phase !== 'awaitingBlock') throw new GameRuleError('not in awaitingBlock phase');
   const pending = state.pending!;
-  if (!BLOCK_ROLES[pending.type].includes(role)) throw new Error(`无法用 ${role} 阻挡 ${pending.type}`);
+  if (!BLOCK_ROLES[pending.type].includes(role)) throw new GameRuleError(`无法用 ${role} 阻挡 ${pending.type}`);
 
   if (pending.type === 'foreignAid') {
-    if (blockerId === pending.actorId) throw new Error('不能阻挡自己的外援');
-    if (!getPlayer(state, blockerId).alive) throw new Error('blocker eliminated');
+    if (blockerId === pending.actorId) throw new GameRuleError('不能阻挡自己的外援');
+    if (!getPlayer(state, blockerId).alive) throw new GameRuleError('blocker eliminated');
   } else {
-    if (blockerId !== pending.targetId) throw new Error('只有目标可以阻挡');
+    if (blockerId !== pending.targetId) throw new GameRuleError('只有目标可以阻挡');
   }
 
   pending.blockById = blockerId;
@@ -406,9 +410,9 @@ export function block(state: GameState, blockerId: string, role: Role): GameEven
 
 // 玩家放弃阻挡：仅记录，所有有资格者都放弃后才结算
 export function passBlock(state: GameState, playerId: string): GameEvent[] {
-  if (state.phase !== 'awaitingBlock') throw new Error('not in awaitingBlock phase');
+  if (state.phase !== 'awaitingBlock') throw new GameRuleError('not in awaitingBlock phase');
   const eligible = eligibleBlockers(state);
-  if (!eligible.includes(playerId)) throw new Error('无权放弃阻挡');
+  if (!eligible.includes(playerId)) throw new GameRuleError('无权放弃阻挡');
   if (!state.passed.includes(playerId)) state.passed.push(playerId);
   if (eligible.some((id) => !state.passed.includes(id))) return [];
   state.passed = [];
@@ -417,17 +421,17 @@ export function passBlock(state: GameState, playerId: string): GameEvent[] {
 
 // 超时：强制结算
 export function resolveBlockTimeout(state: GameState): GameEvent[] {
-  if (state.phase !== 'awaitingBlock') throw new Error('not in awaitingBlock phase');
+  if (state.phase !== 'awaitingBlock') throw new GameRuleError('not in awaitingBlock phase');
   state.passed = [];
   return resolveEffect(state);
 }
 
 export function resolveLoss(state: GameState, playerId: string, cardId: string): GameEvent[] {
-  if (state.phase !== 'choosingLoss') throw new Error('not in choosingLoss phase');
-  if (state.lossToResolve?.playerId !== playerId) throw new Error('not your turn to lose influence');
+  if (state.phase !== 'choosingLoss') throw new GameRuleError('not in choosingLoss phase');
+  if (state.lossToResolve?.playerId !== playerId) throw new GameRuleError('not your turn to lose influence');
   const p = getPlayer(state, playerId);
   const i = p.hand.findIndex((c) => c.id === cardId);
-  if (i < 0) throw new Error('card not in hand');
+  if (i < 0) throw new GameRuleError('card not in hand');
 
   const [card] = p.hand.splice(i, 1);
   p.revealed.push(card);
@@ -446,14 +450,14 @@ export function resolveLoss(state: GameState, playerId: string, cardId: string):
 }
 
 export function resolveExchange(state: GameState, playerId: string, keepIds: string[]): GameEvent[] {
-  if (state.phase !== 'choosingExchange') throw new Error('not in choosingExchange phase');
-  if (state.pending?.actorId !== playerId) throw new Error('not your exchange');
+  if (state.phase !== 'choosingExchange') throw new GameRuleError('not in choosingExchange phase');
+  if (state.pending?.actorId !== playerId) throw new GameRuleError('not your exchange');
   const keepCount = state.exchangeKeepCount!;
-  if (keepIds.length !== keepCount) throw new Error(`需要保留 ${keepCount} 张牌`);
+  if (keepIds.length !== keepCount) throw new GameRuleError(`需要保留 ${keepCount} 张牌`);
   const p = getPlayer(state, playerId);
   const keepSet = new Set(keepIds);
-  if (keepSet.size !== keepIds.length) throw new Error('重复的牌');
-  if (keepIds.some((id) => !p.hand.some((c) => c.id === id))) throw new Error('keep 了不存在的牌');
+  if (keepSet.size !== keepIds.length) throw new GameRuleError('重复的牌');
+  if (keepIds.some((id) => !p.hand.some((c) => c.id === id))) throw new GameRuleError('keep 了不存在的牌');
 
   const keep = keepIds.map((id) => p.hand.find((c) => c.id === id)!);
   const rest = p.hand.filter((c) => !keepSet.has(c.id));

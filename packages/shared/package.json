@@ -7,7 +7,13 @@
     ".": "./src/index.ts"
   },
   "types": "./src/index.ts",
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@coup/engine": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.5"
   }
 }

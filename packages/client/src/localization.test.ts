@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { detectLocale, loadLocale, persistLocale, translate, type LocaleStorage } from './localization.ts';
+import {
+  detectLocale,
+  loadLocale,
+  localizeServerError,
+  persistLocale,
+  translate,
+  type LocaleStorage,
+} from './localization.ts';
 
 function memoryStorage(initial: Record<string, string> = {}): LocaleStorage {
   const values = new Map(Object.entries(initial));
@@ -37,5 +44,19 @@ describe('translate', () => {
   it('interpolates typed values into localized copy', () => {
     expect(translate('en', 'playersCount', { count: 3 })).toBe('Players (3)');
     expect(translate('zh-CN', 'playersCount', { count: 3 })).toBe('玩家（3）');
+  });
+
+  it('localizes parameterized server errors in the current locale', () => {
+    const error = { code: 'roomFull', params: { maximum: 6 } } as const;
+
+    expect(localizeServerError('en', error)).toBe('This room is full (maximum 6 players).');
+    expect(localizeServerError('zh-CN', error)).toBe('房间已满（最多 6 名玩家）。');
+  });
+
+  it('uses a generic localized message for unknown server error input', () => {
+    const unknown = { code: 'futureError', message: 'database password leaked' };
+
+    expect(localizeServerError('en', unknown)).toBe('Something went wrong. Please try again.');
+    expect(localizeServerError('zh-CN', unknown)).toBe('出现意外错误，请重试。');
   });
 });

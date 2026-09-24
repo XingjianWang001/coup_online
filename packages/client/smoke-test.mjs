@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 const URL = 'http://localhost:8787';
 const clients = [io(URL), io(URL), io(URL)];
 
-clients.forEach((c, i) => c.on('error', (m) => console.error(`client${i} error:`, m.message)));
+clients.forEach((c, i) => c.on('error', (error) => console.error(`client${i} error:`, error.code, error.params ?? '')));
 
 const on = (client, event) =>
   new Promise((resolve, reject) => {

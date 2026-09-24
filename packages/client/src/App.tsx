@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ActionType, Card, LobbyPlayer, PublicState, Role } from '@coup/shared';
+import { parseServerError } from '@coup/shared';
+import type { ActionType, Card, LobbyPlayer, PublicState, Role, ServerError } from '@coup/shared';
 import {
   clearIdentity,
   clearRoomCode,
@@ -19,6 +20,7 @@ import { copyToClipboard } from './clipboard.ts';
 import {
   LANGUAGE_OPTIONS,
   loadLocale,
+  localizeServerError,
   persistLocale,
   translate,
   type Locale,
@@ -81,7 +83,7 @@ export function App() {
   const [players, setPlayers] = useState<LobbyPlayer[]>([]);
   const [publicState, setPublicState] = useState<PublicState | null>(null);
   const [hand, setHand] = useState<Card[]>([]);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<ServerError | null>(null);
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
   const [tunnelLoading, setTunnelLoading] = useState(false);
   const [notice, setNotice] = useState<TransientNoticeState | null>(null);
@@ -113,6 +115,7 @@ export function App() {
     const off = onMessage(socket, (msg: ServerMessage) => {
       switch (msg.type) {
         case 'joined':
+          setError(null);
           setJoined(msg.roomCode);
           setHostId(msg.hostId);
           setPlayers(msg.players);
@@ -127,6 +130,7 @@ export function App() {
           setPlayers(msg.players);
           break;
         case 'gameStarted':
+          setError(null);
           showNotice('游戏开始！');
           setLog([]);
           logIdRef.current = 0;
@@ -143,6 +147,7 @@ export function App() {
           setHand(msg.hand);
           break;
         case 'events':
+          setError(null);
           for (const e of msg.events) {
             if (e.type === 'gameOver') showNotice('游戏结束');
             if (e.type === 'eliminated') showNotice('有玩家被淘汰');
@@ -155,14 +160,16 @@ export function App() {
           }
           break;
         case 'error':
-          setError(msg.message);
+          setError(parseServerError(msg));
           setTunnelLoading(false);
           break;
         case 'tunnelUrl':
+          setError(null);
           setTunnelUrl(msg.url);
           setTunnelLoading(false);
           break;
         case 'left':
+          setError(null);
           setLeftReason(msg.reason);
           setJoined(null);
           clearRoomCode();
@@ -255,12 +262,12 @@ export function App() {
   const me = identity?.playerId;
 
   function createRoom() {
-    setError('');
+    setError(null);
     send(socket, { type: 'createRoom', name, playerId: identity?.playerId, secret: identity?.secret });
   }
 
   function joinRoom() {
-    setError('');
+    setError(null);
     send(socket, {
       type: 'joinRoom',
       roomCode: roomCode.trim(),
@@ -276,7 +283,7 @@ export function App() {
 
   function startTunnel() {
     setTunnelLoading(true);
-    setError('');
+    setError(null);
     send(socket, { type: 'startTunnel' });
   }
 
@@ -346,6 +353,8 @@ export function App() {
         </div>
       )}
 
+      {error && <div className="error">{localizeServerError(locale, error)}</div>}
+
       {!joined ? (
         <Lobby
           name={name}
@@ -354,7 +363,6 @@ export function App() {
           setRoomCode={setRoomCode}
           onCreate={createRoom}
           onJoin={joinRoom}
-          error={error}
           locale={locale}
         />
       ) : (
@@ -500,7 +508,6 @@ function Lobby(props: {
   setRoomCode: (v: string) => void;
   onCreate: () => void;
   onJoin: () => void;
-  error: string;
   locale: Locale;
 }) {
   return (
@@ -529,7 +536,6 @@ function Lobby(props: {
       <button className="ghost" onClick={props.onJoin} disabled={!props.name.trim() || props.roomCode.trim().length < 3}>
         {translate(props.locale, 'joinRoom')}
       </button>
-      {props.error && <div className="error">{props.error}</div>}
     </div>
   );
 }

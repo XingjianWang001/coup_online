@@ -1,3 +1,5 @@
+import { parseServerError } from '@coup/shared';
+
 export const LOCALES = ['zh-CN', 'en'] as const;
 
 export type Locale = (typeof LOCALES)[number];
@@ -48,6 +50,17 @@ const english = {
   startGame: 'Start game',
   startGameRequirement: 'Requires at least 2 players',
   leftRoomReason: 'You left: {reason}',
+  errorRoomNotFound: 'Room not found.',
+  errorGameAlreadyStarted: 'The game has already started.',
+  errorHostOnly: 'Only the host can start the game.',
+  errorMinimumPlayers: 'At least {minimum} players are required to start.',
+  errorTunnelUnauthorized: 'Only the host device can start the tunnel.',
+  errorTunnelStartup: 'The tunnel could not be started. Check the host connection and try again.',
+  errorIllegalIntent: 'That request is not supported.',
+  errorInvalidGameAction: 'That action is not allowed right now.',
+  errorGameNotStarted: 'The game has not started yet.',
+  errorRoomFull: 'This room is full (maximum {maximum} players).',
+  errorUnexpected: 'Something went wrong. Please try again.',
 } as const;
 
 type MessageKey = keyof typeof english;
@@ -86,6 +99,17 @@ const simplifiedChinese = {
   startGame: '开始游戏',
   startGameRequirement: '需 ≥2 人',
   leftRoomReason: '你已离开：{reason}',
+  errorRoomNotFound: '房间不存在。',
+  errorGameAlreadyStarted: '牌局已经开始。',
+  errorHostOnly: '只有房主可以开始牌局。',
+  errorMinimumPlayers: '至少需要 {minimum} 名玩家才能开始。',
+  errorTunnelUnauthorized: '只有主机设备可以启动隧道。',
+  errorTunnelStartup: '隧道启动失败，请检查主机网络后重试。',
+  errorIllegalIntent: '不支持此请求。',
+  errorInvalidGameAction: '当前不能执行此行动。',
+  errorGameNotStarted: '牌局尚未开始。',
+  errorRoomFull: '房间已满（最多 {maximum} 名玩家）。',
+  errorUnexpected: '出现意外错误，请重试。',
 } as const satisfies Record<MessageKey, string>;
 
 const dictionaries: Record<Locale, Record<MessageKey, string>> = {
@@ -96,6 +120,8 @@ const dictionaries: Record<Locale, Record<MessageKey, string>> = {
 interface MessageValues {
   playersCount: { count: number };
   leftRoomReason: { reason: string };
+  errorMinimumPlayers: { minimum: number };
+  errorRoomFull: { maximum: number };
 }
 
 type MessageArguments<Key extends MessageKey> = Key extends keyof MessageValues
@@ -145,4 +171,21 @@ export function translate<Key extends MessageKey>(
     const value = values?.[name];
     return value === undefined ? placeholder : String(value);
   });
+}
+
+export function localizeServerError(locale: Locale, value: unknown): string {
+  const error = parseServerError(value);
+  switch (error.code) {
+    case 'roomNotFound': return translate(locale, 'errorRoomNotFound');
+    case 'gameAlreadyStarted': return translate(locale, 'errorGameAlreadyStarted');
+    case 'hostOnly': return translate(locale, 'errorHostOnly');
+    case 'minimumPlayers': return translate(locale, 'errorMinimumPlayers', error.params);
+    case 'tunnelUnauthorized': return translate(locale, 'errorTunnelUnauthorized');
+    case 'tunnelStartup': return translate(locale, 'errorTunnelStartup');
+    case 'illegalIntent': return translate(locale, 'errorIllegalIntent');
+    case 'invalidGameAction': return translate(locale, 'errorInvalidGameAction');
+    case 'gameNotStarted': return translate(locale, 'errorGameNotStarted');
+    case 'roomFull': return translate(locale, 'errorRoomFull', error.params);
+    case 'unexpected': return translate(locale, 'errorUnexpected');
+  }
 }

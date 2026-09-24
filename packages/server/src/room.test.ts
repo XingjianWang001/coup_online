@@ -37,10 +37,37 @@ describe('Room 断连清理', () => {
 });
 
 describe('Room 加入守卫', () => {
+  it('六名玩家后拒绝第七名新玩家', () => {
+    const { room } = makeRoom();
+    for (let index = 1; index <= 6; index += 1) {
+      room.addPlayer(`Player ${index}`, `sock${index}`);
+    }
+
+    expect(() => room.addPlayer('Player 7', 'sock7')).toThrow('roomFull');
+    expect(room.players.size).toBe(6);
+  });
+
+  it('满房时持有效凭证的玩家仍可重连到原座位', () => {
+    const { room } = makeRoom();
+    const returning = room.addPlayer('Alice', 'sock1');
+    for (let index = 2; index <= 6; index += 1) {
+      room.addPlayer(`Player ${index}`, `sock${index}`);
+    }
+
+    const reconnected = room.addPlayer('Alice', 'replacement-socket', {
+      id: returning.id,
+      secret: returning.secret,
+    });
+
+    expect(reconnected).toBe(returning);
+    expect(reconnected.socketId).toBe('replacement-socket');
+    expect(room.players.size).toBe(6);
+  });
+
   it('开局后新玩家加入被拒绝（保证 room.players ⊆ game.players）', () => {
     const { room } = makeRoom();
     room.game = { phase: 'choosingAction', players: [] } as unknown as GameState;
-    expect(() => room.addPlayer('Bob', 'sock2')).toThrow('游戏已开始，无法加入');
+    expect(() => room.addPlayer('Bob', 'sock2')).toThrow('gameAlreadyStarted');
   });
 
   it('开局后带正确 id+secret 的重连仍复用座位', () => {
@@ -140,5 +167,35 @@ describe('Room 开局', () => {
       expect.objectContaining({ id: bob.id, coins: 1, handCount: 2 }),
     ]));
     expect(room.getPublicState()?.players.every((player) => !('hand' in player))).toBe(true);
+  });
+});
+
+describe('Room 意图错误', () => {
+  it('把引擎规则校验映射为稳定的客户端错误', () => {
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.startGame();
+
+    expect(() => room.dispatch(bob.id, { type: 'chooseAction', action: 'income' }))
+      .toThrow('invalidGameAction');
+  });
+
+  it('即使牌局尚未开始也把未知意图映射为稳定的客户端错误', () => {
+    const { room } = makeRoom();
+    const alice = room.addPlayer('Alice', 'sock1');
+
+    expect(() => room.dispatch(alice.id, { type: 'futureIntent' })).toThrow('illegalIntent');
+  });
+
+  it('不把意外基础设施异常误报为规则校验错误', () => {
+    const { room, repo } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addPlayer('Bob', 'sock2');
+    room.startGame();
+    const failure = new Error('storage failed');
+    vi.mocked(repo.save).mockImplementationOnce(() => { throw failure; });
+
+    expect(() => room.dispatch(alice.id, { type: 'chooseAction', action: 'income' })).toThrow(failure);
   });
 });
