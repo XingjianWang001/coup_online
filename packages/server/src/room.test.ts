@@ -1,20 +1,20 @@
 // packages/server/src/room.test.ts
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Room } from './room.ts';
+import { Room, type RoomOptions } from './room.ts';
 import type { GameState } from '@coup/engine';
 import type { GameRepository } from './repository.ts';
+
+function makeRoom(options?: RoomOptions) {
+  const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
+  const events = { onBroadcast: vi.fn(), onEmpty: vi.fn() };
+  const room = new Room('ABC123', '', repo, events, options);
+  return { room, repo, events };
+}
 
 describe('Room 断连清理', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
-
-  function makeRoom() {
-    const repo = { save: () => {}, delete: vi.fn() } as unknown as GameRepository;
-    const events = { onBroadcast: () => {}, onEmpty: vi.fn() };
-    const room = new Room('ABC123', '', repo, events);
-    return { room, repo, events };
-  }
 
   it('游戏结束后（gameOver）断连的玩家在宽限期后被移除，空房随后回收', () => {
     vi.useFakeTimers();
@@ -37,13 +37,6 @@ describe('Room 断连清理', () => {
 });
 
 describe('Room 加入守卫', () => {
-  function makeRoom() {
-    const repo = { save: () => {}, delete: vi.fn() } as unknown as GameRepository;
-    const events = { onBroadcast: () => {}, onEmpty: vi.fn() };
-    const room = new Room('ABC123', '', repo, events);
-    return { room };
-  }
-
   it('开局后新玩家加入被拒绝（保证 room.players ⊆ game.players）', () => {
     const { room } = makeRoom();
     room.game = { phase: 'choosingAction', players: [] } as unknown as GameState;
@@ -70,9 +63,10 @@ describe('Room 计时结束', () => {
 
   it('行动超时后把默认收入的事件和下一回合状态推送给所有玩家', () => {
     vi.useFakeTimers();
-    const onBroadcast = vi.fn();
-    const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
-    const room = new Room('ABC123', '', repo, { onBroadcast, onEmpty: vi.fn() });
+    const {
+      room,
+      events: { onBroadcast },
+    } = makeRoom({ startingPlayerRandom: () => 0 });
     const alice = room.addPlayer('Alice', 'sock1');
     const bob = room.addPlayer('Bob', 'sock2');
     room.startGame();
@@ -80,7 +74,7 @@ describe('Room 计时结束', () => {
 
     vi.advanceTimersByTime(60_000);
 
-    expect(room.game?.players.find((p) => p.id === alice.id)?.coins).toBe(3);
+    expect(room.game?.players.find((p) => p.id === alice.id)?.coins).toBe(2);
     expect(room.game?.currentPlayerId).toBe(bob.id);
     expect(onBroadcast).toHaveBeenCalledWith(room, expect.arrayContaining([
       expect.objectContaining({ type: 'actionChosen', actorId: alice.id, action: 'income' }),
@@ -91,13 +85,14 @@ describe('Room 计时结束', () => {
 
   it('金币达到 10 时自动政变并广播目标选择失去影响力的阶段', () => {
     vi.useFakeTimers();
-    const onBroadcast = vi.fn();
-    const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
-    const room = new Room('ABC123', '', repo, { onBroadcast, onEmpty: vi.fn() });
+    const {
+      room,
+      events: { onBroadcast },
+    } = makeRoom({ startingPlayerRandom: () => 0 });
     const alice = room.addPlayer('Alice', 'sock1');
     const bob = room.addPlayer('Bob', 'sock2');
     room.startGame();
-    room.game!.players[0].coins = 10;
+    room.game!.players.find((player) => player.id === alice.id)!.coins = 10;
 
     vi.advanceTimersByTime(60_000);
 
@@ -111,9 +106,10 @@ describe('Room 计时结束', () => {
 
   it('阻挡窗口超时后广播结算事件和下一回合状态', () => {
     vi.useFakeTimers();
-    const onBroadcast = vi.fn();
-    const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
-    const room = new Room('ABC123', '', repo, { onBroadcast, onEmpty: vi.fn() });
+    const {
+      room,
+      events: { onBroadcast },
+    } = makeRoom({ startingPlayerRandom: () => 0 });
     const alice = room.addPlayer('Alice', 'sock1');
     const bob = room.addPlayer('Bob', 'sock2');
     room.startGame();
@@ -121,11 +117,28 @@ describe('Room 计时结束', () => {
 
     vi.advanceTimersByTime(20_000);
 
-    expect(room.game?.players.find((p) => p.id === alice.id)?.coins).toBe(4);
+    expect(room.game?.players.find((p) => p.id === alice.id)?.coins).toBe(3);
     expect(room.game?.currentPlayerId).toBe(bob.id);
     expect(onBroadcast).toHaveBeenCalledWith(room, expect.arrayContaining([
-      expect.objectContaining({ type: 'coinsChanged', playerId: alice.id, coins: 4 }),
+      expect.objectContaining({ type: 'coinsChanged', playerId: alice.id, coins: 3 }),
       expect.objectContaining({ type: 'turnChanged', playerId: bob.id }),
     ]));
+  });
+});
+
+describe('Room 开局', () => {
+  it('使用服务器注入的随机源选择当前玩家并应用两人局金币规则', () => {
+    const { room } = makeRoom({ startingPlayerRandom: () => 0.75 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+
+    room.startGame();
+
+    expect(room.getPublicState()?.currentPlayerId).toBe(bob.id);
+    expect(room.getPublicState()?.players).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: alice.id, coins: 2, handCount: 2 }),
+      expect.objectContaining({ id: bob.id, coins: 1, handCount: 2 }),
+    ]));
+    expect(room.getPublicState()?.players.every((player) => !('hand' in player))).toBe(true);
   });
 });

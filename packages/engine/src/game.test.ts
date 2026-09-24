@@ -19,7 +19,7 @@ const P = (id: string, name = id) => ({ id, name });
 
 function setup(hands: Record<string, Role[]>) {
   const players = Object.keys(hands).map((id) => P(id));
-  return createGame(players, { hands });
+  return createGame(players, { hands, startingPlayerId: players[0].id });
 }
 
 function coins(state: GameState, id: string): number {
@@ -28,7 +28,7 @@ function coins(state: GameState, id: string): number {
 
 describe('createGame', () => {
   it('发 2 张暗牌、2 金币、牌堆 15-2n 张', () => {
-    const s = createGame([P('a'), P('b'), P('c')]);
+    const s = createGame([P('a'), P('b'), P('c')], { startingPlayerId: 'a' });
     expect(s.players).toHaveLength(3);
     for (const p of s.players) {
       expect(p.hand).toHaveLength(2);
@@ -40,13 +40,35 @@ describe('createGame', () => {
   });
 
   it('拒绝少于 2 人或超过 6 人', () => {
-    expect(() => createGame([P('a')])).toThrow();
-    expect(() => createGame([P('a'), P('b'), P('c'), P('d'), P('e'), P('f'), P('g')])).toThrow();
+    expect(() => createGame([P('a')], { startingPlayerId: 'a' })).toThrow();
+    expect(() =>
+      createGame([P('a'), P('b'), P('c'), P('d'), P('e'), P('f'), P('g')], {
+        startingPlayerId: 'a',
+      }),
+    ).toThrow();
   });
 
   it('允许 2 人开局', () => {
-    const s = createGame([P('a'), P('b')]);
+    const s = createGame([P('a'), P('b')], { startingPlayerId: 'a' });
     expect(s.players).toHaveLength(2);
+  });
+
+  it('使用服务器指定的起始玩家', () => {
+    const s = createGame([P('a'), P('b'), P('c')], { startingPlayerId: 'b' });
+    expect(s.currentPlayerId).toBe('b');
+  });
+
+  it('两人局中起始玩家有 1 枚金币，另一位有 2 枚', () => {
+    const s = createGame([P('a'), P('b')], { startingPlayerId: 'b' });
+    expect(s.currentPlayerId).toBe('b');
+    expect(coins(s, 'a')).toBe(2);
+    expect(coins(s, 'b')).toBe(1);
+  });
+
+  it.each([3, 4, 5, 6])('%i 人局中所有玩家均有 2 枚金币', (playerCount) => {
+    const players = Array.from({ length: playerCount }, (_, i) => P(String(i)));
+    const s = createGame(players, { startingPlayerId: players.at(-1)!.id });
+    expect(s.players.every((player) => player.coins === 2)).toBe(true);
   });
 });
 
@@ -139,6 +161,28 @@ describe('声称行动与质疑', () => {
     expect(s.lossToResolve?.playerId).toBe('a');
   });
 
+  it('付费角色行动被成功质疑时退还全部费用', () => {
+    const s = setup({
+      a: ['captain', 'captain'],
+      b: ['ambassador', 'ambassador'],
+      c: ['contessa', 'contessa'],
+    });
+    s.players.find((p) => p.id === 'a')!.coins = 5;
+
+    chooseAction(s, 'a', 'assassinate', 'b');
+    expect(coins(s, 'a')).toBe(2);
+
+    const events = challenge(s, 'b');
+    expect(coins(s, 'a')).toBe(5);
+    expect(events).toContainEqual({ type: 'coinsChanged', playerId: 'a', coins: 5 });
+    expect(s.lossToResolve).toMatchObject({ playerId: 'a', continuation: { kind: 'cancelAction' } });
+
+    const card = s.players.find((p) => p.id === 'a')!.hand[0];
+    resolveLoss(s, 'a', card.id);
+    expect(s.currentPlayerId).toBe('b');
+    expect(s.players.find((p) => p.id === 'b')!.hand).toHaveLength(2);
+  });
+
   it('无人质疑则行动结算', () => {
     const s = setup({
       a: ['duke', 'captain'],
@@ -210,6 +254,41 @@ describe('暗杀与偷窃', () => {
     expect(s.phase).toBe('choosingLoss');
     expect(s.lossToResolve?.playerId).toBe('b');
     expect(coins(s, 'a')).toBe(2);
+  });
+
+  it('暗杀被无人质疑的女伯爵阻挡时不退费', () => {
+    const s = setup({
+      a: ['assassin', 'captain'],
+      b: ['contessa', 'ambassador'],
+      c: ['duke', 'duke'],
+    });
+    s.players.find((p) => p.id === 'a')!.coins = 5;
+
+    chooseAction(s, 'a', 'assassinate', 'b');
+    resolveChallengeTimeout(s);
+    block(s, 'b', 'contessa');
+    resolveChallengeTimeout(s);
+
+    expect(coins(s, 'a')).toBe(2);
+    expect(s.currentPlayerId).toBe('b');
+    expect(s.players.find((p) => p.id === 'b')!.hand).toHaveLength(2);
+  });
+
+  it('暗杀被真实的女伯爵声明阻挡时不退费', () => {
+    const s = setup({
+      a: ['assassin', 'captain'],
+      b: ['contessa', 'ambassador'],
+      c: ['duke', 'duke'],
+    });
+    s.players.find((p) => p.id === 'a')!.coins = 5;
+
+    chooseAction(s, 'a', 'assassinate', 'b');
+    resolveChallengeTimeout(s);
+    block(s, 'b', 'contessa');
+    challenge(s, 'a');
+
+    expect(coins(s, 'a')).toBe(2);
+    expect(s.lossToResolve).toMatchObject({ playerId: 'a', continuation: { kind: 'cancelAction' } });
   });
 
   it('偷窃转移 2 金币', () => {

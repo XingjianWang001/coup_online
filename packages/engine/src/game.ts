@@ -206,24 +206,26 @@ function resolveEffect(state: GameState): GameEvent[] {
 
 export function createGame(
   players: { id: string; name: string }[],
-  options?: { hands?: Record<string, Role[]> },
+  options: { startingPlayerId: string; hands?: Record<string, Role[]> },
 ): GameState {
   if (players.length < 2 || players.length > 6) {
     throw new Error('players must be 2-6');
   }
+  const startingPlayerIndex = players.findIndex((player) => player.id === options.startingPlayerId);
+  if (startingPlayerIndex < 0) throw new Error('starting player not found');
   let deck = DECK.map((role, i) => ({ id: `${role}-${i}`, role }));
   shuffle(deck);
 
-  const playerStates: Player[] = players.map((p) => ({
+  const playerStates: Player[] = players.map((p, index) => ({
     id: p.id,
     name: p.name,
-    coins: START_COINS,
+    coins: players.length === 2 && index === startingPlayerIndex ? 1 : START_COINS,
     hand: [],
     revealed: [],
     alive: true,
   }));
 
-  if (options?.hands) {
+  if (options.hands) {
     for (const ps of playerStates) {
       const roles = options.hands[ps.id] ?? [];
       for (const r of roles) {
@@ -243,7 +245,7 @@ export function createGame(
     players: playerStates,
     deck,
     turnOrder: players.map((p) => p.id),
-    currentPlayerId: players[0].id,
+    currentPlayerId: players[startingPlayerIndex].id,
     pending: null,
     challengeSubject: null,
     lossToResolve: null,
@@ -333,6 +335,9 @@ export function challenge(state: GameState, challengerId: string): GameEvent[] {
   } else {
     startLoss(state, claimantId, subject === 'action' ? { kind: 'cancelAction' } : { kind: 'resolveEffect' });
     events.push({ type: 'challengeResolved', truth, loserId: claimantId, claimantId });
+    if (subject === 'action' && pending.type === 'assassinate') {
+      events.push(...addCoins(state, pending.actorId, ASSASSINATE_COST));
+    }
   }
   return events;
 }

@@ -43,6 +43,10 @@ export interface RoomEvents {
   onEmpty(room: Room): void;
 }
 
+export interface RoomOptions {
+  startingPlayerRandom?: () => number;
+}
+
 export class Room {
   code: string;
   hostId: string;
@@ -53,7 +57,13 @@ export class Room {
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(code: string, hostId: string, private repo: GameRepository, private events: RoomEvents) {
+  constructor(
+    code: string,
+    hostId: string,
+    private repo: GameRepository,
+    private events: RoomEvents,
+    private options: RoomOptions = {},
+  ) {
     this.code = code;
     this.hostId = hostId;
   }
@@ -123,7 +133,14 @@ export class Room {
   startGame(): GameEvent[] {
     if (this.players.size < 2) throw new Error('至少 2 人才能开局');
     const entries = [...this.players.values()];
-    this.game = createGame(entries.map((p) => ({ id: p.id, name: p.name })));
+    const random = (this.options.startingPlayerRandom ?? Math.random)();
+    if (!Number.isFinite(random) || random < 0 || random >= 1) {
+      throw new Error('starting player random value must be between 0 and 1');
+    }
+    const startingPlayerId = entries[Math.floor(random * entries.length)].id;
+    this.game = createGame(entries.map((p) => ({ id: p.id, name: p.name })), {
+      startingPlayerId,
+    });
     this.repo.save(this.code, this.game);
     this.startTimer(ACTION_TIMEOUT_MS);
     return [{ type: 'started', turnOrder: entries.map((p) => p.id) }];
