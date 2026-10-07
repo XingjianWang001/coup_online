@@ -51,6 +51,10 @@ pnpm dev:server
 cloudflared tunnel --url http://localhost:8787
 ```
 
+### 云服务器部署
+
+仓库提供 Docker Compose 配置。默认只在服务器的 `127.0.0.1:8787` 监听，可通过 SSH 端口转发私有验证；取得域名并完成公开发布所需手续后，才启用 Caddy 的 `public` 配置。操作步骤见 [`docs/deployment.md`](docs/deployment.md)。房间和对局只保存在内存中，服务器或容器重启后会消失。
+
 ### 开发
 
 ```bash
@@ -115,6 +119,10 @@ You can also start the tunnel manually:
 ```bash
 cloudflared tunnel --url http://localhost:8787
 ```
+
+### Cloud deployment
+
+The Docker Compose configuration initially binds the app to `127.0.0.1:8787` on the server for private verification over SSH forwarding. Enable the Caddy `public` profile only after a domain and public-release requirements are ready. See [`docs/deployment.md`](docs/deployment.md). Rooms and games are kept in memory and disappear on server or container restart.
 
 ### Development
 

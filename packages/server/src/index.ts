@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, existsSync, statSync } from 'node:fs';
-import { join, extname, normalize } from 'node:path';
+import { join, extname, normalize, relative, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server, type Socket } from 'socket.io';
 import { InMemoryGameRepository } from './repository.ts';
@@ -10,6 +10,7 @@ import { getTunnelUrl, startTunnel, stopTunnel } from './tunnel.ts';
 import { forfeit } from '@coup/engine';
 import type { ClientIntent } from '@coup/shared';
 import { ClientError, toServerError } from './errors.ts';
+import { reserveRoomCreation } from './room-limits.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -18,6 +19,14 @@ const CLIENT_DIST = join(__dirname, '../../client/dist');
 
 const repo = new InMemoryGameRepository();
 const rooms = new Map<string, Room>();
+
+function clientAddress(socket: Socket): string {
+  if (process.env.TRUST_PROXY === '1') {
+    const forwarded = socket.handshake.headers['x-forwarded-for'];
+    if (typeof forwarded === 'string' && forwarded.trim()) return forwarded.split(',')[0].trim();
+  }
+  return socket.handshake.address;
+}
 
 function genCode(): string {
   let code: string;
@@ -34,12 +43,25 @@ function isLoopback(address: string | undefined): boolean {
 
 const httpServer = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
-  let path = decodeURIComponent(url.pathname);
+  if (url.pathname === '/healthz') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('ok');
+    return;
+  }
+  let path: string;
+  try {
+    path = decodeURIComponent(url.pathname);
+  } catch {
+    res.writeHead(400);
+    res.end('bad request');
+    return;
+  }
   if (path === '/') path = '/index.html';
   path = normalize(path);
 
   const filePath = join(CLIENT_DIST, path);
-  if (!filePath.startsWith(CLIENT_DIST) || !existsSync(filePath) || !statSync(filePath).isFile()) {
+  const relativePath = relative(CLIENT_DIST, filePath);
+  if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath) || !existsSync(filePath) || !statSync(filePath).isFile()) {
     res.writeHead(404);
     res.end('not found');
     return;
@@ -106,8 +128,12 @@ io.on('connection', (socket) => {
 });
 
 function handleIntent(socket: Socket, raw: ClientIntent): void {
+  if (!raw || typeof raw !== 'object' || typeof raw.type !== 'string') {
+    throw new ClientError({ code: 'illegalIntent' });
+  }
   switch (raw.type) {
     case 'createRoom': {
+      if (socket.data.roomCode) throw new ClientError({ code: 'illegalIntent' });
       const code = genCode();
       const room = new Room(code, '', repo, {
         onBroadcast: (room, events) => {
@@ -117,6 +143,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         onEmpty: (r) => rooms.delete(r.code),
       });
       const p = room.addPlayer(raw.name, socket.id);
+      reserveRoomCreation(clientAddress(socket), rooms.size);
       room.hostId = p.id;
       rooms.set(code, room);
       socket.join(code);
@@ -129,11 +156,13 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         players: room.playerList,
         hostId: room.hostId,
         tunnelUrl: getTunnelUrl() ?? undefined,
+        canStartTunnel: isLoopback(socket.handshake.address),
       });
       broadcastLobby(room);
       break;
     }
     case 'joinRoom': {
+      if (socket.data.roomCode) throw new ClientError({ code: 'illegalIntent' });
       if (typeof raw.roomCode !== 'string' || !/^[0-9a-f]{6}$/i.test(raw.roomCode)) {
         throw new ClientError({ code: 'roomNotFound' });
       }
@@ -151,6 +180,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         players: room.playerList,
         hostId: room.hostId,
         tunnelUrl: getTunnelUrl() ?? undefined,
+        canStartTunnel: isLoopback(socket.handshake.address),
       });
       if (room.game) broadcast(room);
       else broadcastLobby(room);
@@ -190,6 +220,8 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         }
         socket.leave(room.code);
       }
+      socket.data.roomCode = undefined;
+      socket.data.playerId = undefined;
       socket.emit('left', { reason: 'left' });
       break;
     }

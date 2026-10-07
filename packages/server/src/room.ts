@@ -24,6 +24,7 @@ const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
 const DISCONNECT_GRACE_MS = 90_000;
 const MAX_PLAYERS = 6;
+const MAX_NAME_LENGTH = 32;
 
 function genId(): string {
   return randomBytes(8).toString('hex');
@@ -82,6 +83,10 @@ export class Room {
 
   // 加入或重连。reconnect 提供 id + secret，匹配才复用座位，否则视为新玩家（防劫持）。
   addPlayer(name: string, socketId: string, reconnect?: { id: string; secret: string }): RoomPlayer {
+    if (typeof name !== 'string' || !name.trim() || name.length > MAX_NAME_LENGTH || /[\u0000-\u001f\u007f]/.test(name)) {
+      throw new ClientError({ code: 'invalidName' });
+    }
+    name = name.trim();
     if (reconnect) {
       const existing = this.players.get(reconnect.id);
       if (existing && existing.secret === reconnect.secret) {
