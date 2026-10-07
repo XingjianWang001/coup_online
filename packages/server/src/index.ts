@@ -134,6 +134,9 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       break;
     }
     case 'joinRoom': {
+      if (typeof raw.roomCode !== 'string' || !/^[0-9a-f]{6}$/i.test(raw.roomCode)) {
+        throw new ClientError({ code: 'roomNotFound' });
+      }
       const room = rooms.get(raw.roomCode.toUpperCase());
       if (!room) throw new ClientError({ code: 'roomNotFound' });
       const reconnect = raw.playerId && raw.secret ? { id: raw.playerId, secret: raw.secret } : undefined;
