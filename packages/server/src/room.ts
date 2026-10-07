@@ -1,6 +1,7 @@
 import type { GameState, GameEvent, Role, ActionType } from '@coup/engine';
 import { randomBytes } from 'node:crypto';
 import {
+  GameRuleError,
   block,
   challenge,
   chooseAction,
@@ -17,10 +18,12 @@ import {
 } from '@coup/engine';
 import type { GameRepository } from './repository.ts';
 import type { LobbyPlayer } from '@coup/shared';
+import { ClientError } from './errors.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
 const DISCONNECT_GRACE_MS = 90_000;
+const MAX_PLAYERS = 6;
 
 function genId(): string {
   return randomBytes(8).toString('hex');
@@ -43,6 +46,10 @@ export interface RoomEvents {
   onEmpty(room: Room): void;
 }
 
+export interface RoomOptions {
+  startingPlayerRandom?: () => number;
+}
+
 export class Room {
   code: string;
   hostId: string;
@@ -53,7 +60,13 @@ export class Room {
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
-  constructor(code: string, hostId: string, private repo: GameRepository, private events: RoomEvents) {
+  constructor(
+    code: string,
+    hostId: string,
+    private repo: GameRepository,
+    private events: RoomEvents,
+    private options: RoomOptions = {},
+  ) {
     this.code = code;
     this.hostId = hostId;
   }
@@ -80,7 +93,10 @@ export class Room {
       }
     }
     // 新玩家：服务器生成全新 id 与 secret。开局后禁止新玩家加入，保证 room.players 是 game.players 的子集。
-    if (this.game) throw new Error('游戏已开始，无法加入');
+    if (this.game) throw new ClientError({ code: 'gameAlreadyStarted' });
+    if (this.players.size >= MAX_PLAYERS) {
+      throw new ClientError({ code: 'roomFull', params: { maximum: MAX_PLAYERS } });
+    }
     const p: RoomPlayer = { id: genId(), secret: genSecret(), name, socketId, connected: true };
     this.players.set(p.id, p);
     return p;
@@ -121,16 +137,25 @@ export class Room {
   }
 
   startGame(): GameEvent[] {
-    if (this.players.size < 2) throw new Error('至少 2 人才能开局');
+    if (this.players.size < 2) {
+      throw new ClientError({ code: 'minimumPlayers', params: { minimum: 2 } });
+    }
     const entries = [...this.players.values()];
-    this.game = createGame(entries.map((p) => ({ id: p.id, name: p.name })));
+    const random = (this.options.startingPlayerRandom ?? Math.random)();
+    if (!Number.isFinite(random) || random < 0 || random >= 1) {
+      throw new Error('starting player random value must be between 0 and 1');
+    }
+    const startingPlayerId = entries[Math.floor(random * entries.length)].id;
+    this.game = createGame(entries.map((p) => ({ id: p.id, name: p.name })), {
+      startingPlayerId,
+    });
     this.repo.save(this.code, this.game);
     this.startTimer(ACTION_TIMEOUT_MS);
     return [{ type: 'started', turnOrder: entries.map((p) => p.id) }];
   }
 
   apply(fn: (g: GameState) => GameEvent[]): GameEvent[] {
-    if (!this.game) throw new Error('游戏尚未开始');
+    if (!this.game) throw new ClientError({ code: 'gameNotStarted' });
     const events = fn(this.game);
     this.repo.save(this.code, this.game);
     this.afterMutation(events);
@@ -210,24 +235,31 @@ export class Room {
 
   // 客户端意图分发
   dispatch(playerId: string, intent: { type: string } & Record<string, unknown>): GameEvent[] {
-    if (!this.game) throw new Error('游戏尚未开始');
-    switch (intent.type) {
-      case 'chooseAction':
-        return this.apply((g) => chooseAction(g, playerId, intent.action as ActionType, intent.targetId as string | undefined));
-      case 'challenge':
-        return this.apply((g) => challenge(g, playerId));
-      case 'passChallenge':
-        return this.apply((g) => passChallenge(g, playerId));
-      case 'block':
-        return this.apply((g) => block(g, playerId, intent.role as Role));
-      case 'passBlock':
-        return this.apply((g) => passBlock(g, playerId));
-      case 'resolveLoss':
-        return this.apply((g) => resolveLoss(g, playerId, intent.cardId as string));
-      case 'resolveExchange':
-        return this.apply((g) => resolveExchange(g, playerId, intent.keepIds as string[]));
-      default:
-        throw new Error(`unknown intent ${intent.type}`);
+    try {
+      switch (intent.type) {
+        case 'chooseAction':
+          return this.apply((g) => chooseAction(g, playerId, intent.action as ActionType, intent.targetId as string | undefined));
+        case 'challenge':
+          return this.apply((g) => challenge(g, playerId));
+        case 'passChallenge':
+          return this.apply((g) => passChallenge(g, playerId));
+        case 'block':
+          return this.apply((g) => block(g, playerId, intent.role as Role));
+        case 'passBlock':
+          return this.apply((g) => passBlock(g, playerId));
+        case 'resolveLoss':
+          return this.apply((g) => resolveLoss(g, playerId, intent.cardId as string));
+        case 'resolveExchange':
+          return this.apply((g) => resolveExchange(g, playerId, intent.keepIds as string[]));
+        default:
+          throw new ClientError({ code: 'illegalIntent' });
+      }
+    } catch (error) {
+      if (error instanceof ClientError) throw error;
+      if (error instanceof GameRuleError) {
+        throw new ClientError({ code: 'invalidGameAction' }, { cause: error });
+      }
+      throw error;
     }
   }
 

@@ -1,5 +1,15 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import type { ActionType, Card, LobbyPlayer, PublicState, Role } from '@coup/shared';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from 'react';
+import { parseServerError } from '@coup/shared';
+import type { ActionType, Card, LobbyPlayer, PublicState, Role, ServerError } from '@coup/shared';
 import {
   clearIdentity,
   clearRoomCode,
@@ -12,25 +22,48 @@ import {
   send,
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
-import { ROLE_DESC, ROLE_NAMES, RULES } from './rules.ts';
+import { actionName, roleDescription, roleName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
 import { describeCountdown, describePending, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, remainingSinceReceipt } from './narration.ts';
 import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
+import { wrappedDialogFocus } from './dialog.ts';
+import { scheduleAutoDismiss } from './transient.ts';
+import {
+  LANGUAGE_OPTIONS,
+  loadLocale,
+  localizeCoinCount,
+  localizeNotice,
+  localizeServerError,
+  persistLocale,
+  translate,
+  type Locale,
+  type NoticeDescriptor,
+} from './localization.ts';
 
-const ACTIONS: { type: ActionType; label: string; needsTarget: boolean; cost?: string }[] = [
-  { type: 'income', label: '收入 +1', needsTarget: false },
-  { type: 'foreignAid', label: '外援 +2', needsTarget: false },
-  { type: 'coup', label: '政变 (7币)', needsTarget: true, cost: '7' },
-  { type: 'tax', label: '征税 +3 (公爵)', needsTarget: false },
-  { type: 'assassinate', label: '暗杀 (3币)', needsTarget: true, cost: '3' },
-  { type: 'steal', label: '偷窃 (队长)', needsTarget: true },
-  { type: 'exchange', label: '交换 (大使)', needsTarget: false },
+const ACTIONS: { type: ActionType; needsTarget: boolean }[] = [
+  { type: 'income', needsTarget: false },
+  { type: 'foreignAid', needsTarget: false },
+  { type: 'coup', needsTarget: true },
+  { type: 'tax', needsTarget: false },
+  { type: 'assassinate', needsTarget: true },
+  { type: 'steal', needsTarget: true },
+  { type: 'exchange', needsTarget: false },
 ];
 
 interface CountdownSnapshot {
   remainingMs: number | null;
   deadlineAt: number | null;
   receivedAt: number;
+}
+
+interface TransientNoticeState {
+  id: number;
+  descriptor: NoticeDescriptor;
+}
+
+interface TransientErrorState {
+  id: number;
+  error: ServerError;
 }
 
 // 加入链接的 ?room= 参数：仅首次加载读取一次，读后从 URL 清除，避免刷新时重复触发。
@@ -46,8 +79,69 @@ const LINK_ROOM = (() => {
   return room;
 })();
 
+function browserStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function useDialogFocus(
+  onClose: () => void,
+  dialogRef: RefObject<HTMLDivElement>,
+  initialFocusRef: RefObject<HTMLElement>,
+) {
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable?.length) return;
+      const target = wrappedDialogFocus(
+        focusable,
+        document.activeElement instanceof HTMLElement ? document.activeElement : null,
+        event.shiftKey,
+      );
+      if (target) {
+        event.preventDefault();
+        target.focus();
+      }
+    };
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKeyDown);
+    initialFocusRef.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', onKeyDown);
+      previouslyFocused?.focus();
+    };
+  }, [dialogRef, initialFocusRef, onClose]);
+}
+
+function useAutoDismiss<T extends { id: number }>(
+  value: T | null,
+  setValue: (update: (current: T | null) => T | null) => void,
+) {
+  useEffect(() => {
+    if (!value) return;
+    return scheduleAutoDismiss(value, setValue);
+  }, [setValue, value]);
+}
+
 export function App() {
   const socket = useMemo(() => connect(), []);
+  const [locale, setLocale] = useState<Locale>(() =>
+    loadLocale(browserStorage(), navigator.languages.length ? navigator.languages : [navigator.language]),
+  );
   const [identity, setIdentity] = useState(() => loadIdentity());
   const [name, setName] = useState(() => identity?.name ?? '');
   const nameRef = useRef(name);
@@ -58,25 +152,42 @@ export function App() {
   const [players, setPlayers] = useState<LobbyPlayer[]>([]);
   const [publicState, setPublicState] = useState<PublicState | null>(null);
   const [hand, setHand] = useState<Card[]>([]);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<TransientErrorState | null>(null);
+  const errorIdRef = useRef(0);
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
   const [tunnelLoading, setTunnelLoading] = useState(false);
-  const [notice, setNotice] = useState('');
+  const [notice, setNotice] = useState<TransientNoticeState | null>(null);
+  const noticeIdRef = useRef(0);
   const [showRules, setShowRules] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
   const [selectedKeep, setSelectedKeep] = useState<string[]>([]);
-  const [leftReason, setLeftReason] = useState('');
+  const [hasLeftRoom, setHasLeftRoom] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [countdownSnapshot, setCountdownSnapshot] = useState<CountdownSnapshot | null>(null);
   const [serverOffsetMs, setServerOffsetMs] = useState<number | null>(null);
   const [clockTick, setClockTick] = useState(0);
   const [log, setLog] = useState<LogEntry[]>([]);
   const logIdRef = useRef(0);
+  const closeRules = useCallback(() => setShowRules(false), []);
+  const closeSettings = useCallback(() => setShowSettings(false), []);
+  const closeLeaveConfirmation = useCallback(() => setConfirmLeave(false), []);
+
+  function changeLocale(nextLocale: Locale) {
+    setLocale(nextLocale);
+    persistLocale(browserStorage(), nextLocale);
+  }
+
+  const showNotice = (descriptor: NoticeDescriptor) => {
+    noticeIdRef.current += 1;
+    setNotice({ id: noticeIdRef.current, descriptor });
+  };
 
   useEffect(() => {
     const off = onMessage(socket, (msg: ServerMessage) => {
       switch (msg.type) {
         case 'joined':
+          setError(null);
           setJoined(msg.roomCode);
           setHostId(msg.hostId);
           setPlayers(msg.players);
@@ -84,14 +195,15 @@ export function App() {
           setIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveRoomCode(msg.roomCode);
-          setLeftReason('');
+          setHasLeftRoom(false);
           break;
         case 'lobby':
           setHostId(msg.hostId);
           setPlayers(msg.players);
           break;
         case 'gameStarted':
-          setNotice('游戏开始！');
+          setError(null);
+          showNotice({ key: 'gameStarted' });
           setLog([]);
           logIdRef.current = 0;
           break;
@@ -107,11 +219,12 @@ export function App() {
           setHand(msg.hand);
           break;
         case 'events':
+          setError(null);
           for (const e of msg.events) {
-            if (e.type === 'gameOver') setNotice('游戏结束');
-            if (e.type === 'eliminated') setNotice('有玩家被淘汰');
-            if (e.type === 'challengeResolved') setNotice(e.truth ? '质疑失败' : '质疑成功');
-            if (e.type === 'influenceLost') setNotice('有玩家失去影响力');
+            if (e.type === 'gameOver') showNotice({ key: 'gameEnded' });
+            if (e.type === 'eliminated') showNotice({ key: 'playerEliminated' });
+            if (e.type === 'challengeResolved') showNotice({ key: e.truth ? 'challengeFailed' : 'challengeSucceeded' });
+            if (e.type === 'influenceLost') showNotice({ key: 'influenceLostNotice' });
           }
           {
             const entries = msg.events.map((event) => ({ id: logIdRef.current++, event }));
@@ -119,15 +232,18 @@ export function App() {
           }
           break;
         case 'error':
-          setError(msg.message);
+          errorIdRef.current += 1;
+          setError({ id: errorIdRef.current, error: parseServerError(msg) });
           setTunnelLoading(false);
           break;
         case 'tunnelUrl':
+          setError(null);
           setTunnelUrl(msg.url);
           setTunnelLoading(false);
           break;
         case 'left':
-          setLeftReason(msg.reason);
+          setError(null);
+          setHasLeftRoom(true);
           setJoined(null);
           clearRoomCode();
           clearIdentity();
@@ -164,12 +280,8 @@ export function App() {
     };
   }, [socket]);
 
-  // 提示自动清除
-  useEffect(() => {
-    if (!notice) return;
-    const t = setTimeout(() => setNotice(''), 4000);
-    return () => clearTimeout(t);
-  }, [notice]);
+  useAutoDismiss(error, setError);
+  useAutoDismiss(notice, setNotice);
 
   // 用一次往返估计客户端与服务器的时钟偏差，取最近几次中延迟最低的样本。
   useEffect(() => {
@@ -216,12 +328,12 @@ export function App() {
   const me = identity?.playerId;
 
   function createRoom() {
-    setError('');
+    setError(null);
     send(socket, { type: 'createRoom', name, playerId: identity?.playerId, secret: identity?.secret });
   }
 
   function joinRoom() {
-    setError('');
+    setError(null);
     send(socket, {
       type: 'joinRoom',
       roomCode: roomCode.trim(),
@@ -237,7 +349,7 @@ export function App() {
 
   function startTunnel() {
     setTunnelLoading(true);
-    setError('');
+    setError(null);
     send(socket, { type: 'startTunnel' });
   }
 
@@ -265,35 +377,48 @@ export function App() {
     }
   }, [joined, identity]);
 
+  useEffect(() => {
+    document.title = translate(locale, 'appTitle');
+    document.documentElement.lang = locale;
+  }, [locale]);
+
   return (
     <div className="app">
       <header className="header">
-        <h1>政变 Coup</h1>
+        <h1>{translate(locale, 'appTitle')}</h1>
         <div className="header-actions">
           <button className="ghost" onClick={() => setShowRules((v) => !v)}>
-            {showRules ? '关闭规则' : '规则'}
+            {translate(locale, showRules ? 'closeRules' : 'rules')}
+          </button>
+          <button className="ghost" onClick={() => setShowSettings(true)}>
+            {translate(locale, 'settings')}
           </button>
           {joined && (
             <button className="ghost" onClick={requestLeave}>
-              离开房间
+              {translate(locale, 'leaveRoom')}
             </button>
           )}
         </div>
       </header>
 
-      {showRules && <RulesPanel onClose={() => setShowRules(false)} />}
+      {showRules && <RulesPanel locale={locale} onLocaleChange={changeLocale} onClose={closeRules} />}
+
+      {showSettings && (
+        <SettingsPanel locale={locale} onLocaleChange={changeLocale} onClose={closeSettings} />
+      )}
 
       {confirmLeave && (
-        <div className="overlay" onClick={() => setConfirmLeave(false)}>
-          <div className="panel" onClick={(e) => e.stopPropagation()}>
-            <p>确认离开房间？对局中离开将视为弃权。</p>
-            <button onClick={leaveRoom}>确认离开</button>
-            <button className="ghost" onClick={() => setConfirmLeave(false)}>
-              取消
-            </button>
-          </div>
-        </div>
+        <LeaveConfirmation locale={locale} onConfirm={leaveRoom} onClose={closeLeaveConfirmation} />
       )}
+
+      <TransientMessage
+        value={error}
+        className="error"
+        regionClassName="error-region"
+        role="alert"
+        ariaLive="assertive"
+        render={(visibleError) => localizeServerError(locale, visibleError.error)}
+      />
 
       {!joined ? (
         <Lobby
@@ -303,7 +428,7 @@ export function App() {
           setRoomCode={setRoomCode}
           onCreate={createRoom}
           onJoin={joinRoom}
-          error={error}
+          locale={locale}
         />
       ) : (
         <RoomView
@@ -314,7 +439,7 @@ export function App() {
           publicState={publicState}
           hand={hand}
           notice={notice}
-          leftReason={leftReason}
+          hasLeftRoom={hasLeftRoom}
           remainingMs={remainingMs}
           deadlineAt={countdownSnapshot?.deadlineAt ?? null}
           serverNow={serverNow}
@@ -330,33 +455,169 @@ export function App() {
           tunnelUrl={tunnelUrl}
           tunnelLoading={tunnelLoading}
           onStartTunnel={startTunnel}
+          locale={locale}
         />
       )}
     </div>
   );
 }
 
-function RulesPanel({ onClose }: { onClose: () => void }) {
+function SettingsPanel(props: {
+  locale: Locale;
+  onLocaleChange: (locale: Locale) => void;
+  onClose: () => void;
+}) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(props.onClose, dialogRef, closeButtonRef);
+
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="panel rules" onClick={(e) => e.stopPropagation()}>
-        <h2>规则说明</h2>
-        {RULES.map((r) => (
-          <div key={r.title} className="rule">
-            <b>{r.title}</b>
-            <p>{r.body}</p>
+    <div className="overlay settings-overlay" onClick={props.onClose}>
+      <div
+        ref={dialogRef}
+        className="panel settings-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="panel-heading">
+          <h2 id="settings-title">{translate(props.locale, 'settingsTitle')}</h2>
+          <button ref={closeButtonRef} className="ghost" onClick={props.onClose}>
+            {translate(props.locale, 'closeSettings')}
+          </button>
+        </div>
+        <fieldset className="language-settings">
+          <legend>{translate(props.locale, 'language')}</legend>
+          <div className="language-options">
+            {LANGUAGE_OPTIONS.map((option) => (
+              <label className="language-option" key={option.locale}>
+                <input
+                  type="radio"
+                  name="locale"
+                  value={option.locale}
+                  checked={props.locale === option.locale}
+                  onChange={() => props.onLocaleChange(option.locale)}
+                />
+                <span lang={option.locale}>{option.label}</span>
+              </label>
+            ))}
           </div>
-        ))}
-        <h3>角色</h3>
-        {Object.entries(ROLE_NAMES).map(([role, label]) => (
-          <div key={role} className="rule">
-            <b>{label}</b>
-            <p>{ROLE_DESC[role as Role]}</p>
-          </div>
-        ))}
-        <button className="ghost" onClick={onClose}>
-          关闭
+        </fieldset>
+      </div>
+    </div>
+  );
+}
+
+function LeaveConfirmation(props: { locale: Locale; onConfirm: () => void; onClose: () => void }) {
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(props.onClose, dialogRef, cancelButtonRef);
+
+  return (
+    <div className="overlay" onClick={props.onClose}>
+      <div
+        ref={dialogRef}
+        className="panel"
+        role="alertdialog"
+        aria-modal="true"
+        aria-describedby="leave-confirmation-description"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <p id="leave-confirmation-description">{translate(props.locale, 'leaveConfirmation')}</p>
+        <button onClick={props.onConfirm}>{translate(props.locale, 'confirmLeave')}</button>
+        <button ref={cancelButtonRef} className="ghost" onClick={props.onClose}>
+          {translate(props.locale, 'cancel')}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function RulesPanel({
+  locale,
+  onLocaleChange,
+  onClose,
+}: {
+  locale: Locale;
+  onLocaleChange: (locale: Locale) => void;
+  onClose: () => void;
+}) {
+  const [level, setLevel] = useState<RuleLevel>('quick');
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(onClose, dialogRef, closeButtonRef);
+
+  return (
+    <div className="overlay rules-overlay" onClick={onClose}>
+      <div
+        ref={dialogRef}
+        className="panel rules"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rules-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="panel-heading rules-heading">
+          <h2 id="rules-title">{translate(locale, 'rulesTitle')}</h2>
+          <div className="rules-heading-actions">
+            <select
+              value={locale}
+              aria-label={translate(locale, 'language')}
+              onChange={(event) => onLocaleChange(event.currentTarget.value as Locale)}
+            >
+              {LANGUAGE_OPTIONS.map((option) => (
+                <option key={option.locale} value={option.locale}>{option.label}</option>
+              ))}
+            </select>
+            <button ref={closeButtonRef} className="ghost" onClick={onClose}>
+              {translate(locale, 'closeRules')}
+            </button>
+          </div>
+        </div>
+        <div className="rules-level-switch" role="group" aria-label={translate(locale, 'rulesLevel')}>
+          {(['quick', 'full'] as const).map((option) => (
+            <button
+              key={option}
+              className={level === option ? 'selected' : ''}
+              aria-pressed={level === option}
+              onClick={() => setLevel(option)}
+            >
+              {translate(locale, option === 'quick' ? 'quickRules' : 'fullRules')}
+            </button>
+          ))}
+        </div>
+        <div className="rules-body">
+          {rulesFor(locale, level).map((section) => (
+            <Fragment key={section.id}>
+              {section.roleReferenceBefore && (
+                <section className="rule-section role-reference" aria-labelledby="rule-roles">
+                  <h3 id="rule-roles">{translate(locale, 'rolesTitle')}</h3>
+                  <div className="role-reference-list">
+                    {ROLES.map((role) => (
+                      <div key={role} className="role-reference-item">
+                        <b>{roleName(locale, role)}</b>
+                        <p>{roleDescription(locale, role)}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+              <section
+                className={`rule-section${section.onlineOnly ? ' online-rules' : ''}`}
+                aria-labelledby={`rule-${section.id}`}
+              >
+                <h3 id={`rule-${section.id}`}>{section.title}</h3>
+                <p>{section.body}</p>
+                {section.items && (
+                  <ul>
+                    {section.items.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                )}
+              </section>
+            </Fragment>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -369,36 +630,45 @@ function Lobby(props: {
   setRoomCode: (v: string) => void;
   onCreate: () => void;
   onJoin: () => void;
-  error: string;
+  locale: Locale;
 }) {
   return (
     <div className="lobby">
       <label>
-        昵称
-        <input value={props.name} onChange={(e) => props.setName(e.target.value)} placeholder="你的昵称" />
+        {translate(props.locale, 'nickname')}
+        <input
+          value={props.name}
+          onChange={(e) => props.setName(e.target.value)}
+          placeholder={translate(props.locale, 'nicknamePlaceholder')}
+        />
       </label>
       <button className="primary" onClick={props.onCreate} disabled={!props.name.trim()}>
-        创建房间
+        {translate(props.locale, 'createRoom')}
       </button>
-      <div className="divider">或</div>
+      <div className="divider">{translate(props.locale, 'or')}</div>
       <label>
-        房间码
+        {translate(props.locale, 'roomCode')}
         <input
           value={props.roomCode}
           onChange={(e) => props.setRoomCode(e.target.value.toUpperCase())}
-          placeholder="6 位房间码"
+          placeholder={translate(props.locale, 'roomCodePlaceholder')}
           maxLength={6}
         />
       </label>
       <button className="ghost" onClick={props.onJoin} disabled={!props.name.trim() || props.roomCode.trim().length < 3}>
-        加入房间
+        {translate(props.locale, 'joinRoom')}
       </button>
-      {props.error && <div className="error">{props.error}</div>}
     </div>
   );
 }
 
-function InviteLink(props: { roomCode: string; url: string | null; loading: boolean; onStart: () => void }) {
+function InviteLink(props: {
+  roomCode: string;
+  url: string | null;
+  loading: boolean;
+  onStart: () => void;
+  locale: Locale;
+}) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const fullUrl = props.url ? `${props.url}?room=${props.roomCode}` : '';
@@ -411,10 +681,12 @@ function InviteLink(props: { roomCode: string; url: string | null; loading: bool
   if (props.url) {
     return (
       <div className="invite">
-        <span className="invite-label">加入链接</span>
+        <span className="invite-label">{translate(props.locale, 'inviteLink')}</span>
         <div className="row">
           <input className="invite-input" readOnly value={fullUrl} onFocus={(e) => e.currentTarget.select()} />
-          <button onClick={copy}>{copied ? '已复制' : copyFailed ? '复制失败' : '复制'}</button>
+          <button onClick={copy}>
+            {translate(props.locale, copied ? 'copied' : copyFailed ? 'copyFailed' : 'copy')}
+          </button>
         </div>
       </div>
     );
@@ -422,7 +694,7 @@ function InviteLink(props: { roomCode: string; url: string | null; loading: bool
   return (
     <div className="invite">
       <button onClick={props.onStart} disabled={props.loading}>
-        {props.loading ? '正在启动隧道…' : '生成加入链接'}
+        {translate(props.locale, props.loading ? 'tunnelStarting' : 'generateInviteLink')}
       </button>
     </div>
   );
@@ -435,8 +707,8 @@ interface RoomViewProps {
   players: LobbyPlayer[];
   publicState: PublicState | null;
   hand: Card[];
-  notice: string;
-  leftReason: string;
+  notice: TransientNoticeState | null;
+  hasLeftRoom: boolean;
   selectedAction: ActionType | null;
   setSelectedAction: (a: ActionType | null) => void;
   selectedKeep: string[];
@@ -452,6 +724,7 @@ interface RoomViewProps {
   tunnelUrl: string | null;
   tunnelLoading: boolean;
   onStartTunnel: () => void;
+  locale: Locale;
 }
 
 function RoomView(props: RoomViewProps) {
@@ -460,8 +733,12 @@ function RoomView(props: RoomViewProps) {
   if (!publicState) {
     return (
       <div className="room">
-        <div className="roomcode">
-          房间码 <b>{props.roomCode}</b>（把此码或链接发给朋友）
+        <div
+          className="roomcode"
+          aria-label={`${translate(props.locale, 'roomCode')} ${props.roomCode}${translate(props.locale, 'roomCodeHelp')}`}
+        >
+          {translate(props.locale, 'roomCode')} <b>{props.roomCode}</b>
+          {translate(props.locale, 'roomCodeHelp')}
         </div>
         {me === props.hostId && isLocal && (
           <InviteLink
@@ -469,24 +746,29 @@ function RoomView(props: RoomViewProps) {
             url={props.tunnelUrl}
             loading={props.tunnelLoading}
             onStart={props.onStartTunnel}
+            locale={props.locale}
           />
         )}
-        <h3>玩家（{props.players.length}）</h3>
+        <h3>{translate(props.locale, 'playersCount', { count: props.players.length })}</h3>
         <ul className="playerlist">
           {props.players.map((p) => (
             <li key={p.id} className={p.isHost ? 'host' : ''}>
               {p.name}
-              {p.isHost && ' (房主)'}
-              {!p.connected && ' (离线)'}
+              {p.isHost && translate(props.locale, 'hostSuffix')}
+              {!p.connected && translate(props.locale, 'offlineSuffix')}
             </li>
           ))}
         </ul>
         {me === props.hostId && (
           <button className="primary" onClick={props.onStart} disabled={props.players.length < 2}>
-            开始游戏（需 ≥2 人）
+            {translate(props.locale, 'startGame')} ({translate(props.locale, 'startGameRequirement')})
           </button>
         )}
-        {props.leftReason && <div className="error">你已离开：{props.leftReason}</div>}
+        {props.hasLeftRoom && (
+          <div className="left-room-notice">
+            {translate(props.locale, 'leftRoomNotice')}
+          </div>
+        )}
       </div>
     );
   }
@@ -507,16 +789,18 @@ function RoomView(props: RoomViewProps) {
       setSelectedKeep={props.setSelectedKeep}
       onAction={props.onAction}
       onIntent={(i) => send(props.socket, i)}
+      locale={props.locale}
     />
   );
 }
 
-function CardView({ role, unavailable }: { role: Role; unavailable?: boolean }) {
-  return <div className={`card card--${role}${unavailable ? ' unavailable' : ''}`}>{ROLE_NAMES[role]}</div>;
+function CardView({ role, locale, unavailable }: { role: Role; locale: Locale; unavailable?: boolean }) {
+  const label = roleName(locale, role);
+  return <div className={`card card--${role}${unavailable ? ' unavailable' : ''}`} aria-label={translate(locale, 'cardFace', { role: label })}>{label}</div>;
 }
 
-function CardBack() {
-  return <div className="card-back" role="img" aria-label="暗牌" />;
+function CardBack({ locale }: { locale: Locale }) {
+  return <div className="card-back" role="img" aria-label={translate(locale, 'cardBack')} />;
 }
 
 function CoinIcon() {
@@ -536,11 +820,62 @@ function CrownIcon() {
   );
 }
 
+function TransientMessage<T extends { id: number }>(props: {
+  value: T | null;
+  className: string;
+  regionClassName?: string;
+  role: 'alert' | 'status';
+  ariaLive: 'assertive' | 'polite';
+  render: (value: T) => ReactNode;
+}) {
+  const [renderedValue, setRenderedValue] = useState(props.value);
+  const [exiting, setExiting] = useState(false);
+
+  useEffect(() => {
+    if (props.value) {
+      setRenderedValue(props.value);
+      setExiting(false);
+      return;
+    }
+    if (!renderedValue) return;
+
+    setExiting(true);
+  }, [props.value, renderedValue]);
+
+  const visibleValue = props.value ?? renderedValue;
+  if (!visibleValue) return null;
+
+  return (
+    <div
+      className={`notice-region${props.regionClassName ? ` ${props.regionClassName}` : ''}${exiting && !props.value ? ' exiting' : ''}`}
+      onTransitionEnd={(event) => {
+        if (event.target !== event.currentTarget || event.propertyName !== 'grid-template-rows' || !exiting || props.value) {
+          return;
+        }
+        setRenderedValue(null);
+        setExiting(false);
+      }}
+    >
+      <div className="notice-region-inner">
+        <div
+          className={`${props.className} transient-message`}
+          key={visibleValue.id}
+          role={props.role}
+          aria-live={props.ariaLive}
+          aria-atomic="true"
+        >
+          {props.render(visibleValue)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GameBoard(props: {
   state: PublicState;
   hand: Card[];
   me: string | undefined;
-  notice: string;
+  notice: TransientNoticeState | null;
   selectedAction: ActionType | null;
   setSelectedAction: (a: ActionType | null) => void;
   selectedKeep: string[];
@@ -551,6 +886,7 @@ function GameBoard(props: {
   deadlineAt: number | null;
   serverNow: number | null;
   log: LogEntry[];
+  locale: Locale;
 }) {
   const { state, me } = props;
   const myView = state.players.find((p) => p.id === me);
@@ -583,7 +919,7 @@ function GameBoard(props: {
   const amLosing = state.phase === 'choosingLoss' && state.lossPlayerId === me;
   const amExchanging = state.phase === 'choosingExchange' && pending?.actorId === me;
 
-  const narration = describePending(state);
+  const narration = describePending(state, props.locale);
   const countdown = describeCountdown(props.remainingMs, props.deadlineAt, props.serverNow);
   const effectiveRemaining = effectiveRemainingMs(props.remainingMs, props.deadlineAt, props.serverNow);
   const urgent = effectiveRemaining != null && effectiveRemaining <= 3000;
@@ -597,7 +933,7 @@ function GameBoard(props: {
   else if (amExchanging) controlMode = 'exchange';
   const controlKey = `${controlMode}:${state.currentPlayerId ?? ''}:${pending?.actorId ?? ''}:${state.lossPlayerId ?? ''}`;
 
-  const groups = groupLog(props.log, state).reverse();
+  const groups = groupLog(props.log, state, props.locale).reverse();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
   const toggleGroup = (id: number) => {
@@ -611,15 +947,18 @@ function GameBoard(props: {
 
   return (
     <div className="board">
-      {props.notice && (
-        <div className="notice" key={props.notice}>
-          {props.notice}
-        </div>
-      )}
+      <TransientMessage
+        value={props.notice}
+        className="notice"
+        role="status"
+        ariaLive="polite"
+        render={(visibleNotice) => localizeNotice(props.locale, visibleNotice.descriptor)}
+      />
 
-      {state.phase === 'gameOver' && (
-        <div className="notice big"><CrownIcon /> {state.players.find((p) => p.id === state.winnerId)?.name} 获胜！</div>
-      )}
+      <div className="board-content">
+        {state.phase === 'gameOver' && (
+          <div className="notice big"><CrownIcon /> {translate(props.locale, 'winner', { name: nameOf(state, state.winnerId) })}</div>
+        )}
 
       {narration ? (
         <div className="narration">
@@ -630,7 +969,7 @@ function GameBoard(props: {
         </div>
       ) : isMyTurn && state.phase === 'choosingAction' && countdown ? (
         <div className="narration">
-          <span className="narration-text">轮到你了</span>
+          <span className="narration-text">{translate(props.locale, 'yourTurn')}</span>
           <span className={`narration-timer${urgent ? ' urgent' : ''}`}>{countdown}</span>
         </div>
       ) : null}
@@ -640,15 +979,15 @@ function GameBoard(props: {
           <div key={p.id} className={`seat ${p.id === state.currentPlayerId ? 'current' : ''} ${!p.alive ? 'dead' : ''}`}>
             <div className="name">
               {p.name}
-              {p.id === me && ' (你)'}
+              {p.id === me && translate(props.locale, 'selfMarker')}
             </div>
-            <div className="coins"><CoinIcon /> {p.coins}</div>
-            <div className="cards-row">
+            <div className="coins"><CoinIcon /> {localizeCoinCount(props.locale, p.coins)}</div>
+            <div className="cards-row" aria-label={translate(props.locale, 'influenceCount', { count: p.handCount })}>
               {p.id === me
-                ? props.hand.map((c) => <CardView key={c.id} role={c.role} />)
-                : Array.from({ length: p.handCount }, (_, i) => <CardBack key={`back-${i}`} />)}
+                ? props.hand.map((c) => <CardView key={c.id} role={c.role} locale={props.locale} />)
+                : Array.from({ length: p.handCount }, (_, i) => <CardBack key={`back-${i}`} locale={props.locale} />)}
               {p.revealed.map((role, i) => (
-                <CardView key={`rev-${i}`} role={role} unavailable />
+                <CardView key={`rev-${i}`} role={role} locale={props.locale} unavailable />
               ))}
             </div>
           </div>
@@ -663,14 +1002,15 @@ function GameBoard(props: {
             onSelect={props.setSelectedAction}
             targets={aliveOthers}
             onAction={props.onAction}
+            locale={props.locale}
           />
         )}
 
         {canChallenge && (
           <div className="row">
-            <button onClick={() => props.onIntent({ type: 'challenge' })}>质疑！</button>
+            <button onClick={() => props.onIntent({ type: 'challenge' })}>{translate(props.locale, 'challenge')}</button>
             <button className="ghost" onClick={() => props.onIntent({ type: 'passChallenge' })}>
-              不质疑
+              {translate(props.locale, 'passChallenge')}
             </button>
           </div>
         )}
@@ -679,25 +1019,25 @@ function GameBoard(props: {
           <div className="row">
             {canBlockRoles.map((r) => (
               <button key={r} className={`role-btn role--${r}`} onClick={() => props.onIntent({ type: 'block', role: r })}>
-                用{ROLE_NAMES[r]}阻挡
+                {translate(props.locale, 'blockWith', { role: roleName(props.locale, r) })}
               </button>
             ))}
             <button className="ghost" onClick={() => props.onIntent({ type: 'passBlock' })}>
-              不阻挡
+              {translate(props.locale, 'passBlock')}
             </button>
           </div>
         )}
 
         {amLosing && (
           <div className="row">
-            <p>请选择一张暗牌公开翻开：</p>
+            <p>{translate(props.locale, 'chooseInfluenceLoss')}</p>
             {props.hand.map((c) => (
               <button
                 key={c.id}
                 className={`role-btn role--${c.role}`}
                 onClick={() => props.onIntent({ type: 'resolveLoss', cardId: c.id })}
               >
-                翻开 {ROLE_NAMES[c.role]}
+                {translate(props.locale, 'revealRole', { role: roleName(props.locale, c.role) })}
               </button>
             ))}
           </div>
@@ -710,44 +1050,47 @@ function GameBoard(props: {
             selectedKeep={props.selectedKeep}
             setSelectedKeep={props.setSelectedKeep}
             onConfirm={(ids) => props.onIntent({ type: 'resolveExchange', keepIds: ids })}
+            locale={props.locale}
           />
         )}
 
         {!isMyTurn && !canChallenge && !canBlock && !amLosing && !amExchanging && state.phase !== 'gameOver' && (
-          <div className="waiting">等待 {nameOf(state, state.currentPlayerId)} 行动…</div>
+          <div className="waiting">{translate(props.locale, 'waitingForAction', { name: nameOf(state, state.currentPlayerId) })}</div>
         )}
       </div>
 
-      {groups.length > 0 && (
-        <div className="log">
-          {groups.map((g, i) => (
-            <Fragment key={g.id}>
-              {i > 0 && <div className="log-sep" aria-hidden="true" />}
-              <div className="log-group">
-                <button
-                  className="log-header"
-                  onClick={g.entries.length ? () => toggleGroup(g.id) : undefined}
-                  aria-expanded={g.entries.length ? expanded.has(g.id) : undefined}
-                >
-                  {g.entries.length > 0 && (
-                    <span className={`log-chevron${expanded.has(g.id) ? ' open' : ''}`}>▸</span>
+        {groups.length > 0 && (
+          <div className="log">
+            {groups.map((g, i) => (
+              <Fragment key={g.id}>
+                {i > 0 && <div className="log-sep" aria-hidden="true" />}
+                <div className="log-group">
+                  <button
+                    className="log-header"
+                    onClick={g.entries.length ? () => toggleGroup(g.id) : undefined}
+                    aria-expanded={g.entries.length ? expanded.has(g.id) : undefined}
+                    aria-label={g.entries.length ? translate(props.locale, expanded.has(g.id) ? 'collapseLog' : 'expandLog', { action: g.action }) : undefined}
+                  >
+                    {g.entries.length > 0 && (
+                      <span className={`log-chevron${expanded.has(g.id) ? ' open' : ''}`}>▸</span>
+                    )}
+                    <span>{g.action}</span>
+                  </button>
+                  {expanded.has(g.id) && g.entries.length > 0 && (
+                    <div className="log-entries">
+                      {g.entries.map((en) => (
+                        <div key={en.id} className="log-entry">
+                          {en.text}
+                        </div>
+                      ))}
+                    </div>
                   )}
-                  <span>{g.action}</span>
-                </button>
-                {expanded.has(g.id) && g.entries.length > 0 && (
-                  <div className="log-entries">
-                    {g.entries.map((en) => (
-                      <div key={en.id} className="log-entry">
-                        {en.text}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Fragment>
-          ))}
-        </div>
-      )}
+                </div>
+              </Fragment>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -758,12 +1101,26 @@ function Actions(props: {
   onSelect: (a: ActionType | null) => void;
   targets: { id: string; name: string }[];
   onAction: (a: ActionType, targetId?: string) => void;
+  locale: Locale;
 }) {
   const sel = ACTIONS.find((a) => a.type === props.selectedAction);
+  const mustCoup = props.coins >= 10;
+  const label = (action: ActionType): string => {
+    const name = actionName(props.locale, action);
+    switch (action) {
+      case 'income': return `${name} +1`;
+      case 'foreignAid': return `${name} +2`;
+      case 'coup': return `${name} (${localizeCoinCount(props.locale, 7)})`;
+      case 'tax': return `${name} +3 (${roleName(props.locale, 'duke')})`;
+      case 'assassinate': return `${name} (${localizeCoinCount(props.locale, 3)})`;
+      case 'steal': return `${name} (${roleName(props.locale, 'captain')})`;
+      case 'exchange': return `${name} (${roleName(props.locale, 'ambassador')})`;
+    }
+  };
   return (
     <div className="actions">
+      {mustCoup && <p role="status">{translate(props.locale, 'mandatoryCoup')}</p>}
       {ACTIONS.map((a) => {
-        const mustCoup = props.coins >= 10;
         const disabled =
           a.type === 'coup'
             ? props.coins < 7
@@ -780,20 +1137,20 @@ function Actions(props: {
               else props.onAction(a.type);
             }}
           >
-            {a.label}
+            {label(a.type)}
           </button>
         );
       })}
       {sel?.needsTarget && (
         <div className="row">
-          <span>选择目标：</span>
+          <span>{translate(props.locale, 'chooseTarget')}</span>
           {props.targets.map((t) => (
             <button key={t.id} onClick={() => props.onAction(sel.type, t.id)}>
               {t.name}
             </button>
           ))}
           <button className="ghost" onClick={() => props.onSelect(null)}>
-            取消
+            {translate(props.locale, 'cancel')}
           </button>
         </div>
       )}
@@ -807,6 +1164,7 @@ function ExchangeControl(props: {
   selectedKeep: string[];
   setSelectedKeep: (ids: string[]) => void;
   onConfirm: (ids: string[]) => void;
+  locale: Locale;
 }) {
   const [confirming, setConfirming] = useState(false);
   const toggle = (id: string) => {
@@ -822,7 +1180,7 @@ function ExchangeControl(props: {
   };
   return (
     <div className="row">
-      <p>交换：请选择保留的 {props.keepCount} 张牌</p>
+      <p>{translate(props.locale, 'exchangePrompt', { count: props.keepCount })}</p>
       {props.hand.map((c) => {
         const keep = props.selectedKeep.includes(c.id);
         return (
@@ -832,7 +1190,7 @@ function ExchangeControl(props: {
             onClick={() => toggle(c.id)}
             disabled={confirming}
           >
-            {ROLE_NAMES[c.role]}
+            {roleName(props.locale, c.role)}
           </button>
         );
       })}
@@ -840,7 +1198,7 @@ function ExchangeControl(props: {
         disabled={props.selectedKeep.length !== props.keepCount || confirming}
         onClick={() => confirm(props.selectedKeep)}
       >
-        确认保留
+        {translate(props.locale, 'confirmKeep')}
       </button>
     </div>
   );

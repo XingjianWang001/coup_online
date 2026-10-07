@@ -9,6 +9,7 @@ import { Room } from './room.ts';
 import { getTunnelUrl, startTunnel, stopTunnel } from './tunnel.ts';
 import { forfeit } from '@coup/engine';
 import type { ClientIntent } from '@coup/shared';
+import { ClientError, toServerError } from './errors.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -86,7 +87,7 @@ io.on('connection', (socket) => {
     try {
       handleIntent(socket, raw);
     } catch (e) {
-      socket.emit('error', { message: e instanceof Error ? e.message : 'unknown error' });
+      socket.emit('error', toServerError(e));
     }
   });
 
@@ -134,7 +135,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
     }
     case 'joinRoom': {
       const room = rooms.get(raw.roomCode.toUpperCase());
-      if (!room) throw new Error('房间不存在');
+      if (!room) throw new ClientError({ code: 'roomNotFound' });
       const reconnect = raw.playerId && raw.secret ? { id: raw.playerId, secret: raw.secret } : undefined;
       const p = room.addPlayer(raw.name, socket.id, reconnect);
       socket.join(room.code);
@@ -153,16 +154,19 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       break;
     }
     case 'startTunnel': {
-      if (!isLoopback(socket.handshake.address)) throw new Error('仅本机可启动隧道');
+      if (!isLoopback(socket.handshake.address)) throw new ClientError({ code: 'tunnelUnauthorized' });
       startTunnel(PORT)
         .then((url) => socket.emit('tunnelUrl', { url }))
-        .catch((e) => socket.emit('error', { message: e instanceof Error ? e.message : '隧道启动失败' }));
+        .catch((error) => {
+          console.error('tunnel startup error', error);
+          socket.emit('error', { code: 'tunnelStartup' });
+        });
       break;
     }
     case 'startGame': {
       const room = rooms.get(socket.data.roomCode);
-      if (!room) throw new Error('房间不存在');
-      if (socket.data.playerId !== room.hostId) throw new Error('只有房主能开始游戏');
+      if (!room) throw new ClientError({ code: 'roomNotFound' });
+      if (socket.data.playerId !== room.hostId) throw new ClientError({ code: 'hostOnly' });
       const events = room.startGame();
       io.to(room.code).emit('gameStarted', { turnOrder: events[0].type === 'started' ? (events[0] as { turnOrder: string[] }).turnOrder : [] });
       broadcast(room);
@@ -188,7 +192,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
     }
     default: {
       const room = rooms.get(socket.data.roomCode);
-      if (!room) throw new Error('房间不存在');
+      if (!room) throw new ClientError({ code: 'roomNotFound' });
       const events = room.dispatch(socket.data.playerId, raw);
       io.to(room.code).emit('events', { events });
       broadcast(room);

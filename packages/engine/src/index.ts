@@ -14,6 +14,7 @@ export type {
 } from './types.ts';
 
 export {
+  GameRuleError,
   block,
   challenge,
   chooseAction,

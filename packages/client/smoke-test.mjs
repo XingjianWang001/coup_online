@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 const URL = 'http://localhost:8787';
 const clients = [io(URL), io(URL), io(URL)];
 
-clients.forEach((c, i) => c.on('error', (m) => console.error(`client${i} error:`, m.message)));
+clients.forEach((c, i) => c.on('error', (error) => console.error(`client${i} error:`, error.code, error.params ?? '')));
 
 const on = (client, event) =>
   new Promise((resolve, reject) => {
@@ -28,12 +28,20 @@ async function main() {
   const roomCode = joined.roomCode;
   console.log('✅ 房间创建:', roomCode, 'playerId:', joined.playerId);
 
+  const structuredError = on(clients[2], 'error');
+  clients[2].emit('intent', { type: 'joinRoom', roomCode: 'NOPE00', name: 'Carol' });
+  const error = await structuredError;
+  if (error.code !== 'roomNotFound' || 'message' in error) {
+    throw new Error(`结构化错误信封无效: ${JSON.stringify(error)}`);
+  }
+  console.log('✅ 结构化错误信封:', error.code);
+
   const bJoined = on(clients[1], 'joined');
   const cJoined = on(clients[2], 'joined');
   clients[1].emit('intent', { type: 'joinRoom', roomCode, name: 'Bob' });
   clients[2].emit('intent', { type: 'joinRoom', roomCode, name: 'Carol' });
-  await bJoined;
-  await cJoined;
+  const bob = await bJoined;
+  const carol = await cJoined;
   console.log('✅ 3 人加入');
 
   host.emit('intent', { type: 'startGame' });
@@ -48,12 +56,21 @@ async function main() {
   console.log('✅ 权威倒计时(ms):', pub1.remainingMs);
 
   const pub2Promise = on(host, 'publicState');
-  const privPromise = on(host, 'privateState');
-  host.emit('intent', { type: 'chooseAction', action: 'income' });
+  const players = [
+    { client: host, id: joined.playerId, name: 'Alice' },
+    { client: clients[1], id: bob.playerId, name: 'Bob' },
+    { client: clients[2], id: carol.playerId, name: 'Carol' },
+  ];
+  const actor = players.find((player) => player.id === pub1.state.currentPlayerId);
+  if (!actor) throw new Error('当前玩家不在已加入玩家列表中');
+  const privPromise = on(actor.client, 'privateState');
+  actor.client.emit('intent', { type: 'chooseAction', action: 'income' });
   const pub2 = await pub2Promise;
   const priv = await privPromise;
-  console.log('✅ Alice 收入后轮到:', pub2.state.currentPlayerId, 'Alice 金币:', pub2.state.players[0].coins);
-  console.log('✅ Alice 暗牌数量:', priv.hand.length);
+  const actorState = pub2.state.players.find((player) => player.id === actor.id);
+  if (!actorState) throw new Error('行动者不在公开状态中');
+  console.log(`✅ ${actor.name} 收入后轮到:`, pub2.state.currentPlayerId, '行动者金币:', actorState.coins);
+  console.log(`✅ ${actor.name} 暗牌数量:`, priv.hand.length);
 
   console.log('🎉 冒烟测试全部通过');
   process.exit(0);

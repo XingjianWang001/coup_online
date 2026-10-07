@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PublicState } from '@coup/shared';
+import type { GameEvent, PublicState } from '@coup/shared';
 import { describeAction, describeCountdown, describeEvent, describePending, estimateServerOffset, groupLog, remainingSinceReceipt } from './narration.ts';
 
 function state(overrides: Partial<PublicState>): PublicState {
@@ -61,6 +61,7 @@ describe('describePending', () => {
       },
     });
     expect(describePending(s)).toBe('张三 发动外援；李四 用【公爵】阻挡');
+    expect(describePending(s, 'en')).toBe('张三 uses Foreign Aid; 李四 blocks with Duke');
   });
 });
 
@@ -211,5 +212,37 @@ describe('groupLog', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].action).toBe('张三 获胜');
     expect(groups[0].entries).toEqual([]);
+  });
+
+  it('renders the same raw events in either locale without mutating them', () => {
+    const events: { id: number; event: GameEvent }[] = [
+      { id: 0, event: { type: 'actionChosen', actorId: 'a', action: 'assassinate', targetId: 'b', claimedRole: 'assassin' } },
+      { id: 1, event: { type: 'challenged', challengerId: 'b', targetId: 'a' } },
+      { id: 2, event: { type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a' } },
+      { id: 3, event: { type: 'blocked', blockerId: 'b', role: 'contessa' } },
+      { id: 4, event: { type: 'influenceLost', playerId: 'b', role: 'duke' } },
+      { id: 5, event: { type: 'eliminated', playerId: 'b' } },
+      { id: 6, event: { type: 'exchangeDrew', playerId: 'a', count: 2 } },
+      { id: 7, event: { type: 'gameOver', winnerId: 'a' } },
+    ];
+    const snapshot = structuredClone(events);
+
+    const chinese = groupLog(events, s, 'zh-CN');
+    const english = groupLog(events, s, 'en');
+
+    expect(chinese[0].action).toBe('张三 声称【刺客】发动暗杀，目标 李四');
+    expect(english[0].action).toBe('张三 claims Assassin to Assassinate, targeting 李四');
+    expect(english.flatMap((group) => [group.action, ...group.entries.map((entry) => entry.text)])).toEqual(
+      expect.arrayContaining([
+        '李四 challenges 张三',
+        'Challenge failed: 李四 loses influence',
+        '李四 blocks with Contessa',
+        '李四 reveals Duke',
+        '李四 is eliminated',
+        '张三 draws 2 cards',
+        '张三 wins',
+      ]),
+    );
+    expect(events).toEqual(snapshot);
   });
 });

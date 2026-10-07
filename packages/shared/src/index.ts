@@ -8,4 +8,7 @@ export type {
   PrivateState,
   Role,
   Card,
+  ServerError,
 } from './protocol.ts';
+
+export { parseServerError } from './protocol.ts';
