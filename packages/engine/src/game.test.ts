@@ -342,7 +342,7 @@ describe('publicState 不泄露暗牌', () => {
     const pub = publicState(s);
     for (const p of pub.players) {
       expect(p.handCount).toBe(2);
-      expect((p as never).hand).toBeUndefined();
+      expect((p as unknown as { hand?: unknown }).hand).toBeUndefined();
     }
   });
 });
