@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 
-const URL = 'http://localhost:8787';
+const URL = process.env.COUP_URL ?? 'http://localhost:8787';
 const clients = [io(URL), io(URL), io(URL)];
 
 clients.forEach((c, i) => c.on('error', (error) => console.error(`client${i} error:`, error.code, error.params ?? '')));
@@ -26,6 +26,7 @@ async function main() {
   host.emit('intent', { type: 'createRoom', name: 'Alice' });
   const joined = await on(host, 'joined');
   const roomCode = joined.roomCode;
+  if (!/^[0-9A-F]{6}$/.test(roomCode)) throw new Error(`房间码格式无效: ${roomCode}`);
   console.log('✅ 房间创建:', roomCode, 'playerId:', joined.playerId);
 
   const structuredError = on(clients[2], 'error');

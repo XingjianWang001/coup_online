@@ -63,6 +63,9 @@ const english = {
   errorInvalidGameAction: 'That action is not allowed right now.',
   errorGameNotStarted: 'The game has not started yet.',
   errorRoomFull: 'This room is full (maximum {maximum} players).',
+  errorInvalidName: 'Enter a nickname of 1–32 characters.',
+  errorRateLimited: 'Too many rooms created recently. Try again in a minute.',
+  errorServerBusy: 'The server is full. Please try again later.',
   errorUnexpected: 'Something went wrong. Please try again.',
   gameStarted: 'Game started!',
   gameEnded: 'Game over',
@@ -155,6 +158,9 @@ const simplifiedChinese = {
   errorInvalidGameAction: '当前不能执行此行动。',
   errorGameNotStarted: '牌局尚未开始。',
   errorRoomFull: '房间已满（最多 {maximum} 名玩家）。',
+  errorInvalidName: '请输入 1～32 个字符的昵称。',
+  errorRateLimited: '最近创建的房间过多，请一分钟后再试。',
+  errorServerBusy: '服务器房间已满，请稍后再试。',
   errorUnexpected: '出现意外错误，请重试。',
   gameStarted: '牌局开始！',
   gameEnded: '牌局结束',
@@ -295,6 +301,9 @@ export function localizeServerError(locale: Locale, value: unknown): string {
     case 'invalidGameAction': return translate(locale, 'errorInvalidGameAction');
     case 'gameNotStarted': return translate(locale, 'errorGameNotStarted');
     case 'roomFull': return translate(locale, 'errorRoomFull', error.params);
+    case 'invalidName': return translate(locale, 'errorInvalidName');
+    case 'rateLimited': return translate(locale, 'errorRateLimited');
+    case 'serverBusy': return translate(locale, 'errorServerBusy');
     case 'unexpected': return translate(locale, 'errorUnexpected');
   }
 }

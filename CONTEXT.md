@@ -58,11 +58,11 @@ _Avoid_: 弃牌区
 ### 角色与行动
 
 **角色 Role**
-公爵、刺客、队长、大使、女伯爵。
+五种角色采用官方英文名：公爵 Duke、刺客 Assassin、队长 Captain、大使 Ambassador、女伯爵 Contessa。
 _Avoid_: 身份
 
 **行动 Action**
-收入、外援、政变、征税、暗杀、偷窃、交换。
+七种行动采用官方英文名：收入 Income、外援 Foreign Aid、政变 Coup、征税 Tax、暗杀 Assassinate、偷窃 Steal、交换 Exchange。
 _Avoid_: 操作、技能
 
 **默认行动 Default Action**

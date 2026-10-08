@@ -8,12 +8,14 @@
   },
   "types": "./src/index.ts",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@coup/engine": "workspace:*"
   },
   "devDependencies": {
+    "typescript": "^5.7.2",
     "vitest": "^3.0.5"
   }
 }

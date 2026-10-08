@@ -155,6 +155,7 @@ export function App() {
   const [error, setError] = useState<TransientErrorState | null>(null);
   const errorIdRef = useRef(0);
   const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
+  const [canStartTunnel, setCanStartTunnel] = useState(false);
   const [tunnelLoading, setTunnelLoading] = useState(false);
   const [notice, setNotice] = useState<TransientNoticeState | null>(null);
   const noticeIdRef = useRef(0);
@@ -192,6 +193,7 @@ export function App() {
           setHostId(msg.hostId);
           setPlayers(msg.players);
           setTunnelUrl(msg.tunnelUrl ?? null);
+          setCanStartTunnel(msg.canStartTunnel);
           setIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveRoomCode(msg.roomCode);
@@ -254,6 +256,7 @@ export function App() {
           setPlayers([]);
           setHostId('');
           setTunnelUrl(null);
+          setCanStartTunnel(false);
           setTunnelLoading(false);
           setSelectedAction(null);
           setSelectedKeep([]);
@@ -453,6 +456,7 @@ export function App() {
           socket={socket}
           identity={identity}
           tunnelUrl={tunnelUrl}
+          canStartTunnel={canStartTunnel}
           tunnelLoading={tunnelLoading}
           onStartTunnel={startTunnel}
           locale={locale}
@@ -640,6 +644,7 @@ function Lobby(props: {
           value={props.name}
           onChange={(e) => props.setName(e.target.value)}
           placeholder={translate(props.locale, 'nicknamePlaceholder')}
+          maxLength={32}
         />
       </label>
       <button className="primary" onClick={props.onCreate} disabled={!props.name.trim()}>
@@ -722,6 +727,7 @@ interface RoomViewProps {
   serverNow: number | null;
   log: LogEntry[];
   tunnelUrl: string | null;
+  canStartTunnel: boolean;
   tunnelLoading: boolean;
   onStartTunnel: () => void;
   locale: Locale;
@@ -740,10 +746,10 @@ function RoomView(props: RoomViewProps) {
           {translate(props.locale, 'roomCode')} <b>{props.roomCode}</b>
           {translate(props.locale, 'roomCodeHelp')}
         </div>
-        {me === props.hostId && isLocal && (
+        {me === props.hostId && (!isLocal || props.canStartTunnel || props.tunnelUrl) && (
           <InviteLink
             roomCode={props.roomCode}
-            url={props.tunnelUrl}
+            url={isLocal ? props.tunnelUrl : window.location.origin}
             loading={props.tunnelLoading}
             onStart={props.onStartTunnel}
             locale={props.locale}

@@ -37,6 +37,14 @@ describe('Room 断连清理', () => {
 });
 
 describe('Room 加入守卫', () => {
+  it('拒绝空白、过长或带控制字符的昵称', () => {
+    const { room } = makeRoom();
+    for (const name of ['   ', 'x'.repeat(33), 'A\nB']) {
+      expect(() => room.addPlayer(name, 'sock')).toThrow('invalidName');
+    }
+    expect(room.players.size).toBe(0);
+  });
+
   it('六名玩家后拒绝第七名新玩家', () => {
     const { room } = makeRoom();
     for (let index = 1; index <= 6; index += 1) {

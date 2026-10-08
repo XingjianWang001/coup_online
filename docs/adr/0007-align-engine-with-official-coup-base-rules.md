@@ -1,0 +1,3 @@
+# Align the engine with the official Coup base rules
+
+Coup Online treats the standard Indie Boards & Cards Coup rulebook as authoritative for both engine behavior and bilingual rule copy. The two-player game uses the base rule where the starting player receives one coin, not the optional card-drafting variant; because an online room has no previous-game winner, each new game selects its starting player randomly. Digital-only behavior such as response timers, automatic actions, and disconnect forfeits is documented separately as online-play rules rather than presented as part of the official tabletop rules.

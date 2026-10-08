@@ -32,6 +32,9 @@ const SIMPLE_SERVER_ERROR_CODES = [
   'illegalIntent',
   'invalidGameAction',
   'gameNotStarted',
+  'invalidName',
+  'rateLimited',
+  'serverBusy',
   'unexpected',
 ] as const;
 
@@ -64,7 +67,7 @@ export function parseServerError(value: unknown): ServerError {
 
 // 服务器 → 客户端 的消息
 export type ServerMessage =
-  | { type: 'joined'; roomCode: string; playerId: string; secret: string; players: LobbyPlayer[]; hostId: string; tunnelUrl?: string }
+  | { type: 'joined'; roomCode: string; playerId: string; secret: string; players: LobbyPlayer[]; hostId: string; tunnelUrl?: string; canStartTunnel: boolean }
   | { type: 'tunnelUrl'; url: string }
   | { type: 'lobby'; players: LobbyPlayer[]; hostId: string }
   | { type: 'gameStarted'; turnOrder: string[] }

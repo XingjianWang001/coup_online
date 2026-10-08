@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coup Online 腾讯云部署速查表</title>
+  <link rel="stylesheet" href="../assets/reference.css">
+</head>
+<body>
+<main>
+  <p class="eyebrow">可打印速查表</p>
+  <h1>Coup Online 上线清单</h1>
+  <p class="lede">先私有验证，再按公开发布条件启用固定域名。具体命令和配置以仓库的<a href="../docs/deployment.md">部署文档</a>为准。</p>
+
+  <h2>1. 准备服务器</h2>
+  <ol>
+    <li>根据玩家位置、域名和备案要求选择腾讯云服务器地域；官方资料见<a href="../RESOURCES.md">资源清单</a>。</li>
+    <li>选择 Ubuntu 24.04 LTS，设置续费或到期提醒，并将 SSH 访问限制在管理来源。</li>
+    <li>按<a href="../docs/deployment.md">部署文档</a>安装 Docker Engine 和 Compose，并将完整仓库放到服务器。</li>
+    <li>保留仓库已有的 <code>.dockerignore</code>、<code>Dockerfile</code>、<code>compose.yaml</code> 和 <code>Caddyfile</code>；不要另建一套部署配置。</li>
+  </ol>
+
+  <h2>2. 私有验证</h2>
+  <ol>
+    <li>按照部署文档启动 <code>app</code> 服务。此阶段仅将应用绑定到服务器的 <code>127.0.0.1:8787</code>，不要开放公网 80、443 或 8787。</li>
+    <li>确认本机健康检查 <code>http://127.0.0.1:8787/healthz</code> 返回 <code>ok</code>。</li>
+    <li>使用 SSH 端口转发，在浏览器中完成建房、加入、对局和刷新重连测试。</li>
+  </ol>
+
+  <h2>3. 启用固定域名</h2>
+  <ol>
+    <li>确认公开发布所需条件已满足；把域名的 A 记录指向服务器公网 IP。</li>
+    <li>在不提交 Git 的 <code>.env</code> 中设置 <code>SITE_DOMAIN=实际域名</code> 和 <code>TRUST_PROXY=1</code>。</li>
+    <li>开放公网 TCP 80 和 443，保持 8787 仅绑定服务器本机。</li>
+    <li>按照部署文档使用 Compose 的 <code>public</code> profile 启动 Caddy，并确认 <code>https://实际域名/healthz</code> 返回 <code>ok</code>。</li>
+  </ol>
+  <div class="callout">只有在域名解析和公网端口配置完成后，Caddy 才能申请公开 HTTPS 证书。不要用服务器 IP 代替 <code>SITE_DOMAIN</code>。</div>
+
+  <h2>4. 发布与故障定位</h2>
+  <ol>
+    <li>选择没有牌局的时间发布更新；替换应用容器会清空内存中的房间和对局。</li>
+    <li>域名无法访问时，依次检查 DNS 记录、80/443 防火墙规则和 Caddy 日志。</li>
+    <li>网页无法加载时，检查 Compose 服务状态、应用日志和 <code>/healthz</code>。</li>
+    <li>实时交互异常时，检查浏览器里的 <code>/socket.io/</code> 请求。</li>
+  </ol>
+
+  <h2>5. 项目特有事项</h2>
+  <ul>
+    <li>固定域名下，加入链接使用当前网页地址和 <code>?room=六位房间码</code>；客户端已支持生成该链接。</li>
+    <li>服务器重启、容器重建和发布版本都会清空房间。</li>
+  </ul>
+
+  <footer>部署命令与配置见<a href="../docs/deployment.md">仓库部署文档</a>；方案依据见<a href="../docs/adr/0009-private-cloud-staging-and-fixed-domain.md">架构决策</a>和<a href="../RESOURCES.md">资源清单</a>。</footer>
+</main>
+</body>
+</html>
