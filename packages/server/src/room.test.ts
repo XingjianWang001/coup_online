@@ -22,7 +22,7 @@ describe('Room 断连清理', () => {
     const p = room.addPlayer('Alice', 'sock1');
     room.game = { phase: 'gameOver' } as unknown as GameState;
 
-    room.markDisconnected(p.id);
+    room.markDisconnected(p.id, 'sock1');
     expect(room.players.size).toBe(1);
 
     // 断连宽限 90 秒后应移除玩家（而非走 forfeit 保留座位）
@@ -33,6 +33,71 @@ describe('Room 断连清理', () => {
     vi.advanceTimersByTime(5 * 60_000);
     expect(repo.delete).toHaveBeenCalledWith('ABC123');
     expect(events.onEmpty).toHaveBeenCalled();
+  });
+});
+
+describe('Room 连接归属', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('新连接接管后，旧连接不能开局或离开，晚断开也不会让玩家离线或弃权', () => {
+    vi.useFakeTimers();
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'old');
+    room.hostId = alice.id;
+    room.addPlayer('Bob', 'bob');
+    room.addPlayer('Alice', 'new', { id: alice.id, secret: alice.secret });
+
+    expect(() => room.startGame(alice.id, 'old')).toThrow('illegalIntent');
+    expect(() => room.leavePlayer(alice.id, 'old')).toThrow('illegalIntent');
+    expect(room.markDisconnected(alice.id, 'old')).toBe(false);
+    expect(room.playerList.find((p) => p.id === alice.id)?.connected).toBe(true);
+
+    room.startGame(alice.id, 'new');
+    expect(() => room.dispatch(alice.id, 'old', { type: 'chooseAction', action: 'income' })).toThrow('illegalIntent');
+    expect(room.getPublicState()?.players.find((p) => p.id === alice.id)?.coins).toBe(1);
+    expect(room.dispatch(alice.id, 'new', { type: 'chooseAction', action: 'income' }))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ type: 'actionChosen', actorId: alice.id })]));
+
+    vi.advanceTimersByTime(90_001);
+    expect(room.playerList.find((p) => p.id === alice.id)?.connected).toBe(true);
+    expect(room.getPublicState()?.players.find((p) => p.id === alice.id)?.alive).toBe(true);
+  });
+
+  it('当前连接断开后，宽限期内重连取消弃权；未重连则在 90 秒后弃权', () => {
+    vi.useFakeTimers();
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'first');
+    room.hostId = alice.id;
+    room.addPlayer('Bob', 'bob');
+    room.startGame(alice.id, 'first');
+
+    expect(room.markDisconnected(alice.id, 'first')).toBe(true);
+    expect(room.playerList.find((p) => p.id === alice.id)?.connected).toBe(false);
+    vi.advanceTimersByTime(89_000);
+    room.addPlayer('Alice', 'second', { id: alice.id, secret: alice.secret });
+    vi.advanceTimersByTime(1_001);
+    expect(room.playerList.find((p) => p.id === alice.id)?.connected).toBe(true);
+    expect(room.getPublicState()?.players.find((p) => p.id === alice.id)?.alive).toBe(true);
+
+    expect(room.markDisconnected(alice.id, 'second')).toBe(true);
+    vi.advanceTimersByTime(90_000);
+    expect(room.getPublicState()?.players.find((p) => p.id === alice.id)?.alive).toBe(false);
+    expect(events.onBroadcast).toHaveBeenCalledWith(room, expect.arrayContaining([
+      expect.objectContaining({ type: 'eliminated', playerId: alice.id }),
+    ]));
+  });
+
+  it('当前连接主动离开仍立即弃权并移除房间座位', () => {
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'first');
+    room.hostId = alice.id;
+    room.addPlayer('Bob', 'bob');
+    room.startGame(alice.id, 'first');
+
+    expect(room.leavePlayer(alice.id, 'first'))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ type: 'eliminated', playerId: alice.id })]));
+    expect(room.playerList.some((p) => p.id === alice.id)).toBe(false);
+    expect(room.getPublicState()?.players.find((p) => p.id === alice.id)?.alive).toBe(false);
   });
 });
 
@@ -104,7 +169,8 @@ describe('Room 计时结束', () => {
     } = makeRoom({ startingPlayerRandom: () => 0 });
     const alice = room.addPlayer('Alice', 'sock1');
     const bob = room.addPlayer('Bob', 'sock2');
-    room.startGame();
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
     expect(room.getDeadlineAt()).toBe(Date.now() + 60_000);
 
     vi.advanceTimersByTime(60_000);
@@ -126,7 +192,8 @@ describe('Room 计时结束', () => {
     } = makeRoom({ startingPlayerRandom: () => 0 });
     const alice = room.addPlayer('Alice', 'sock1');
     const bob = room.addPlayer('Bob', 'sock2');
-    room.startGame();
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
     room.game!.players.find((player) => player.id === alice.id)!.coins = 10;
 
     vi.advanceTimersByTime(60_000);
@@ -147,8 +214,9 @@ describe('Room 计时结束', () => {
     } = makeRoom({ startingPlayerRandom: () => 0 });
     const alice = room.addPlayer('Alice', 'sock1');
     const bob = room.addPlayer('Bob', 'sock2');
-    room.startGame();
-    room.dispatch(alice.id, { type: 'chooseAction', action: 'foreignAid' });
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'foreignAid' });
 
     vi.advanceTimersByTime(20_000);
 
@@ -167,7 +235,8 @@ describe('Room 开局', () => {
     const alice = room.addPlayer('Alice', 'sock1');
     const bob = room.addPlayer('Bob', 'sock2');
 
-    room.startGame();
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
 
     expect(room.getPublicState()?.currentPlayerId).toBe(bob.id);
     expect(room.getPublicState()?.players).toEqual(expect.arrayContaining([
@@ -181,11 +250,12 @@ describe('Room 开局', () => {
 describe('Room 意图错误', () => {
   it('把引擎规则校验映射为稳定的客户端错误', () => {
     const { room } = makeRoom({ startingPlayerRandom: () => 0 });
-    room.addPlayer('Alice', 'sock1');
+    const alice = room.addPlayer('Alice', 'sock1');
     const bob = room.addPlayer('Bob', 'sock2');
-    room.startGame();
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
 
-    expect(() => room.dispatch(bob.id, { type: 'chooseAction', action: 'income' }))
+    expect(() => room.dispatch(bob.id, 'sock2', { type: 'chooseAction', action: 'income' }))
       .toThrow('invalidGameAction');
   });
 
@@ -193,17 +263,18 @@ describe('Room 意图错误', () => {
     const { room } = makeRoom();
     const alice = room.addPlayer('Alice', 'sock1');
 
-    expect(() => room.dispatch(alice.id, { type: 'futureIntent' })).toThrow('illegalIntent');
+    expect(() => room.dispatch(alice.id, 'sock1', { type: 'futureIntent' })).toThrow('illegalIntent');
   });
 
   it('不把意外基础设施异常误报为规则校验错误', () => {
     const { room, repo } = makeRoom({ startingPlayerRandom: () => 0 });
     const alice = room.addPlayer('Alice', 'sock1');
     room.addPlayer('Bob', 'sock2');
-    room.startGame();
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
     const failure = new Error('storage failed');
     vi.mocked(repo.save).mockImplementationOnce(() => { throw failure; });
 
-    expect(() => room.dispatch(alice.id, { type: 'chooseAction', action: 'income' })).toThrow(failure);
+    expect(() => room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' })).toThrow(failure);
   });
 });

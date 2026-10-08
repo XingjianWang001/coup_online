@@ -7,7 +7,6 @@ import { Server, type Socket } from 'socket.io';
 import { InMemoryGameRepository } from './repository.ts';
 import { Room } from './room.ts';
 import { getTunnelUrl, startTunnel, stopTunnel } from './tunnel.ts';
-import { forfeit } from '@coup/engine';
 import type { ClientIntent } from '@coup/shared';
 import { ClientError, toServerError } from './errors.ts';
 import { reserveRoomCreation } from './room-limits.ts';
@@ -91,7 +90,7 @@ function broadcast(room: Room): void {
     });
     for (const p of room.players.values()) {
       const priv = room.getPrivateState(p.id);
-      if (priv) io.to(p.socketId).emit('privateState', { hand: priv.hand });
+      if (priv && room.isCurrentConnection(p.id, p.socketId)) io.to(p.socketId).emit('privateState', { hand: priv.hand });
     }
   }
 }
@@ -119,9 +118,10 @@ io.on('connection', (socket) => {
     if (roomCode && playerId) {
       const room = rooms.get(roomCode);
       if (room) {
-        room.markDisconnected(playerId);
-        if (room.game) broadcast(room);
-        else broadcastLobby(room);
+        if (room.markDisconnected(playerId, socket.id)) {
+          if (room.game) broadcast(room);
+          else broadcastLobby(room);
+        }
       }
     }
   });
@@ -170,6 +170,12 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       if (!room) throw new ClientError({ code: 'roomNotFound' });
       const reconnect = raw.playerId && raw.secret ? { id: raw.playerId, secret: raw.secret } : undefined;
       const p = room.addPlayer(raw.name, socket.id, reconnect);
+      for (const previousId of io.sockets.adapter.rooms.get(room.code) ?? []) {
+        const previous = io.sockets.sockets.get(previousId);
+        if (previous && previous.data.playerId === p.id && previous.id !== socket.id) {
+          previous.leave(room.code);
+        }
+      }
       socket.join(room.code);
       socket.data.roomCode = room.code;
       socket.data.playerId = p.id;
@@ -199,27 +205,22 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
     case 'startGame': {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new ClientError({ code: 'roomNotFound' });
-      if (socket.data.playerId !== room.hostId) throw new ClientError({ code: 'hostOnly' });
-      const events = room.startGame();
+      const events = room.startGame(socket.data.playerId, socket.id);
       io.to(room.code).emit('gameStarted', { turnOrder: events[0].type === 'started' ? (events[0] as { turnOrder: string[] }).turnOrder : [] });
       broadcast(room);
       break;
     }
     case 'leaveRoom': {
       const room = rooms.get(socket.data.roomCode);
-      if (room) {
-        if (room.game) {
-          // 对局中主动离开 = 立即弃权：翻开暗牌、淘汰、推进回合，避免幽灵玩家卡死
-          const events = room.apply((g) => forfeit(g, socket.data.playerId));
-          io.to(room.code).emit('events', { events });
-          room.removePlayer(socket.data.playerId);
-          broadcast(room);
-        } else {
-          room.removePlayer(socket.data.playerId);
-          broadcastLobby(room);
-        }
-        socket.leave(room.code);
+      if (!room) throw new ClientError({ code: 'roomNotFound' });
+      const events = room.leavePlayer(socket.data.playerId, socket.id);
+      if (room.game) {
+        io.to(room.code).emit('events', { events });
+        broadcast(room);
+      } else {
+        broadcastLobby(room);
       }
+      socket.leave(room.code);
       socket.data.roomCode = undefined;
       socket.data.playerId = undefined;
       socket.emit('left', { reason: 'left' });
@@ -228,7 +229,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
     default: {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new ClientError({ code: 'roomNotFound' });
-      const events = room.dispatch(socket.data.playerId, raw);
+      const events = room.dispatch(socket.data.playerId, socket.id, raw);
       io.to(room.code).emit('events', { events });
       broadcast(room);
     }
