@@ -2,6 +2,14 @@
 
 本配置适用于一台 Ubuntu 24.04 云服务器。Node 服务同时提供网页和 Socket.IO；Docker Compose 默认仅将端口绑定到服务器的 `127.0.0.1:8787`。不需要数据库，房间及对局在服务重启后清空。
 
+## 从 Windows 一键私有部署
+
+在仓库根目录的 Windows PowerShell 中运行 `.\deploy.cmd`。首次运行输入服务器 IPv4 地址或域名、SSH 用户名（默认 `ubuntu`）和本机 PEM 文件完整路径；设置保存在 Git 忽略的 `.deploy-private.local.json`，PEM 文件始终留在 Windows。之后每次运行相同命令即可更新。
+
+命令从 `origin/dev` 取得最新提交，只打包该提交中的文件，不包含未提交改动；通过 SSH 上传、在 Ubuntu 24.04 上检查或安装 Docker、构建并启动应用，然后检查服务器和 Windows 隧道两端的 `/healthz`。成功后打开 `http://127.0.0.1:18887`，保持命令窗口运行；按 `Ctrl+C` 关闭隧道；若 Windows 继续询问 `Terminate batch job (Y/N)?`，输入 `Y`。之后只想重新打开私有访问而不更新服务器时，运行 `.\deploy.cmd -AccessOnly`。SSH 密钥口令或远端 `sudo` 密码如有要求，会在运行时提示，不会保存。
+
+更新前请确认无人正在对局。构建失败不会替换正在运行的容器；如果启动或健康检查失败，命令会报错并显示日志，不会自动回滚。需要恢复时可运行 `.\deploy.cmd -Revision <上次成功的完整提交 SHA>`，上次成功的 SHA 记录在服务器的 `~/.coup-online/current`。服务器上的旧版本目录会保留；磁盘空间不足时需人工清理。Windows 需要 Git 和 OpenSSH 客户端，服务器需要能访问软件源和 Docker 镜像仓库。
+
 ## 私有部署与验证
 
 1. 在服务器安装 Docker Engine 和 Compose。Ubuntu 24.04 可使用系统软件源的 `docker.io` 与 `docker-compose-v2` 包：

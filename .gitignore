@@ -444,6 +444,7 @@ dist/
 .codex/
 skills-lock.json
 PRODUCT.md
+.deploy-private.local.json
 
 
 # coup_online: developer/AI-facing docs (not committed)

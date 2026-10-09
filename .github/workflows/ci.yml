@@ -40,3 +40,19 @@ jobs:
 
       - name: Build client
         run: pnpm build:client
+
+  deploy-scripts:
+    runs-on: windows-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Check Windows deployment package
+        shell: pwsh
+        run: .\deploy.cmd -Check -Revision $env:GITHUB_SHA
+
+      - name: Check Bash syntax after Windows checkout
+        shell: bash
+        run: bash -n scripts/deploy-private-remote.sh

@@ -107,20 +107,32 @@ export class Room {
     return p;
   }
 
-  markDisconnected(id: string): void {
+  isCurrentConnection(id: string, socketId: string): boolean {
     const p = this.players.get(id);
-    if (!p) return;
+    return !!p && p.connected && p.socketId === socketId;
+  }
+
+  private requireCurrentConnection(id: string, socketId: string): void {
+    if (!this.isCurrentConnection(id, socketId)) throw new ClientError({ code: 'illegalIntent' });
+  }
+
+  markDisconnected(id: string, socketId: string): boolean {
+    if (!this.isCurrentConnection(id, socketId)) return false;
+    const p = this.players.get(id)!;
     p.connected = false;
     const t = setTimeout(() => {
+      if (this.players.get(id) !== p || p.connected || p.socketId !== socketId) return;
       // 游戏结束后（gameOver）断连：对局已定胜负，forfeit 无意义，直接移除玩家让房间能排空回收。
       if (!this.game || this.game.phase === 'gameOver') {
         this.removePlayer(id);
       } else {
-        this.apply(() => forfeit(this.game!, id));
+        const events = this.apply((g) => forfeit(g, id));
+        this.events.onBroadcast(this, events);
       }
       this.disconnectTimers.delete(id);
     }, DISCONNECT_GRACE_MS);
     this.disconnectTimers.set(id, t);
+    return true;
   }
 
   clearDisconnectTimer(id: string): void {
@@ -141,7 +153,9 @@ export class Room {
     }
   }
 
-  startGame(): GameEvent[] {
+  startGame(playerId: string, socketId: string): GameEvent[] {
+    this.requireCurrentConnection(playerId, socketId);
+    if (playerId !== this.hostId) throw new ClientError({ code: 'hostOnly' });
     if (this.players.size < 2) {
       throw new ClientError({ code: 'minimumPlayers', params: { minimum: 2 } });
     }
@@ -157,6 +171,13 @@ export class Room {
     this.repo.save(this.code, this.game);
     this.startTimer(ACTION_TIMEOUT_MS);
     return [{ type: 'started', turnOrder: entries.map((p) => p.id) }];
+  }
+
+  leavePlayer(playerId: string, socketId: string): GameEvent[] {
+    this.requireCurrentConnection(playerId, socketId);
+    const events = this.game ? this.apply((g) => forfeit(g, playerId)) : [];
+    this.removePlayer(playerId);
+    return events;
   }
 
   apply(fn: (g: GameState) => GameEvent[]): GameEvent[] {
@@ -239,7 +260,8 @@ export class Room {
   }
 
   // 客户端意图分发
-  dispatch(playerId: string, intent: { type: string } & Record<string, unknown>): GameEvent[] {
+  dispatch(playerId: string, socketId: string, intent: { type: string } & Record<string, unknown>): GameEvent[] {
+    this.requireCurrentConnection(playerId, socketId);
     try {
       switch (intent.type) {
         case 'chooseAction':

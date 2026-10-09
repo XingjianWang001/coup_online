@@ -1,7 +1,7 @@
 import { io } from 'socket.io-client';
 
 const URL = process.env.COUP_URL ?? 'http://localhost:8787';
-const clients = [io(URL), io(URL), io(URL)];
+const clients = [io(URL), io(URL), io(URL), io(URL)];
 
 clients.forEach((c, i) => c.on('error', (error) => console.error(`client${i} error:`, error.code, error.params ?? '')));
 
@@ -18,9 +18,9 @@ const connected = (client) =>
   client.connected ? Promise.resolve() : on(client, 'connect');
 
 async function main() {
-  // 等三个客户端都连上
+  // 等四个客户端都连上，第四个用于接管房主连接
   await Promise.all(clients.map(connected));
-  console.log('✅ 3 个客户端已连接');
+  console.log('✅ 4 个客户端已连接');
 
   const host = clients[0];
   host.emit('intent', { type: 'createRoom', name: 'Alice' });
@@ -45,20 +45,40 @@ async function main() {
   const carol = await cJoined;
   console.log('✅ 3 人加入');
 
-  host.emit('intent', { type: 'startGame' });
-  const started = await Promise.all(clients.map((c) => on(c, 'gameStarted')));
+  const currentHost = clients[3];
+  const takeover = on(currentHost, 'joined');
+  currentHost.emit('intent', { type: 'joinRoom', roomCode, name: 'Alice', playerId: joined.playerId, secret: joined.secret });
+  if ((await takeover).playerId !== joined.playerId) throw new Error('重连没有接管原座位');
+
+  for (const type of ['startGame', 'leaveRoom', 'chooseAction']) {
+    const denied = on(host, 'error');
+    host.emit('intent', { type, action: 'income' });
+    if ((await denied).code !== 'illegalIntent') throw new Error(`旧连接仍可发送 ${type}`);
+  }
+  const staleMessages = [];
+  for (const event of ['gameStarted', 'publicState', 'privateState', 'events']) {
+    host.on(event, () => staleMessages.push(event));
+  }
+  const startedPromises = [clients[1], clients[2], currentHost].map((c) => on(c, 'gameStarted'));
+  const pub1Promise = on(currentHost, 'publicState');
+  currentHost.emit('intent', { type: 'startGame' });
+  const started = await Promise.all(startedPromises);
   console.log('✅ 游戏开始, turnOrder:', started[0].turnOrder);
 
-  const pub1 = await on(host, 'publicState');
+  const pub1 = await pub1Promise;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  if (staleMessages.length) throw new Error(`旧连接收到房间消息: ${staleMessages.join(', ')}`);
+  console.log('✅ 旧连接无法操作或接收房间消息');
+  host.disconnect();
   console.log('✅ 当前回合玩家:', pub1.state.currentPlayerId, '金币:', pub1.state.players[0].coins);
   if (typeof pub1.remainingMs !== 'number' || pub1.remainingMs <= 0) {
     throw new Error('publicState 缺少权威倒计时 remainingMs');
   }
   console.log('✅ 权威倒计时(ms):', pub1.remainingMs);
 
-  const pub2Promise = on(host, 'publicState');
+  const pub2Promise = on(currentHost, 'publicState');
   const players = [
-    { client: host, id: joined.playerId, name: 'Alice' },
+    { client: currentHost, id: joined.playerId, name: 'Alice' },
     { client: clients[1], id: bob.playerId, name: 'Bob' },
     { client: clients[2], id: carol.playerId, name: 'Carol' },
   ];
