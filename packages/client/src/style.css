@@ -300,7 +300,8 @@ input:focus-visible {
 }
 
 .notice {
-  background: color-mix(in srgb, var(--gold) 13%, var(--panel));
+  --surface: color-mix(in srgb, var(--gold) 13%, var(--panel));
+  background: var(--surface);
   color: var(--gold);
   padding: var(--sp-3) var(--sp-4);
   border-radius: var(--r-md);
@@ -473,7 +474,8 @@ input:focus-visible {
 }
 
 .seat {
-  background: var(--felt);
+  --surface: var(--felt);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   display: flex;
@@ -572,22 +574,23 @@ input:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, currentColor 10%, var(--canvas));
+  --surface: color-mix(in srgb, currentColor 10%, var(--canvas));
+  background: var(--surface);
   border: 2px solid;
   border-radius: var(--r-md);
 }
 
-/* 角色图标：实心剪影，细节用牌底色镂空 */
-.role-icon {
+/* 图标：实心剪影，细节用所在表面（--surface）的底色镂空 */
+.glyph {
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.role-icon .f { fill: currentColor; }
-.role-icon .d { stroke: color-mix(in srgb, currentColor 10%, var(--canvas)); stroke-width: 1.4; }
-.card .role-icon { width: 64%; }
+.glyph .f { fill: currentColor; }
+.glyph .d { stroke: var(--surface, var(--canvas)); stroke-width: 1.4; }
+.card .glyph { width: 64%; }
 
 .card--duke       { border-color: var(--duke);       color: var(--duke); }
 .card--assassin   { border-color: var(--assassin);   color: var(--assassin); }
@@ -755,7 +758,8 @@ input:focus-visible {
 }
 
 .panel {
-  background: var(--felt);
+  --surface: var(--felt);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-xl);
   padding: var(--sp-6);
@@ -969,11 +973,9 @@ input:focus-visible {
   border-top: 1px solid var(--line-2);
 }
 
-.role-reference-item .role-icon {
+.role-reference-item .glyph {
   width: 32px;
 }
-
-.role-reference-item .role-icon .d { stroke: var(--panel); }
 
 .role-reference-item > div {
   display: grid;

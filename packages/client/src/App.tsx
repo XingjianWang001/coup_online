@@ -825,7 +825,7 @@ function CardView({ role, locale, unavailable }: { role: Role; locale: Locale; u
   );
 }
 
-// 角色图标：24 格几何，.f 为实心块，.d 为在实心块上镂空的细节
+// 角色图标：24 格几何，.f 为实心块，.d 为镂空细节（见 Glyph）
 const ROLE_GLYPHS: Record<Role, ReactNode> = {
   // 权杖
   duke: (
@@ -883,32 +883,44 @@ const ROLE_GLYPHS: Record<Role, ReactNode> = {
   ),
 };
 
-function RoleIcon({ role }: { role: Role }) {
+function Glyph({ children, size, className = '' }: { children: ReactNode; size?: number; className?: string }) {
   return (
-    <svg className="role-icon" viewBox="0 0 24 24" aria-hidden="true">
-      {ROLE_GLYPHS[role]}
+    <svg className={`glyph ${className}`} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      {children}
     </svg>
   );
+}
+
+function RoleIcon({ role }: { role: Role }) {
+  return <Glyph>{ROLE_GLYPHS[role]}</Glyph>;
 }
 
 function CardBack({ locale }: { locale: Locale }) {
   return <div className="card-back" role="img" aria-label={translate(locale, 'cardBack')} />;
 }
 
+// 银元
 function CoinIcon() {
   return (
-    <svg className="inline-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <circle cx="8" cy="8" r="3.5" fill="none" stroke="currentColor" strokeWidth="1" />
-    </svg>
+    <Glyph size={16} className="inline-icon">
+      <circle className="f" cx="12" cy="12" r="9.5" />
+      <circle className="d" cx="12" cy="12" r="6.2" />
+    </Glyph>
   );
 }
 
+// 皇冠：下移 1.5 使视觉居中
 function CrownIcon() {
   return (
-    <svg className="inline-icon" width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
-      <path d="M3 14 L3 6.5 L6.6 9.5 L10 4.5 L13.4 9.5 L17 6.5 L17 14 Z" fill="currentColor" />
-    </svg>
+    <Glyph size={22} className="inline-icon">
+      <g transform="translate(0 1.5)">
+        <path className="f" d="M4.5 18.5 L3 8 L8.5 12 L12 5 L15.5 12 L21 8 L19.5 18.5 Z" />
+        <circle className="f" cx="3" cy="7" r="1.6" />
+        <circle className="f" cx="12" cy="4" r="1.6" />
+        <circle className="f" cx="21" cy="7" r="1.6" />
+        <line className="d" x1="6.5" y1="15.5" x2="17.5" y2="15.5" />
+      </g>
+    </Glyph>
   );
 }
 
