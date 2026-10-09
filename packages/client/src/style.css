@@ -590,7 +590,86 @@ input:focus-visible {
 }
 .glyph .f { fill: currentColor; }
 .glyph .d { stroke: var(--surface, var(--canvas)); stroke-width: 1.4; }
-.card .glyph { width: 64%; }
+.card .glyph { width: 64%; transition: opacity 150ms ease; }
+
+/* 悬浮看名字：大牌图标淡出、名字淡入；小牌弹出角色同色气泡。只在有悬浮的设备上生效 */
+.card {
+  position: relative;
+  container-type: size;
+}
+
+.card-name {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Noto Serif SC', 'Noto Serif', Georgia, serif;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 150ms ease;
+  pointer-events: none;
+}
+
+/* 字号按字数占满牌宽，上限 17px */
+.card-name > span { font-size: min(17px, calc(150cqi / var(--len))); }
+.card-name .short,
+.card-name[data-fit='never'] .full { display: none; }
+.card-name[data-fit='never'] .short { display: inline; }
+
+.card-tip-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+.card-tip,
+.action-tip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  z-index: 10;
+  transform: translateX(-50%);
+  translate: 0 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 150ms ease, translate 150ms ease;
+}
+
+.card-tip::after,
+.action-tip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -5px;
+  border: 5px solid transparent;
+  border-top-color: var(--surface);
+}
+
+/* 深色字：角色色偏亮，白字对比度不够 */
+.card-tip {
+  --surface: var(--tip);
+  padding: 4px 10px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--canvas);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.35);
+}
+
+@media (hover: hover) {
+  .card:has(.card-name):hover .glyph { opacity: 0; }
+  .card:hover .card-name { opacity: 1; }
+  .card-tip-anchor:hover .card-tip,
+  .action-tip-anchor:hover .action-tip {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
 
 .card--duke       { border-color: var(--duke);       color: var(--duke); }
 .card--assassin   { border-color: var(--assassin);   color: var(--assassin); }
@@ -622,6 +701,44 @@ input:focus-visible {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: var(--sp-2);
+}
+
+/* 行动气泡：银元增减 + 需声称的角色 */
+.action-tip-anchor {
+  position: relative;
+  display: grid;
+}
+
+.action-tip {
+  --surface: oklch(0.12 0.01 155);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: 0 6px 16px rgb(0 0 0 / 0.4);
+}
+
+.action-tip-anchor:has(:focus-visible) .action-tip {
+  opacity: 1;
+  translate: 0 0;
+}
+
+.action-tip-coins {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--gold);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.action-tip .glyph {
+  display: block;
+  width: 22px;
+  height: 22px;
 }
 
 .row {
@@ -1081,6 +1198,9 @@ input:focus-visible {
 
 /* ---------- 减少动态效果：保留透明度/颜色反馈，去掉位移与翻转 ---------- */
 @media (prefers-reduced-motion: reduce) {
+  .card-tip,
+  .action-tip { translate: none; }
+
   .cards-row .card,
   .card-back,
   .notice,
@@ -1122,6 +1242,9 @@ input:focus-visible {
 
 /* ---------- 移动端 ---------- */
 @media (max-width: 768px) {
+  .card-name[data-fit='desktop'] .full { display: none; }
+  .card-name[data-fit='desktop'] .short { display: inline; }
+
   .app {
     padding: var(--sp-4) var(--sp-4) 220px;
   }
