@@ -516,7 +516,7 @@ input:focus-visible {
 .seat-head {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: center;
   column-gap: var(--sp-2);
   row-gap: var(--sp-1);
@@ -975,7 +975,10 @@ input:focus-visible {
 
 .role-reference-item .glyph {
   width: 32px;
+  height: auto;
 }
+
+.coin-legend { color: var(--gold); }
 
 .role-reference-item > div {
   display: grid;

@@ -24,7 +24,7 @@ import {
   send,
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
-import { actionName, roleDescription, roleName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
+import { actionName, coinLegend, roleDescription, roleName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
 import { describeCountdown, describePending, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, remainingSinceReceipt } from './narration.ts';
 import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
@@ -603,6 +603,13 @@ function RulesPanel({
                         </div>
                       </div>
                     ))}
+                    <div className="role-reference-item coin-legend">
+                      <CoinIcon />
+                      <div>
+                        <b>{coinLegend(locale).name}</b>
+                        <p>{coinLegend(locale).description}</p>
+                      </div>
+                    </div>
                   </div>
                 </section>
               )}
@@ -1049,7 +1056,7 @@ function GameBoard(props: {
             {p.name}
             {p.id === me && translate(props.locale, 'selfMarker')}
           </span>
-          <span className="coins"><CoinIcon /> {localizeCoinCount(props.locale, p.coins)}</span>
+          <span className="coins" role="img" aria-label={localizeCoinCount(props.locale, p.coins)}><CoinIcon /> {p.coins}</span>
         </div>
         <div className="cards-row" role="group" aria-label={translate(props.locale, 'influenceCount', { count: p.handCount })}>
           {p.id === me
