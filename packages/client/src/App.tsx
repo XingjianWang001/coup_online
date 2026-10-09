@@ -24,7 +24,7 @@ import {
   send,
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
-import { actionName, roleDescription, roleName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
+import { actionName, coinLegend, roleDescription, roleName, roleShortName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
 import { describeCountdown, describePending, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, remainingSinceReceipt } from './narration.ts';
 import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
@@ -43,14 +43,15 @@ import {
   type NoticeDescriptor,
 } from './localization.ts';
 
-const ACTIONS: { type: ActionType; needsTarget: boolean }[] = [
-  { type: 'income', needsTarget: false },
-  { type: 'foreignAid', needsTarget: false },
-  { type: 'coup', needsTarget: true },
-  { type: 'tax', needsTarget: false },
-  { type: 'assassinate', needsTarget: true },
-  { type: 'steal', needsTarget: true },
-  { type: 'exchange', needsTarget: false },
+// coins / claim 只用于悬浮气泡里的图标说明
+const ACTIONS: { type: ActionType; needsTarget: boolean; coins?: string; claim?: Role }[] = [
+  { type: 'income', needsTarget: false, coins: '+1' },
+  { type: 'foreignAid', needsTarget: false, coins: '+2' },
+  { type: 'coup', needsTarget: true, coins: '−7' },
+  { type: 'tax', needsTarget: false, coins: '+3', claim: 'duke' },
+  { type: 'assassinate', needsTarget: true, coins: '−3', claim: 'assassin' },
+  { type: 'steal', needsTarget: true, coins: '+2', claim: 'captain' },
+  { type: 'exchange', needsTarget: false, claim: 'ambassador' },
 ];
 
 interface CountdownSnapshot {
@@ -603,6 +604,13 @@ function RulesPanel({
                         </div>
                       </div>
                     ))}
+                    <div className="role-reference-item coin-legend">
+                      <CoinIcon />
+                      <div>
+                        <b>{coinLegend(locale).name}</b>
+                        <p>{coinLegend(locale).description}</p>
+                      </div>
+                    </div>
                   </div>
                 </section>
               )}
@@ -810,22 +818,43 @@ function RoomView(props: RoomViewProps) {
   );
 }
 
-// 明牌只靠视觉暗淡区分；读屏另给「已翻开」文案，界面不加字
-function CardView({ role, locale, unavailable }: { role: Role; locale: Locale; unavailable?: boolean }) {
+// 明牌只靠视觉暗淡区分；读屏另给「已翻开」文案，界面不加字。
+// 悬浮看名字：自己的大牌把图标换成名字，对手的小牌弹出同色气泡（仅限有悬浮的设备）。
+function CardView({ role, locale, unavailable, small }: { role: Role; locale: Locale; unavailable?: boolean; small?: boolean }) {
   const label = roleName(locale, role);
-  return (
+  const card = (
     <div
       className={`card card--${role}${unavailable ? ' unavailable' : ''}`}
       role="img"
       aria-label={translate(locale, unavailable ? 'cardRevealed' : 'cardFace', { role: label })}
-      title={label}
     >
       <RoleIcon role={role} />
+      {!small && <CardName name={label} short={roleShortName(locale, role)} />}
     </div>
+  );
+  if (!small) return card;
+  // 气泡放在牌外，免得随明牌一起变暗
+  return (
+    <span className="card-tip-anchor" style={{ '--tip': `var(--${role})` } as CSSProperties}>
+      {card}
+      <span className="card-tip" aria-hidden="true">{label}</span>
+    </span>
   );
 }
 
-// 角色图标：24 格几何，.f 为实心块，.d 为在实心块上镂空的细节
+// 名字按字数缩放到占满牌宽；按每字约 2/3 em 估算，缩到 12px 以下就换缩写：
+// 桌面牌（内宽 68px）容得下 8 个字母，手机牌（内宽 54px）只容得下 6 个。字数估算是有意的简化。
+function CardName({ name, short }: { name: string; short?: string }) {
+  const fit = !short || name.length <= 6 ? 'always' : name.length <= 8 ? 'desktop' : 'never';
+  return (
+    <span className="card-name" data-fit={fit} aria-hidden="true">
+      <span className="full" style={{ '--len': name.length } as CSSProperties}>{name}</span>
+      {short && <span className="short" style={{ '--len': short.length } as CSSProperties}>{short}</span>}
+    </span>
+  );
+}
+
+// 角色图标：24 格几何，.f 为实心块，.d 为镂空细节（见 Glyph）
 const ROLE_GLYPHS: Record<Role, ReactNode> = {
   // 权杖
   duke: (
@@ -883,32 +912,44 @@ const ROLE_GLYPHS: Record<Role, ReactNode> = {
   ),
 };
 
-function RoleIcon({ role }: { role: Role }) {
+function Glyph({ children, size, className = '' }: { children: ReactNode; size?: number; className?: string }) {
   return (
-    <svg className="role-icon" viewBox="0 0 24 24" aria-hidden="true">
-      {ROLE_GLYPHS[role]}
+    <svg className={`glyph ${className}`} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      {children}
     </svg>
   );
+}
+
+function RoleIcon({ role }: { role: Role }) {
+  return <Glyph>{ROLE_GLYPHS[role]}</Glyph>;
 }
 
 function CardBack({ locale }: { locale: Locale }) {
   return <div className="card-back" role="img" aria-label={translate(locale, 'cardBack')} />;
 }
 
+// 银元
 function CoinIcon() {
   return (
-    <svg className="inline-icon" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-      <circle cx="8" cy="8" r="3.5" fill="none" stroke="currentColor" strokeWidth="1" />
-    </svg>
+    <Glyph size={16} className="inline-icon">
+      <circle className="f" cx="12" cy="12" r="9.5" />
+      <circle className="d" cx="12" cy="12" r="6.2" />
+    </Glyph>
   );
 }
 
+// 皇冠：下移 1.5 使视觉居中
 function CrownIcon() {
   return (
-    <svg className="inline-icon" width="18" height="18" viewBox="0 0 20 20" aria-hidden="true">
-      <path d="M3 14 L3 6.5 L6.6 9.5 L10 4.5 L13.4 9.5 L17 6.5 L17 14 Z" fill="currentColor" />
-    </svg>
+    <Glyph size={22} className="inline-icon">
+      <g transform="translate(0 1.5)">
+        <path className="f" d="M4.5 18.5 L3 8 L8.5 12 L12 5 L15.5 12 L21 8 L19.5 18.5 Z" />
+        <circle className="f" cx="3" cy="7" r="1.6" />
+        <circle className="f" cx="12" cy="4" r="1.6" />
+        <circle className="f" cx="21" cy="7" r="1.6" />
+        <line className="d" x1="6.5" y1="15.5" x2="17.5" y2="15.5" />
+      </g>
+    </Glyph>
   );
 }
 
@@ -1037,14 +1078,14 @@ function GameBoard(props: {
             {p.name}
             {p.id === me && translate(props.locale, 'selfMarker')}
           </span>
-          <span className="coins"><CoinIcon /> {localizeCoinCount(props.locale, p.coins)}</span>
+          <span className="coins" role="img" aria-label={localizeCoinCount(props.locale, p.coins)}><CoinIcon /> {p.coins}</span>
         </div>
         <div className="cards-row" role="group" aria-label={translate(props.locale, 'influenceCount', { count: p.handCount })}>
           {p.id === me
             ? props.hand.map((c) => <CardView key={c.id} role={c.role} locale={props.locale} />)
             : Array.from({ length: p.handCount }, (_, i) => <CardBack key={`back-${i}`} locale={props.locale} />)}
           {p.revealed.map((role, i) => (
-            <CardView key={`rev-${i}`} role={role} locale={props.locale} unavailable />
+            <CardView key={`rev-${i}`} role={role} locale={props.locale} unavailable small={p.id !== me} />
           ))}
         </div>
       </div>
@@ -1240,17 +1281,23 @@ function Actions(props: {
               ? props.coins < 3 || mustCoup
               : mustCoup;
         return (
-          <button
-            key={a.type}
-            className={props.selectedAction === a.type ? 'active' : ''}
-            disabled={disabled}
-            onClick={() => {
-              if (a.needsTarget) props.onSelect(a.type);
-              else props.onAction(a.type);
-            }}
-          >
-            {label(a.type)}
-          </button>
+          <span key={a.type} className="action-tip-anchor">
+            <button
+              className={props.selectedAction === a.type ? 'active' : ''}
+              disabled={disabled}
+              aria-label={label(a.type)}
+              onClick={() => {
+                if (a.needsTarget) props.onSelect(a.type);
+                else props.onAction(a.type);
+              }}
+            >
+              {actionName(props.locale, a.type)}
+            </button>
+            <span className="action-tip" aria-hidden="true">
+              {a.coins && <span className="action-tip-coins"><CoinIcon />{a.coins}</span>}
+              {a.claim && <span className={`role--${a.claim}`}><RoleIcon role={a.claim} /></span>}
+            </span>
+          </span>
         );
       })}
       {sel?.needsTarget && (

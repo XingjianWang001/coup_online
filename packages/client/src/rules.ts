@@ -189,5 +189,19 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
 
 export const roleName = (locale: Locale, role: Role): string => ROLE_NAMES[locale][role];
 export const actionName = (locale: Locale, action: ActionType): string => ACTION_NAMES[locale][action];
+// 大牌放不下全名时的缩写；中文名都放得下，不需要
+const ROLE_SHORT_NAMES: Partial<Record<Locale, Partial<Record<Role, string>>>> = {
+  en: { assassin: 'Assn.', captain: 'Capt.', ambassador: 'Amb.', contessa: 'Ctss.' },
+};
+
+export const roleShortName = (locale: Locale, role: Role): string | undefined => ROLE_SHORT_NAMES[locale]?.[role];
+
+// 规则中心图标对照里的银元一行：座位上只显示图标与数字
+const COIN_LEGEND: Record<Locale, { name: string; description: string }> = {
+  'zh-CN': { name: '金币', description: '座位上银元旁的数字即该玩家持有的金币数。' },
+  en: { name: 'Coins', description: 'The number beside the coin on each seat is how many coins that player holds.' },
+};
+
+export const coinLegend = (locale: Locale) => COIN_LEGEND[locale];
 export const roleDescription = (locale: Locale, role: Role): string => ROLE_DESCRIPTIONS[locale][role];
 export const rulesFor = (locale: Locale, level: RuleLevel = 'quick'): readonly RuleSection[] => RULES[locale][level];

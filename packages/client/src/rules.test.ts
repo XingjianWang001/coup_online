@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actionName, roleDescription, roleName, rulesFor, type RuleLevel } from './rules.ts';
+import { actionName, roleDescription, roleName, roleShortName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
 
 describe('official terminology', () => {
   it('uses the official role names in both locales', () => {
@@ -21,6 +21,15 @@ describe('official terminology', () => {
     expect(roleDescription('en', 'ambassador')).toContain('shuffle 2 back');
     expect(roleDescription('zh-CN', 'captain')).toContain('至多 2 金币');
     expect(roleDescription('zh-CN', 'ambassador')).toContain('将 2 张洗回牌堆');
+  });
+
+  // 手机大牌只容得下 6 个字母（见 CardName）；更长的名字必须有放得下的缩写
+  it('gives every role a card-face name short enough for the mobile card', () => {
+    for (const locale of ['zh-CN', 'en'] as const) {
+      for (const role of ROLES) {
+        expect((roleShortName(locale, role) ?? roleName(locale, role)).length).toBeLessThanOrEqual(6);
+      }
+    }
   });
 });
 
