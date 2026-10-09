@@ -316,7 +316,7 @@ input:focus-visible {
 }
 
 /* ---------- 大厅 / 房间 ---------- */
-.lobby {
+.entry-form {
   max-width: 400px;
   margin: var(--sp-8) auto;
   padding: var(--sp-6);
@@ -328,7 +328,7 @@ input:focus-visible {
   gap: var(--sp-3);
 }
 
-.lobby button {
+.entry-form button {
   width: 100%;
 }
 
@@ -450,22 +450,55 @@ input:focus-visible {
   transform: translateY(-4px);
 }
 
+/* 牌桌：自己坐近端，对手按 --seat-angle 落在远端半圈（180° 左手边 → 0° 右手边）。
+   桌面端用 cos()/sin() 把角度投影到椭圆弧上；手机端改为左右两侧 + 正对面的网格。 */
 .table {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
-  gap: var(--sp-3);
+  --rx: calc(50% - 90px);
+  --cy: calc(100% - 80px);
+  --ry: calc(100% - 170px);
+  position: relative;
+  height: 440px;
+}
+
+.table[data-seats='1'] {
+  height: 320px;
+}
+
+.table[data-seats='2'] {
+  height: 240px;
+}
+
+.rail {
+  display: contents;
 }
 
 .seat {
   background: var(--felt);
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
-  padding: var(--sp-4) var(--sp-3);
-  text-align: center;
   display: flex;
+  align-items: center;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, opacity 0.2s ease, filter 0.2s ease;
+}
+
+.seat.opponent {
+  position: absolute;
+  left: calc(50% + cos(var(--seat-angle)) * var(--rx));
+  top: calc(var(--cy) - sin(var(--seat-angle)) * var(--ry));
+  transform: translate(-50%, -50%);
   flex-direction: column;
   gap: var(--sp-2);
-  transition: border-color 0.15s ease, box-shadow 0.2s ease, opacity 0.2s ease, filter 0.2s ease;
+  max-width: 168px;
+  padding: var(--sp-3);
+}
+
+.seat.self {
+  justify-content: center;
+  gap: var(--sp-5);
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: var(--sp-4) var(--sp-6);
 }
 
 .seat.current {
@@ -478,9 +511,30 @@ input:focus-visible {
   filter: saturate(0.4);
 }
 
+.seat-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  column-gap: var(--sp-2);
+  row-gap: var(--sp-1);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.seat.self .seat-head {
+  flex-direction: column;
+  align-items: flex-start;
+}
+
 .seat .name {
   font-weight: 600;
   font-size: 15px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .seat .coins {
@@ -490,31 +544,46 @@ input:focus-visible {
   align-items: center;
   justify-content: center;
   gap: 4px;
+  white-space: nowrap;
 }
 
 .cards-row {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
   gap: var(--sp-2);
   perspective: 600px;
 }
 
+/* 牌的尺寸：自己的牌比对手大一档，近大远小 */
+.card,
+.card-back {
+  width: 72px;
+  height: 102px;
+}
+
+.seat.opponent .card,
+.seat.opponent .card-back {
+  width: 58px;
+  height: 82px;
+}
+
 .card {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 64px;
-  height: 90px;
   text-align: center;
   font-weight: 600;
   font-family: 'Noto Serif SC', 'Noto Serif', Georgia, serif;
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1.2;
   background: color-mix(in srgb, currentColor 10%, var(--canvas));
   border: 2px solid;
   border-radius: var(--r-md);
+}
+
+.seat.opponent .card {
+  font-size: 14px;
 }
 
 .card--duke       { border-color: var(--duke);       color: var(--duke); }
@@ -525,8 +594,6 @@ input:focus-visible {
 
 .card-back {
   display: block;
-  width: 64px;
-  height: 90px;
   border-radius: var(--r-md);
   border: 1px solid var(--gold-dim);
   background: repeating-linear-gradient(45deg, oklch(0.34 0.03 152) 0 5px, oklch(0.28 0.03 152) 5px 10px);
@@ -574,20 +641,30 @@ input:focus-visible {
 }
 
 /* ---------- 叙述条 ---------- */
+/* 桌面端：牌桌中央的一行金字，无底板（座位稀疏，底板会显得错位） */
 .narration {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--cy) - var(--ry) * 0.35);
+  transform: translate(-50%, -50%);
+  width: min(320px, 60%);
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  background: color-mix(in srgb, var(--gold) 8%, var(--felt));
-  border: 1px solid var(--gold-dim);
-  border-radius: var(--r-md);
-  padding: var(--sp-3) var(--sp-4);
+  gap: var(--sp-1);
+  text-align: center;
 }
 
 .narration-text {
   font-weight: 600;
+  font-size: 17px;
+  line-height: 1.4;
   color: var(--gold);
+}
+
+.narration-line {
+  display: block;
+  animation: fade-in 240ms ease;
 }
 
 .narration-timer {
@@ -942,7 +1019,6 @@ input:focus-visible {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.narration { animation: slide-in 200ms cubic-bezier(0.16, 1, 0.3, 1); }
 .controls { animation: slide-in 220ms cubic-bezier(0.16, 1, 0.3, 1); }
 .log { animation: slide-in 200ms cubic-bezier(0.16, 1, 0.3, 1); }
 
@@ -987,7 +1063,6 @@ input:focus-visible {
   .cards-row .card,
   .card-back,
   .notice,
-  .narration,
   .controls,
   .log,
   .overlay,
@@ -996,7 +1071,6 @@ input:focus-visible {
     animation: none;
   }
   .notice,
-  .narration,
   .controls,
   .log,
   .overlay,
@@ -1004,7 +1078,8 @@ input:focus-visible {
     animation: fade-in 120ms linear;
   }
   .cards-row .card.unavailable { animation: reveal-fade 200ms linear; }
-  .narration-timer.urgent { animation: none; }
+  /* 不呼吸，但保留「快到时」的状态：静态琥珀 */
+  .narration-timer.urgent { animation: none; color: var(--warn); }
   .role-btn { transition: none; }
   .role-btn.active {
     transform: none;
@@ -1102,17 +1177,109 @@ input:focus-visible {
     border-radius: var(--r-xl) var(--r-xl) 0 0;
   }
 
-  .table {
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  /* 手机：对手沿左右两侧 + 正对面落座，牌桌中央放叙述 */
+  .table,
+  .table[data-seats='1'],
+  .table[data-seats='2'] {
+    display: grid;
+    grid-template-columns: minmax(0, 100px) minmax(0, 1fr) minmax(0, 100px);
+    grid-template-areas:
+      'left top right'
+      'left center right';
+    grid-template-rows: auto 1fr;
+    gap: var(--sp-2);
+    height: auto;
+  }
+
+  .rail {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--sp-2);
+    min-width: 0;
+  }
+
+  /* 左侧自下而上：顺时针下一位离自己最近 */
+  .rail--left { grid-area: left; flex-direction: column-reverse; }
+  .rail--top { grid-area: top; align-items: center; }
+  .rail--right { grid-area: right; }
+
+  .seat.opponent {
+    position: static;
+    transform: none;
+    width: 100%;
+    max-width: 100px;
+    padding: var(--sp-2) var(--sp-1);
+    gap: var(--sp-1);
+  }
+
+  .seat.opponent .seat-head {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .seat.opponent .name {
+    font-size: 13px;
+  }
+
+  .seat.opponent .coins {
+    font-size: 12px;
+  }
+
+  .seat.opponent .cards-row {
+    gap: var(--sp-1);
+  }
+
+  .seat.opponent .card,
+  .seat.opponent .card-back {
+    width: 40px;
+    height: 56px;
+  }
+
+  .seat.opponent .card {
+    font-size: 11px;
+    border-width: 1.5px;
+    border-radius: var(--r-sm);
+  }
+
+  .seat.opponent .card-back {
+    border-radius: var(--r-sm);
   }
 
   .card,
   .card-back {
-    width: 54px;
-    height: 78px;
+    width: 58px;
+    height: 82px;
   }
 
   .card {
+    font-size: 15px;
+  }
+
+  .seat.self {
+    width: 100%;
+    padding: var(--sp-3) var(--sp-4);
+  }
+
+  /* 手机：座位紧凑，叙述带底板才读得清 */
+  .narration {
+    grid-area: center;
+    position: static;
+    transform: none;
+    width: auto;
+    align-self: center;
+    padding: var(--sp-3);
+    background: color-mix(in srgb, var(--gold) 8%, var(--felt));
+    border: 1px solid var(--gold-dim);
+    border-radius: var(--r-md);
+    transition: opacity 0.2s ease;
+  }
+
+  .narration.is-empty {
+    opacity: 0;
+  }
+
+  .narration-text {
     font-size: 14px;
   }
 
