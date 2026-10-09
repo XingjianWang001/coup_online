@@ -229,11 +229,11 @@ button.active {
 .role-btn:hover:not(:disabled) {
   background: color-mix(in srgb, currentColor 22%, transparent);
 }
-.role-btn.role--duke       { color: var(--duke); }
-.role-btn.role--assassin   { color: var(--assassin); }
-.role-btn.role--captain    { color: var(--captain); }
-.role-btn.role--ambassador { color: var(--ambassador); }
-.role-btn.role--contessa   { color: var(--contessa); }
+.role--duke       { color: var(--duke); }
+.role--assassin   { color: var(--assassin); }
+.role--captain    { color: var(--captain); }
+.role--ambassador { color: var(--ambassador); }
+.role--contessa   { color: var(--contessa); }
 
 /* ---------- 表单 ---------- */
 label {
@@ -572,19 +572,22 @@ input:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  text-align: center;
-  font-weight: 600;
-  font-family: 'Noto Serif SC', 'Noto Serif', Georgia, serif;
-  font-size: 17px;
-  line-height: 1.2;
   background: color-mix(in srgb, currentColor 10%, var(--canvas));
   border: 2px solid;
   border-radius: var(--r-md);
 }
 
-.seat.opponent .card {
-  font-size: 14px;
+/* 角色图标：实心剪影，细节用牌底色镂空 */
+.role-icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
+.role-icon .f { fill: currentColor; }
+.role-icon .d { stroke: color-mix(in srgb, currentColor 10%, var(--canvas)); stroke-width: 1.4; }
+.card .role-icon { width: 64%; }
 
 .card--duke       { border-color: var(--duke);       color: var(--duke); }
 .card--assassin   { border-color: var(--assassin);   color: var(--assassin); }
@@ -958,10 +961,23 @@ input:focus-visible {
 
 .role-reference-item {
   display: grid;
-  gap: var(--sp-1);
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: var(--sp-3);
+  align-items: start;
   min-width: 0;
   padding-block: var(--sp-3);
   border-top: 1px solid var(--line-2);
+}
+
+.role-reference-item .role-icon {
+  width: 32px;
+}
+
+.role-reference-item .role-icon .d { stroke: var(--panel); }
+
+.role-reference-item > div {
+  display: grid;
+  gap: var(--sp-1);
 }
 
 .role-reference-item b {
@@ -1237,7 +1253,6 @@ input:focus-visible {
   }
 
   .seat.opponent .card {
-    font-size: 11px;
     border-width: 1.5px;
     border-radius: var(--r-sm);
   }
@@ -1250,10 +1265,6 @@ input:focus-visible {
   .card-back {
     width: 58px;
     height: 82px;
-  }
-
-  .card {
-    font-size: 15px;
   }
 
   .seat.self {
