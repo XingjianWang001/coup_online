@@ -920,7 +920,7 @@ function Glyph({ children, size, className = '' }: { children: ReactNode; size?:
   );
 }
 
-function RoleIcon({ role }: { role: Role }) {
+export function RoleIcon({ role }: { role: Role }) {
   return <Glyph>{ROLE_GLYPHS[role]}</Glyph>;
 }
 
@@ -929,7 +929,7 @@ function CardBack({ locale }: { locale: Locale }) {
 }
 
 // 银元
-function CoinIcon() {
+export function CoinIcon() {
   return (
     <Glyph size={16} className="inline-icon">
       <circle className="f" cx="12" cy="12" r="9.5" />
