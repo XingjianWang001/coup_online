@@ -93,6 +93,32 @@ async function main() {
   console.log(`✅ ${actor.name} 收入后轮到:`, pub2.state.currentPlayerId, '行动者金币:', actorState.coins);
   console.log(`✅ ${actor.name} 暗牌数量:`, priv.hand.length);
 
+  // 打完一局：Carol、Bob 相继离开（弃权），Alice 获胜
+  let overPub;
+  for (const leaver of [clients[2], clients[1]]) {
+    const leftPromise = on(leaver, 'left');
+    const pubPromise = on(currentHost, 'publicState');
+    leaver.emit('intent', { type: 'leaveRoom' });
+    await leftPromise;
+    overPub = await pubPromise;
+  }
+  if (overPub.state.phase !== 'gameOver' || overPub.state.winnerId !== joined.playerId) throw new Error('牌局没有以 Alice 获胜结束');
+  console.log('✅ 牌局结束，Alice 获胜');
+
+  const lobbyPromise = on(currentHost, 'lobby');
+  currentHost.emit('intent', { type: 'rematch' });
+  const lobby = await lobbyPromise;
+  if (lobby.hostId !== joined.playerId || lobby.players.length !== 1) throw new Error('再来一局后未回到大厅阶段');
+  console.log('✅ 再来一局：回到大厅阶段');
+
+  const rejoined = on(clients[1], 'joined');
+  clients[1].emit('intent', { type: 'joinRoom', roomCode, name: 'Bob' });
+  await rejoined;
+  const restarted = [currentHost, clients[1]].map((c) => on(c, 'gameStarted'));
+  currentHost.emit('intent', { type: 'startGame' });
+  if ((await Promise.all(restarted))[0].turnOrder.length !== 2) throw new Error('再次开局的玩家数不对');
+  console.log('✅ 新玩家凭房间码加入，再次开局');
+
   console.log('🎉 冒烟测试全部通过');
   process.exit(0);
 }

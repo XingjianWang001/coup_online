@@ -1,7 +1,7 @@
 // packages/server/src/room.test.ts
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Room, type RoomOptions } from './room.ts';
-import type { GameState } from '@coup/engine';
+import { forfeit, type GameState } from '@coup/engine';
 import type { GameRepository } from './repository.ts';
 
 function makeRoom(options?: RoomOptions) {
@@ -276,5 +276,110 @@ describe('Room 意图错误', () => {
     vi.mocked(repo.save).mockImplementationOnce(() => { throw failure; });
 
     expect(() => room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' })).toThrow(failure);
+  });
+});
+
+describe('Room 牌局结束后', () => {
+  afterEach(() => vi.useRealTimers());
+
+  function finishedRoom() {
+    const made = makeRoom({ startingPlayerRandom: () => 0 });
+    const { room } = made;
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    const carol = room.addPlayer('Carol', 'sock3');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    room.apply((g) => forfeit(g, carol.id));
+    room.apply((g) => forfeit(g, alice.id));
+    expect(room.game?.phase).toBe('gameOver');
+    return { ...made, alice, bob, carol };
+  }
+
+  it('离开房间不产生失去影响力或淘汰事件，玩家直接移除', () => {
+    const { room, bob } = finishedRoom();
+    expect(room.leavePlayer(bob.id, 'sock2')).toEqual([]);
+    expect(room.players.has(bob.id)).toBe(false);
+    expect(room.getPublicState()?.players.find((p) => p.id === bob.id)?.alive).toBe(true);
+  });
+
+  it('房主发起再来一局后回到大厅阶段且在场玩家不变；非房主被拒', () => {
+    const { room, alice, bob } = finishedRoom();
+    const before = room.playerList;
+    expect(() => room.rematch(bob.id, 'sock2')).toThrow('hostOnly');
+    room.rematch(alice.id, 'sock1');
+    expect(room.game).toBeNull();
+    expect(room.getDeadlineMs()).toBeNull();
+    expect(room.playerList).toEqual(before);
+    room.addPlayer('Dave', 'sock4');
+    room.startGame(alice.id, 'sock1');
+    expect(room.game?.players).toHaveLength(4);
+  });
+
+  it('牌局进行中不能再来一局', () => {
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addPlayer('Bob', 'sock2');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    expect(() => room.rematch(alice.id, 'sock1')).toThrow('illegalIntent');
+  });
+
+  it('房主离线时再来一局权利立即交给下一位在线玩家', () => {
+    vi.useFakeTimers();
+    const { room, alice, bob, carol } = finishedRoom();
+    room.markDisconnected(alice.id, 'sock1');
+    expect(room.hostId).toBe(bob.id);
+    expect(() => room.rematch(alice.id, 'sock1')).toThrow('illegalIntent');
+    room.markDisconnected(bob.id, 'sock2');
+    expect(room.hostId).toBe(carol.id);
+    room.rematch(carol.id, 'sock3');
+    expect(room.game).toBeNull();
+  });
+
+  it('房主在牌局结束前已离线，结束时权利立即转交', () => {
+    vi.useFakeTimers();
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    room.markDisconnected(alice.id, 'sock1');
+    expect(room.hostId).toBe(alice.id);
+    room.apply((g) => forfeit(g, alice.id));
+    expect(room.hostId).toBe(bob.id);
+  });
+
+  it('全员离线时牌局结束，第一位重连的玩家立即获得再来一局权利', () => {
+    vi.useFakeTimers();
+    const { room, alice, bob, carol } = finishedRoom();
+    for (const [p, sock] of [[alice, 'sock1'], [bob, 'sock2'], [carol, 'sock3']] as const) room.markDisconnected(p.id, sock);
+    room.addPlayer('Bob', 'sock2b', { id: bob.id, secret: bob.secret });
+    expect(room.hostId).toBe(bob.id);
+  });
+
+  it('牌局中宽限期已到而弃权的离线玩家不会被带进再来一局，移除时广播', () => {
+    vi.useFakeTimers();
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    const carol = room.addPlayer('Carol', 'sock3');
+    const dave = room.addPlayer('Dave', 'sock4');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    room.markDisconnected(carol.id, 'sock3');
+    vi.advanceTimersByTime(90_000);
+    room.apply((g) => forfeit(g, bob.id));
+    room.markDisconnected(dave.id, 'sock4'); // 宽限期未到，仍可重连
+    room.apply((g) => forfeit(g, dave.id));
+    expect(room.game?.phase).toBe('gameOver');
+
+    room.rematch(alice.id, 'sock1');
+    expect([...room.players.keys()]).toEqual([alice.id, bob.id, dave.id]);
+
+    events.onBroadcast.mockClear();
+    vi.advanceTimersByTime(90_000);
+    expect([...room.players.keys()]).toEqual([alice.id, bob.id]);
+    expect(events.onBroadcast).toHaveBeenCalledWith(room, []);
   });
 });

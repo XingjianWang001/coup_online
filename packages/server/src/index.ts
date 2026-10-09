@@ -87,6 +87,7 @@ function broadcast(room: Room): void {
       state: pub,
       remainingMs: room.getDeadlineMs(),
       deadlineAt: room.getDeadlineAt(),
+      hostId: room.hostId,
     });
     for (const p of room.players.values()) {
       const priv = room.getPrivateState(p.id);
@@ -138,7 +139,8 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       const room = new Room(code, '', repo, {
         onBroadcast: (room, events) => {
           io.to(room.code).emit('events', { events });
-          broadcast(room);
+          if (room.game) broadcast(room);
+          else broadcastLobby(room);
         },
         onEmpty: (r) => rooms.delete(r.code),
       });
@@ -208,6 +210,13 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       const events = room.startGame(socket.data.playerId, socket.id);
       io.to(room.code).emit('gameStarted', { turnOrder: events[0].type === 'started' ? (events[0] as { turnOrder: string[] }).turnOrder : [] });
       broadcast(room);
+      break;
+    }
+    case 'rematch': {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room) throw new ClientError({ code: 'roomNotFound' });
+      room.rematch(socket.data.playerId, socket.id);
+      broadcastLobby(room);
       break;
     }
     case 'leaveRoom': {

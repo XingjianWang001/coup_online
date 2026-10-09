@@ -6,6 +6,7 @@ export type ClientIntent =
   | { type: 'joinRoom'; roomCode: string; name: string; playerId?: string; secret?: string }
   | { type: 'startTunnel' }
   | { type: 'startGame' }
+  | { type: 'rematch' }
   | { type: 'chooseAction'; action: ActionType; targetId?: string }
   | { type: 'challenge' }
   | { type: 'passChallenge' }
@@ -71,7 +72,7 @@ export type ServerMessage =
   | { type: 'tunnelUrl'; url: string }
   | { type: 'lobby'; players: LobbyPlayer[]; hostId: string }
   | { type: 'gameStarted'; turnOrder: string[] }
-  | { type: 'publicState'; state: PublicState; remainingMs: number | null; deadlineAt: number | null }
+  | { type: 'publicState'; state: PublicState; remainingMs: number | null; deadlineAt: number | null; hostId: string }
   | { type: 'privateState'; hand: Card[] }
   | { type: 'events'; events: GameEvent[] }
   | ({ type: 'error' } & ServerError)

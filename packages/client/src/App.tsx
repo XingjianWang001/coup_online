@@ -203,8 +203,15 @@ export function App() {
           setHasLeftRoom(false);
           break;
         case 'lobby':
+          // 服务器只在大厅阶段发送 lobby：再来一局后清掉上一局的牌桌。
           setHostId(msg.hostId);
           setPlayers(msg.players);
+          setPublicState(null);
+          setCountdownSnapshot(null);
+          setHand([]);
+          setLog([]);
+          setSelectedAction(null);
+          setSelectedKeep([]);
           break;
         case 'gameStarted':
           setError(null);
@@ -213,6 +220,7 @@ export function App() {
           logIdRef.current = 0;
           break;
         case 'publicState':
+          setHostId(msg.hostId);
           setPublicState(msg.state);
           setCountdownSnapshot({
             remainingMs: msg.remainingMs,
@@ -791,6 +799,7 @@ function RoomView(props: RoomViewProps) {
       state={publicState}
       hand={props.hand}
       me={me}
+      hostId={props.hostId}
       notice={props.notice}
       remainingMs={props.remainingMs}
       deadlineAt={props.deadlineAt}
@@ -897,6 +906,7 @@ function GameBoard(props: {
   state: PublicState;
   hand: Card[];
   me: string | undefined;
+  hostId: string;
   notice: TransientNoticeState | null;
   selectedAction: ActionType | null;
   setSelectedAction: (a: ActionType | null) => void;
@@ -1095,6 +1105,14 @@ function GameBoard(props: {
             locale={props.locale}
           />
         )}
+
+        {state.phase === 'gameOver' && (me === props.hostId ? (
+          <button className="primary" onClick={() => props.onIntent({ type: 'rematch' })}>
+            {translate(props.locale, 'rematch')}
+          </button>
+        ) : (
+          <div className="waiting">{translate(props.locale, 'waitingForRematch', { name: nameOf(state, props.hostId) })}</div>
+        ))}
 
         {!isMyTurn && !canChallenge && !canBlock && !amLosing && !amExchanging && state.phase !== 'gameOver' && (
           <div className="waiting">{translate(props.locale, 'waitingForAction', { name: nameOf(state, state.currentPlayerId) })}</div>
