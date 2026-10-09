@@ -92,6 +92,7 @@ const english = {
   confirmKeep: 'Keep selected cards',
   cardBack: 'Hidden card',
   cardFace: '{role} card',
+  cardRevealed: '{role} card (revealed)',
   expandLog: 'Expand details for {action}',
   collapseLog: 'Collapse details for {action}',
   narrationAction: '{actor} uses {action}',
@@ -117,7 +118,7 @@ const simplifiedChinese = {
   rules: '规则',
   closeRules: '关闭规则',
   leaveRoom: '离开房间',
-  leaveConfirmation: '确认离开房间？对局中离开将视为弃权。',
+  leaveConfirmation: '确认离开房间？牌局中离开将视为弃权。',
   confirmLeave: '确认离开',
   cancel: '取消',
   settingsTitle: '设置',
@@ -187,6 +188,7 @@ const simplifiedChinese = {
   confirmKeep: '确认保留',
   cardBack: '暗牌',
   cardFace: '{role}牌',
+  cardRevealed: '{role}牌（已翻开）',
   expandLog: '展开{action}的详情',
   collapseLog: '收起{action}的详情',
   narrationAction: '{actor} 发动{action}',
@@ -222,6 +224,7 @@ interface MessageValues {
   revealRole: { role: string };
   exchangePrompt: { count: number };
   cardFace: { role: string };
+  cardRevealed: { role: string };
   expandLog: { action: string };
   collapseLog: { action: string };
   narrationAction: { actor: string; action: string };

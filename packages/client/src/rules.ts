@@ -60,7 +60,7 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
       { id: 'challenges', title: '质疑', body: '任何其他存活玩家都可质疑角色声称。声称属实：质疑者失去 1 影响力，声称者把出示的牌洗回牌堆并抽取替代牌；声称不实：声称者失去 1 影响力，行动或阻挡失败。' },
       { id: 'blocks', title: '阻挡', body: '公爵阻挡外援；女伯爵阻挡对自己的暗杀；队长或大使阻挡对自己的偷窃。阻挡也是可被质疑的声称。' },
       { id: 'mandatory-coup', title: '十金币规则', body: '回合开始时若有 10 枚或更多金币，该回合必须发动政变。' },
-      { id: 'online-play', title: '线上对局', body: '行动与问询窗口有倒计时；超时会自动选择行动或放弃回应。短暂断线可凭本机身份重连，超过宽限时间或主动离开对局会弃权。', onlineOnly: true },
+      { id: 'online-play', title: '线上牌局', body: '行动与问询窗口有倒计时；超时会自动选择行动或放弃回应。短暂断线可凭本机身份重连，超过宽限时间或主动离开牌局会弃权。', onlineOnly: true },
     ],
     full: [
       { id: 'setup', title: '准备', body: '五种角色各有 3 张牌。洗牌后每人获得 2 张暗牌和 2 枚金币，其余牌组成牌堆。确定一名起始玩家；标准两人局中，起始玩家以 1 枚金币开局，另一位玩家仍以 2 枚金币开局。' },
@@ -98,7 +98,7 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
       { id: 'mandatory-coup', title: '十金币规则', body: '回合开始时若有 10 枚或更多金币，只能发动政变。' },
       {
         id: 'online-play',
-        title: '线上对局规则',
+        title: '线上牌局规则',
         body: '以下是本线上版本的流程，不属于桌游基础规则。',
         onlineOnly: true,
         items: [
@@ -106,7 +106,7 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
           '行动阶段限时 60 秒；超时自动选择收入。若玩家已有至少 10 枚金币，则自动对随机合法目标发动政变。',
           '问询窗口限时 20 秒；无论当前等待质疑还是阻挡，超时都视为所有尚未回应的玩家放弃。',
           '刷新或短暂断线后，本机可凭保存的临时身份回到原座位。断线宽限为 90 秒。',
-          '宽限期内未重连会自动弃权；对局中主动离开也会立即弃权。弃权会公开全部剩余暗牌并淘汰该玩家。',
+          '宽限期内未重连会自动弃权；牌局中主动离开也会立即弃权。弃权会公开全部剩余暗牌并淘汰该玩家。',
         ],
       },
     ],

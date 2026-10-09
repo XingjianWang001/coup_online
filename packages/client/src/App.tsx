@@ -5,6 +5,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   type RefObject,
 } from 'react';
@@ -28,6 +30,7 @@ import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { wrappedDialogFocus } from './dialog.ts';
 import { scheduleAutoDismiss } from './transient.ts';
+import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
 import {
   LANGUAGE_OPTIONS,
   loadLocale,
@@ -366,19 +369,11 @@ export function App() {
     send(socket, { type: 'leaveRoom' });
   }
 
-  // 对局中离开需确认（视为弃权）；大厅阶段直接离开。
+  // 牌局进行中离开需确认（视为弃权）；大厅阶段或牌局结束后直接离开。
   function requestLeave() {
-    if (publicState) setConfirmLeave(true);
+    if (publicState && publicState.phase !== 'gameOver') setConfirmLeave(true);
     else leaveRoom();
   }
-
-  // 规则说明：首次进入询问
-  useEffect(() => {
-    if (joined && !identity && !localStorage.getItem('coup_seen_rules')) {
-      setShowRules(true);
-      localStorage.setItem('coup_seen_rules', '1');
-    }
-  }, [joined, identity]);
 
   useEffect(() => {
     document.title = translate(locale, 'appTitle');
@@ -424,7 +419,7 @@ export function App() {
       />
 
       {!joined ? (
-        <Lobby
+        <EntryForm
           name={name}
           setName={setName}
           roomCode={roomCode}
@@ -525,6 +520,7 @@ function LeaveConfirmation(props: { locale: Locale; onConfirm: () => void; onClo
         className="panel"
         role="alertdialog"
         aria-modal="true"
+        aria-label={translate(props.locale, 'leaveRoom')}
         aria-describedby="leave-confirmation-description"
         onClick={(event) => event.stopPropagation()}
       >
@@ -627,7 +623,8 @@ function RulesPanel({
   );
 }
 
-function Lobby(props: {
+// 创建/加入房间之前的入口（不是房间内的大厅阶段）
+function EntryForm(props: {
   name: string;
   setName: (v: string) => void;
   roomCode: string;
@@ -636,18 +633,27 @@ function Lobby(props: {
   onJoin: () => void;
   locale: Locale;
 }) {
+  const canCreate = !!props.name.trim();
+  const canJoin = canCreate && props.roomCode.trim().length === 6;
+  // 回车：填了完整房间码就加入，否则创建房间
+  const onEnter = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+    if (canJoin) props.onJoin();
+    else if (canCreate && !props.roomCode.trim()) props.onCreate();
+  };
   return (
-    <div className="lobby">
+    <div className="entry-form">
       <label>
         {translate(props.locale, 'nickname')}
         <input
           value={props.name}
           onChange={(e) => props.setName(e.target.value)}
+          onKeyDown={onEnter}
           placeholder={translate(props.locale, 'nicknamePlaceholder')}
           maxLength={32}
         />
       </label>
-      <button className="primary" onClick={props.onCreate} disabled={!props.name.trim()}>
+      <button className="primary" onClick={props.onCreate} disabled={!canCreate}>
         {translate(props.locale, 'createRoom')}
       </button>
       <div className="divider">{translate(props.locale, 'or')}</div>
@@ -656,11 +662,12 @@ function Lobby(props: {
         <input
           value={props.roomCode}
           onChange={(e) => props.setRoomCode(e.target.value.toUpperCase())}
+          onKeyDown={onEnter}
           placeholder={translate(props.locale, 'roomCodePlaceholder')}
           maxLength={6}
         />
       </label>
-      <button className="ghost" onClick={props.onJoin} disabled={!props.name.trim() || props.roomCode.trim().length < 3}>
+      <button className="ghost" onClick={props.onJoin} disabled={!canJoin}>
         {translate(props.locale, 'joinRoom')}
       </button>
     </div>
@@ -800,9 +807,18 @@ function RoomView(props: RoomViewProps) {
   );
 }
 
+// 明牌只靠视觉暗淡区分；读屏另给「已翻开」文案，界面不加字
 function CardView({ role, locale, unavailable }: { role: Role; locale: Locale; unavailable?: boolean }) {
   const label = roleName(locale, role);
-  return <div className={`card card--${role}${unavailable ? ' unavailable' : ''}`} aria-label={translate(locale, 'cardFace', { role: label })}>{label}</div>;
+  return (
+    <div
+      className={`card card--${role}${unavailable ? ' unavailable' : ''}`}
+      role="img"
+      aria-label={translate(locale, unavailable ? 'cardRevealed' : 'cardFace', { role: label })}
+    >
+      {label}
+    </div>
+  );
 }
 
 function CardBack({ locale }: { locale: Locale }) {
@@ -929,6 +945,41 @@ function GameBoard(props: {
   const countdown = describeCountdown(props.remainingMs, props.deadlineAt, props.serverNow);
   const effectiveRemaining = effectiveRemainingMs(props.remainingMs, props.deadlineAt, props.serverNow);
   const urgent = effectiveRemaining != null && effectiveRemaining <= 3000;
+  const centerText = narration ?? (isMyTurn && state.phase === 'choosingAction' ? translate(props.locale, 'yourTurn') : null);
+
+  type SeatPlayer = PublicState['players'][number];
+  const seats = placeSeats(state.players, me);
+  const rails: Record<SeatSide, PlacedSeat<SeatPlayer>[]> = { left: [], top: [], right: [] };
+  for (const s of seats.opponents) rails[s.side].push(s);
+
+  // angle 缺省即自己的座位（近端）
+  const renderSeat = (p: SeatPlayer, angle?: number) => {
+    const isCurrent = p.id === state.currentPlayerId;
+    return (
+      <div
+        key={p.id}
+        className={`seat ${angle == null ? 'self' : 'opponent'}${isCurrent ? ' current' : ''}${p.alive ? '' : ' dead'}`}
+        aria-current={isCurrent ? 'true' : undefined}
+        style={angle == null ? undefined : ({ '--seat-angle': `${angle}deg` } as CSSProperties)}
+      >
+        <div className="seat-head">
+          <span className="name">
+            {p.name}
+            {p.id === me && translate(props.locale, 'selfMarker')}
+          </span>
+          <span className="coins"><CoinIcon /> {localizeCoinCount(props.locale, p.coins)}</span>
+        </div>
+        <div className="cards-row" role="group" aria-label={translate(props.locale, 'influenceCount', { count: p.handCount })}>
+          {p.id === me
+            ? props.hand.map((c) => <CardView key={c.id} role={c.role} locale={props.locale} />)
+            : Array.from({ length: p.handCount }, (_, i) => <CardBack key={`back-${i}`} locale={props.locale} />)}
+          {p.revealed.map((role, i) => (
+            <CardView key={`rev-${i}`} role={role} locale={props.locale} unavailable />
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   // 控制区内容切换的键：变化时重挂载以触发入场动画（避免行动选项闪现）
   let controlMode = 'waiting';
@@ -966,39 +1017,24 @@ function GameBoard(props: {
           <div className="notice big"><CrownIcon /> {translate(props.locale, 'winner', { name: nameOf(state, state.winnerId) })}</div>
         )}
 
-      {narration ? (
-        <div className="narration">
-          <span className="narration-text">{narration}</span>
-          {countdown && (
+      <div className="table" data-seats={seats.opponents.length}>
+        {(['left', 'top', 'right'] as const).map((side) => (
+          <div key={side} className={`rail rail--${side}`}>
+            {rails[side].map((s) => renderSeat(s.player, s.angle))}
+          </div>
+        ))}
+        {/* 牌桌中央：live 区常驻，内容换行时淡入；倒计时放在 live 区外，避免读屏每秒播报 */}
+        <div className={`narration${centerText ? '' : ' is-empty'}`}>
+          <span className="narration-text" aria-live="polite">
+            {centerText && <span key={centerText} className="narration-line">{centerText}</span>}
+          </span>
+          {centerText && countdown && (
             <span className={`narration-timer${urgent ? ' urgent' : ''}`}>{countdown}</span>
           )}
         </div>
-      ) : isMyTurn && state.phase === 'choosingAction' && countdown ? (
-        <div className="narration">
-          <span className="narration-text">{translate(props.locale, 'yourTurn')}</span>
-          <span className={`narration-timer${urgent ? ' urgent' : ''}`}>{countdown}</span>
-        </div>
-      ) : null}
-
-      <div className="table">
-        {state.players.map((p) => (
-          <div key={p.id} className={`seat ${p.id === state.currentPlayerId ? 'current' : ''} ${!p.alive ? 'dead' : ''}`}>
-            <div className="name">
-              {p.name}
-              {p.id === me && translate(props.locale, 'selfMarker')}
-            </div>
-            <div className="coins"><CoinIcon /> {localizeCoinCount(props.locale, p.coins)}</div>
-            <div className="cards-row" aria-label={translate(props.locale, 'influenceCount', { count: p.handCount })}>
-              {p.id === me
-                ? props.hand.map((c) => <CardView key={c.id} role={c.role} locale={props.locale} />)
-                : Array.from({ length: p.handCount }, (_, i) => <CardBack key={`back-${i}`} locale={props.locale} />)}
-              {p.revealed.map((role, i) => (
-                <CardView key={`rev-${i}`} role={role} locale={props.locale} unavailable />
-              ))}
-            </div>
-          </div>
-        ))}
       </div>
+
+      {seats.self && renderSeat(seats.self)}
 
       <div className="controls" key={controlKey}>
         {state.phase === 'choosingAction' && isMyTurn && (
