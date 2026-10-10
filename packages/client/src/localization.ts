@@ -55,7 +55,7 @@ const english = {
   leftRoomNotice: 'You left the room.',
   errorRoomNotFound: 'Room not found.',
   errorGameAlreadyStarted: 'The game has already started.',
-  errorHostOnly: 'Only the host can start the game.',
+  errorHostOnly: 'Only the host can do that.',
   errorMinimumPlayers: 'At least {minimum} players are required to start.',
   errorTunnelUnauthorized: 'Only the host device can start the tunnel.',
   errorTunnelStartup: 'The tunnel could not be started. Check the host connection and try again.',
@@ -76,6 +76,8 @@ const english = {
   winner: '{name} wins!',
   yourTurn: 'Your turn',
   waitingForAction: 'Waiting for {name} to act…',
+  rematch: 'Rematch',
+  waitingForRematch: 'Waiting for host {name} to start a rematch…',
   selfMarker: ' (you)',
   coinCount: '{count} coins',
   coinCountOne: '{count} coin',
@@ -151,7 +153,7 @@ const simplifiedChinese = {
   leftRoomNotice: '你已离开房间。',
   errorRoomNotFound: '房间不存在。',
   errorGameAlreadyStarted: '牌局已经开始。',
-  errorHostOnly: '只有房主可以开始牌局。',
+  errorHostOnly: '只有房主可以执行此操作。',
   errorMinimumPlayers: '至少需要 {minimum} 名玩家才能开始。',
   errorTunnelUnauthorized: '只有主机设备可以启动隧道。',
   errorTunnelStartup: '隧道启动失败，请检查主机网络后重试。',
@@ -172,6 +174,8 @@ const simplifiedChinese = {
   winner: '{name} 获胜！',
   yourTurn: '轮到你了',
   waitingForAction: '等待 {name} 行动…',
+  rematch: '再来一局',
+  waitingForRematch: '等待房主 {name} 发起再来一局…',
   selfMarker: ' (你)',
   coinCount: '{count} 金币',
   coinCountOne: '{count} 金币',
@@ -217,6 +221,7 @@ interface MessageValues {
   errorRoomFull: { maximum: number };
   winner: { name: string };
   waitingForAction: { name: string };
+  waitingForRematch: { name: string };
   coinCount: { count: number };
   coinCountOne: { count: number };
   influenceCount: { count: number };

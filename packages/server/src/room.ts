@@ -94,6 +94,7 @@ export class Room {
         existing.connected = true;
         if (name) existing.name = name;
         this.clearDisconnectTimer(reconnect.id);
+        this.handOffOfflineHost();
         return existing;
       }
     }
@@ -120,11 +121,13 @@ export class Room {
     if (!this.isCurrentConnection(id, socketId)) return false;
     const p = this.players.get(id)!;
     p.connected = false;
+    this.handOffOfflineHost();
     const t = setTimeout(() => {
       if (this.players.get(id) !== p || p.connected || p.socketId !== socketId) return;
       // 游戏结束后（gameOver）断连：对局已定胜负，forfeit 无意义，直接移除玩家让房间能排空回收。
       if (!this.game || this.game.phase === 'gameOver') {
         this.removePlayer(id);
+        this.events.onBroadcast(this, []);
       } else {
         const events = this.apply((g) => forfeit(g, id));
         this.events.onBroadcast(this, events);
@@ -150,7 +153,28 @@ export class Room {
       this.scheduleEmptyCleanup();
     } else if (id === this.hostId) {
       this.hostId = this.players.keys().next().value!;
+      this.handOffOfflineHost();
     }
+  }
+
+  // 牌局结束后房主离线：再来一局的权利立即交给最早加入的在线玩家，不等宽限期。
+  private handOffOfflineHost(): void {
+    if (this.game?.phase !== 'gameOver' || this.players.get(this.hostId)?.connected) return;
+    const next = [...this.players.values()].find((p) => p.connected);
+    if (next) this.hostId = next.id;
+  }
+
+  rematch(playerId: string, socketId: string): void {
+    this.requireCurrentConnection(playerId, socketId);
+    if (this.game?.phase !== 'gameOver') throw new ClientError({ code: 'illegalIntent' });
+    if (playerId !== this.hostId) throw new ClientError({ code: 'hostOnly' });
+    // 牌局中宽限期已到而弃权的玩家仍占着座位且没有计时器，不带进新的大厅阶段。
+    for (const p of [...this.players.values()]) {
+      if (!p.connected && !this.disconnectTimers.has(p.id)) this.removePlayer(p.id);
+    }
+    this.game = null;
+    this.repo.delete(this.code);
+    this.clearTimer();
   }
 
   startGame(playerId: string, socketId: string): GameEvent[] {
@@ -175,7 +199,8 @@ export class Room {
 
   leavePlayer(playerId: string, socketId: string): GameEvent[] {
     this.requireCurrentConnection(playerId, socketId);
-    const events = this.game ? this.apply((g) => forfeit(g, playerId)) : [];
+    // 牌局结束后离开不算弃权，直接移除。
+    const events = this.game && this.game.phase !== 'gameOver' ? this.apply((g) => forfeit(g, playerId)) : [];
     this.removePlayer(playerId);
     return events;
   }
@@ -190,6 +215,7 @@ export class Room {
 
   private afterMutation(_events: GameEvent[]): void {
     if (!this.game) return;
+    this.handOffOfflineHost();
     switch (this.game.phase) {
       case 'choosingAction':
         this.startTimer(ACTION_TIMEOUT_MS);
