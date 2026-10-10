@@ -703,6 +703,14 @@ input:focus-visible {
   gap: var(--sp-2);
 }
 
+/* 必须政变提示、选目标标题：占满整行 */
+.actions > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
 /* 行动气泡：银元增减 + 需声称的角色 */
 .action-tip-anchor {
   position: relative;
