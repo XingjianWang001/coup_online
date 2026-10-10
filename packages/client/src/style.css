@@ -1246,7 +1246,11 @@ input:focus-visible {
   .card-name[data-fit='desktop'] .short { display: inline; }
 
   .app {
-    padding: var(--sp-4) var(--sp-4) 220px;
+    padding: var(--sp-4);
+  }
+
+  .app:has(.controls) {
+    padding-bottom: 0;
   }
 
   h1 {
@@ -1423,11 +1427,11 @@ input:focus-visible {
   }
 
   .controls {
-    position: fixed;
-    left: 0;
-    right: 0;
+    /* sticky 而非 fixed：滚到底时回到记录区之后，不遮挡最后几行 */
+    position: sticky;
     bottom: 0;
-    margin: 0;
+    order: 1;
+    margin: 0 calc(-1 * var(--sp-4));
     border-radius: var(--r-lg) var(--r-lg) 0 0;
     border-bottom: none;
     padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));
