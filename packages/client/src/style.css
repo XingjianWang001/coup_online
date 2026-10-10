@@ -1444,8 +1444,8 @@ input:focus-visible {
     border-bottom: none;
     padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));
     z-index: 5;
-    max-height: 45vh;
-    overflow-y: auto;
+    /* 不设 overflow：滚动容器会裁掉第一排行动按钮的气泡。
+       ponytail: 视口矮于行动栏（约 260px）时栏顶看不全；真遇到再加 max-height + 气泡朝下。 */
     box-shadow: 0 -8px 24px oklch(0.08 0.01 155 / 0.55);
   }
 }
