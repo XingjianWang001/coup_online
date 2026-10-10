@@ -55,4 +55,6 @@ jobs:
 
       - name: Check Bash syntax after Windows checkout
         shell: bash
-        run: bash -n scripts/deploy-private-remote.sh
+        run: |
+          bash -n scripts/deploy-private-remote.sh
+          bash -n scripts/pr-review/review.sh

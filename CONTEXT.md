@@ -51,7 +51,7 @@ _Avoid_: 生命、命
 因失去影响力而公开翻开的牌。
 
 **牌面 Card Face**
-牌的正面向外观，展示角色名或角色铭文。
+牌的正面向外观，展示角色色与角色图标，不显示角色名。
 
 **牌背 Card Back**
 牌的面朝下外观，无角色信息，用于代表他人未翻开的暗牌。
@@ -68,6 +68,9 @@ _Avoid_: 弃牌区
 **角色 Role**
 五种角色采用官方英文名：公爵 Duke、刺客 Assassin、队长 Captain、大使 Ambassador、女伯爵 Contessa。
 _Avoid_: 身份
+
+**角色图标 Role Icon**
+每个角色唯一对应的图形符号，在牌面上代替角色名；与角色的对照见规则中心。
 
 **行动 Action**
 七种行动采用官方英文名：收入 Income、外援 Foreign Aid、政变 Coup、征税 Tax、暗杀 Assassinate、偷窃 Steal、交换 Exchange。
