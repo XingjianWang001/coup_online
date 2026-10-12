@@ -47,13 +47,16 @@ async function main() {
 
   const currentHost = clients[3];
   const takeover = on(currentHost, 'joined');
+  const replaced = on(host, 'left');
   currentHost.emit('intent', { type: 'joinRoom', roomCode, name: 'Alice', playerId: joined.playerId, secret: joined.secret });
   if ((await takeover).playerId !== joined.playerId) throw new Error('重连没有接管原座位');
+  if ((await replaced).reason !== 'replaced') throw new Error('旧连接没有收到 replaced 通知');
 
+  // 旧连接的房间状态已清空：房间内操作报 roomNotFound 而不是卡在 illegalIntent
   for (const type of ['startGame', 'leaveRoom', 'chooseAction']) {
     const denied = on(host, 'error');
     host.emit('intent', { type, action: 'income' });
-    if ((await denied).code !== 'illegalIntent') throw new Error(`旧连接仍可发送 ${type}`);
+    if ((await denied).code !== 'roomNotFound') throw new Error(`旧连接仍可发送 ${type}`);
   }
   const staleMessages = [];
   for (const event of ['gameStarted', 'publicState', 'privateState', 'events']) {

@@ -176,6 +176,9 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         const previous = io.sockets.sockets.get(previousId);
         if (previous && previous.data.playerId === p.id && previous.id !== socket.id) {
           previous.leave(room.code);
+          previous.data.roomCode = undefined;
+          previous.data.playerId = undefined;
+          previous.emit('left', { reason: 'replaced' });
         }
       }
       socket.join(room.code);

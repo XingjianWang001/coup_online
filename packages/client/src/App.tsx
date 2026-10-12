@@ -167,7 +167,7 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
   const [selectedKeep, setSelectedKeep] = useState<string[]>([]);
-  const [hasLeftRoom, setHasLeftRoom] = useState(false);
+  const [leftReason, setLeftReason] = useState<'left' | 'replaced' | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [countdownSnapshot, setCountdownSnapshot] = useState<CountdownSnapshot | null>(null);
   const [serverOffsetMs, setServerOffsetMs] = useState<number | null>(null);
@@ -201,7 +201,7 @@ export function App() {
           setIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveRoomCode(msg.roomCode);
-          setHasLeftRoom(false);
+          setLeftReason(null);
           break;
         case 'lobby':
           // 服务器只在大厅阶段发送 lobby：再来一局后清掉上一局的牌桌。
@@ -257,10 +257,13 @@ export function App() {
           break;
         case 'left':
           setError(null);
-          setHasLeftRoom(true);
+          setLeftReason(msg.reason);
           setJoined(null);
-          clearRoomCode();
-          clearIdentity();
+          // 被其他标签页接管时，localStorage 里的身份属于新标签页，不能清掉。
+          if (msg.reason === 'left') {
+            clearRoomCode();
+            clearIdentity();
+          }
           setIdentity(null);
           setPublicState(null);
           setCountdownSnapshot(null);
@@ -446,7 +449,7 @@ export function App() {
           publicState={publicState}
           hand={hand}
           notice={notice}
-          hasLeftRoom={hasLeftRoom}
+          leftReason={leftReason}
           remainingMs={remainingMs}
           deadlineAt={countdownSnapshot?.deadlineAt ?? null}
           serverNow={serverNow}
@@ -739,7 +742,7 @@ interface RoomViewProps {
   publicState: PublicState | null;
   hand: Card[];
   notice: TransientNoticeState | null;
-  hasLeftRoom: boolean;
+  leftReason: 'left' | 'replaced' | null;
   selectedAction: ActionType | null;
   setSelectedAction: (a: ActionType | null) => void;
   selectedKeep: string[];
@@ -796,9 +799,9 @@ function RoomView(props: RoomViewProps) {
             {translate(props.locale, 'startGame')} ({translate(props.locale, 'startGameRequirement')})
           </button>
         )}
-        {props.hasLeftRoom && (
+        {props.leftReason && (
           <div className="left-room-notice">
-            {translate(props.locale, 'leftRoomNotice')}
+            {translate(props.locale, props.leftReason === 'replaced' ? 'replacedRoomNotice' : 'leftRoomNotice')}
           </div>
         )}
       </div>
