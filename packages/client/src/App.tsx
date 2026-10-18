@@ -428,15 +428,18 @@ export function App() {
       />
 
       {!joined ? (
-        <EntryForm
-          name={name}
-          setName={setName}
-          roomCode={roomCode}
-          setRoomCode={setRoomCode}
-          onCreate={createRoom}
-          onJoin={joinRoom}
-          locale={locale}
-        />
+        <>
+          <EntryForm
+            name={name}
+            setName={setName}
+            roomCode={roomCode}
+            setRoomCode={setRoomCode}
+            onCreate={createRoom}
+            onJoin={joinRoom}
+            locale={locale}
+          />
+          <FilingFooter />
+        </>
       ) : (
         <RoomView
           roomCode={joined}
@@ -690,6 +693,25 @@ function EntryForm(props: {
         {translate(props.locale, 'joinRoom')}
       </button>
     </div>
+  );
+}
+
+// 备案号为官方编号，任何语言下都不翻译
+function FilingFooter() {
+  return (
+    <footer className="filing">
+      <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">
+        粤ICP备2026157913号-1
+      </a>
+      <a
+        href="https://beian.mps.gov.cn/#/query/webSearch?code=44010602017448"
+        target="_blank"
+        rel="noreferrer"
+      >
+        <img src="/beian-police.png" alt="" width={14} height={15} />
+        粤公网安备44010602017448号
+      </a>
+    </footer>
   );
 }
 
