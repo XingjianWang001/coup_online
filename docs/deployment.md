@@ -67,4 +67,22 @@ sudo docker compose --profile public up -d --build
 
 Caddy 会为该域名申请 HTTPS 证书，并代理网页与 Socket.IO；`https://实际域名/healthz` 应返回 `ok`。应用自身的 8787 端口仍只绑定服务器本机。域名应先正确解析到此服务器，否则证书申请不会成功。不要在没有域名时把服务器 IP 填入 `SITE_DOMAIN` 来期待浏览器信任的 HTTPS。
 
+## 同一服务器上的其他站点
+
+这个 Caddy 也是整台服务器的入口（[ADR 0010](adr/0010-coup-caddy-as-shared-server-edge.md)）。公网发布时，部署脚本会创建 `~/.edge/sites` 与 `~/.edge/www`，并通过 `.env` 的 `EDGE_DIR` 将它们只读挂载到 Caddy 容器的 `/etc/caddy/sites` 与 `/srv/www`。个人主页等站点由各自的仓库上传文件，例如 `~/.edge/sites/www.caddy`：
+
+```caddy
+www.davidxjwang.com {
+  encode zstd gzip
+  root * /srv/www
+  file_server
+}
+
+davidxjwang.com {
+  redir https://www.davidxjwang.com{uri} permanent
+}
+```
+
+只更新 `~/.edge/www` 里的静态文件时，不需要重启或重载 Caddy。新增或修改片段后，在服务器上运行 `sudo docker compose -p coup-online exec caddy caddy reload --config /etc/caddy/Caddyfile`。如果之后重新部署 coup，Caddy 启动时也会读入这些片段。新域名同样需要配置 A 记录，Caddy 会自动申请证书。去掉 coup 的 `Domain` 会同时停掉这些站点。
+
 当前项目借用了《Coup》的名称和规则相关表达；公开发布前，应根据取得的授权回复和主管部门要求确认知识产权与备案／游戏审批条件。私有验证不等于已经满足公开发布条件。

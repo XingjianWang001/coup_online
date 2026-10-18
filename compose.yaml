@@ -20,6 +20,8 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${EDGE_DIR:-./.edge}/sites:/etc/caddy/sites:ro
+      - ${EDGE_DIR:-./.edge}/www:/srv/www:ro
       - caddy_data:/data
       - caddy_config:/config
 

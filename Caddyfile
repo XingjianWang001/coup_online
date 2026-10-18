@@ -2,3 +2,7 @@
   encode zstd gzip
   reverse_proxy app:8787
 }
+
+# ponytail: 这个 Caddy 兼做整台服务器的入口，其他站点的片段放在服务器 ~/.edge/sites/；
+# 80/443 因此随 coup-online 项目启停。触发条件满足时拆成独立 edge，见 ADR-0010 与 #26。
+import /etc/caddy/sites/*.caddy
