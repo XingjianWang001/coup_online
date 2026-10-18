@@ -5,6 +5,8 @@ revision=${1:?A release commit is required}
 archive_name=${2:?An archive name is required}
 [[ $revision =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid release commit.' >&2; exit 1; }
 [[ $archive_name =~ ^coup-online-[0-9a-f]{40}-[0-9a-f-]+\.tar$ ]] || { echo 'Invalid archive name.' >&2; exit 1; }
+domain=${3:-}
+[[ -z $domain || $domain =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$ ]] || { echo 'Invalid domain.' >&2; exit 1; }
 
 root="$HOME/.coup-online"
 release="$root/releases/$revision"
@@ -35,7 +37,15 @@ fi
 cd "$release"
 echo "Building $revision before replacing the running app..."
 sudo env BUILDKIT_PROGRESS=plain docker compose -p coup-online -f compose.yaml build app
-sudo docker compose -p coup-online -f compose.yaml up -d --no-build app
+if [[ -n $domain ]]; then
+  # 每个 release 目录都是新的，.env 需在每次发布时重写
+  printf 'SITE_DOMAIN=%s\nTRUST_PROXY=1\n' "$domain" > .env
+  sudo docker compose -p coup-online -f compose.yaml --profile public up -d --no-build
+else
+  # 删去 Domain 后，停掉之前公网发布留下的 Caddy，80/443 不再对外
+  sudo docker compose -p coup-online -f compose.yaml --profile public rm -sf caddy
+  sudo docker compose -p coup-online -f compose.yaml up -d --no-build app
+fi
 
 for ((attempt = 1; attempt <= 30; attempt++)); do
   if curl -fsS --max-time 2 http://127.0.0.1:8787/healthz 2>/dev/null | grep -qx ok; then

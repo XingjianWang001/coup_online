@@ -53,14 +53,18 @@
 
 更新源码后，在服务器目录执行 `sudo docker compose up -d --build app`。构建成功后 Compose 会替换容器；正在进行的房间和对局会丢失，宜先通知玩家。`sudo docker compose logs --tail=100 app` 查看日志，`sudo docker compose ps` 查看容器状态。云服务器防火墙无需为私有验证开放 8787 端口。
 
-## 将来启用固定网址
+## 启用固定网址
 
-取得域名并完成公开发布所需手续后，将域名的 A 记录指向服务器公网 IP，在项目目录的 `.env` 写入 `SITE_DOMAIN=实际域名` 与 `TRUST_PROXY=1`，然后执行：
+取得域名并完成公开发布所需手续后，将域名的 A 记录指向服务器公网 IP，并在腾讯云轻量应用服务器的防火墙开放 TCP 80 和 443。
+
+使用 `deploy.cmd` 时，在 `.deploy-private.local.json` 中加入 `"Domain": "实际域名"`（例如 `"coup.davidxjwang.com"`），再运行 `.\deploy.cmd`。脚本每次发布都会在新版本目录写入 `SITE_DOMAIN` 与 `TRUST_PROXY=1`，以 `public` 配置同时启动应用和 Caddy，最后从 Windows 检查 `https://实际域名/healthz`，成功后直接退出，不再开 SSH 隧道。删去 `Domain` 后再次部署会移除 Caddy 容器、恢复私有部署行为；`.\deploy.cmd -AccessOnly` 仍可打开 SSH 隧道排查问题。首页底部显示的 ICP 与公安备案号写在 `packages/client/src/App.tsx` 的 `FilingFooter` 中，更换域名或备案主体时需同步修改。
+
+手动部署时，在项目目录的 `.env` 写入 `SITE_DOMAIN=实际域名` 与 `TRUST_PROXY=1`，然后执行：
 
 ```bash
 sudo docker compose --profile public up -d --build
 ```
 
-在腾讯云轻量应用服务器的防火墙开放 TCP 80 和 443。Caddy 会为该域名申请 HTTPS 证书，并代理网页与 Socket.IO；`https://实际域名/healthz` 应返回 `ok`。应用自身的 8787 端口仍只绑定服务器本机。域名应先正确解析到此服务器，否则证书申请不会成功。不要在没有域名时把服务器 IP 填入 `SITE_DOMAIN` 来期待浏览器信任的 HTTPS。
+Caddy 会为该域名申请 HTTPS 证书，并代理网页与 Socket.IO；`https://实际域名/healthz` 应返回 `ok`。应用自身的 8787 端口仍只绑定服务器本机。域名应先正确解析到此服务器，否则证书申请不会成功。不要在没有域名时把服务器 IP 填入 `SITE_DOMAIN` 来期待浏览器信任的 HTTPS。
 
 当前项目借用了《Coup》的名称和规则相关表达；公开发布前，应根据取得的授权回复和主管部门要求确认知识产权与备案／游戏审批条件。私有验证不等于已经满足公开发布条件。

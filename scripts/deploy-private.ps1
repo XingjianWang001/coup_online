@@ -32,6 +32,10 @@ function Read-DeployConfig {
 
   if ($config.Host -notmatch '^[A-Za-z0-9][A-Za-z0-9.-]*$') { throw 'Invalid server host in deploy config.' }
   if ($config.User -notmatch '^[A-Za-z_][A-Za-z0-9_-]*$') { throw 'Invalid SSH user in deploy config.' }
+  # 可选 Domain：设置后以 Caddy 公网 HTTPS 发布，不再开 SSH 隧道
+  $domain = if ($config.PSObject.Properties['Domain']) { ([string]$config.Domain).ToLowerInvariant() } else { '' }
+  if ($domain -and $domain -notmatch '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$') { throw 'Invalid Domain in deploy config.' }
+  $config | Add-Member -NotePropertyName Domain -NotePropertyValue $domain -Force
   $key = Get-Item -LiteralPath $config.KeyPath -ErrorAction Stop
   if ($key.PSIsContainer) { throw 'The PEM path must be a file.' }
   $config.KeyPath = $key.FullName
@@ -101,8 +105,31 @@ try {
   Assert-ExitCode 'Uploading the release archive'
   Write-Host 'Building and starting the server app...'
   $archiveName = Split-Path -Leaf $archive
-  & ssh.exe @sshOptions -tt -i $keyCopy $target "cd && bash .coup-online/uploads/$commit/deploy-private-remote.sh $commit $archiveName"
+  & ssh.exe @sshOptions -tt -i $keyCopy $target "cd && bash .coup-online/uploads/$commit/deploy-private-remote.sh $commit $archiveName $($config.Domain)"
   Assert-ExitCode 'Deploying and checking the server'
+  }
+
+  if ($config.Domain -and -not $AccessOnly) {
+    $publicUrl = "https://$($config.Domain)"
+    $healthy = $false
+    $lastError = 'no response'
+    # Windows PowerShell 5.1 可能默认不启用 TLS 1.2
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    # Caddy 首次签发证书需要一些时间
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+      try {
+        $response = Invoke-WebRequest -Uri "$publicUrl/healthz" -UseBasicParsing -TimeoutSec 5
+        if ($response.StatusCode -eq 200 -and $response.Content.Trim() -eq 'ok') {
+          $healthy = $true
+          break
+        }
+        $lastError = "HTTP $($response.StatusCode)"
+      } catch { $lastError = $_.Exception.Message }
+      Start-Sleep -Seconds 2
+    }
+    if (-not $healthy) { throw "$publicUrl/healthz did not answer ok ($lastError). Check DNS, firewall ports 80/443 and 'docker compose -p coup-online logs caddy'." }
+    Write-Host "Deployment and public access verified: $publicUrl"
+    return
   }
 
   $sshPath = (Get-Command ssh.exe).Source
