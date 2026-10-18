@@ -38,8 +38,7 @@ cd "$release"
 echo "Building $revision before replacing the running app..."
 sudo env BUILDKIT_PROGRESS=plain docker compose -p coup-online -f compose.yaml build app
 if [[ -n $domain ]]; then
-  # 每个 release 目录都是新的，.env 需在每次发布时重写
-  # sudo 会改写 HOME，这里写入绝对路径；其他站点从 ~/.edge 接入同一个 Caddy（ADR-0010）
+  # 每个 release 目录都是新的：.env 每次重写，EDGE_DIR 用固定绝对路径；其他站点从 ~/.edge 接入同一个 Caddy（ADR-0010）
   mkdir -p "$HOME/.edge/sites" "$HOME/.edge/www"
   printf 'SITE_DOMAIN=%s\nTRUST_PROXY=1\nEDGE_DIR=%s\n' "$domain" "$HOME/.edge" > .env
   sudo docker compose -p coup-online -f compose.yaml --profile public up -d --no-build

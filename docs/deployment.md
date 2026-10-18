@@ -83,6 +83,6 @@ davidxjwang.com {
 }
 ```
 
-只更新 `~/.edge/www` 里的静态文件时，不需要重启或重载 Caddy。新增或修改片段后，在服务器上运行 `sudo docker compose -p coup-online exec caddy caddy reload --config /etc/caddy/Caddyfile`。如果之后重新部署 coup，Caddy 启动时也会读入这些片段。新域名同样需要配置 A 记录，Caddy 会自动申请证书。去掉 coup 的 `Domain` 会同时停掉这些站点。
+只更新 `~/.edge/www` 里的静态文件时，不需要重启或重载 Caddy。新增或修改片段后，在服务器上运行 `sudo docker exec coup-online-caddy-1 caddy reload --config /etc/caddy/Caddyfile`。如果之后重新部署 coup，Caddy 启动时也会读入这些片段。新域名同样需要配置 A 记录，Caddy 会自动申请证书。去掉 coup 的 `Domain` 会同时停掉这些站点。
 
 当前项目借用了《Coup》的名称和规则相关表达；公开发布前，应根据取得的授权回复和主管部门要求确认知识产权与备案／游戏审批条件。私有验证不等于已经满足公开发布条件。
