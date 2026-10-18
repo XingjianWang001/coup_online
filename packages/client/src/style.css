@@ -333,6 +333,27 @@ input:focus-visible {
   width: 100%;
 }
 
+.filing {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-1) var(--sp-4);
+  font-size: 12px;
+}
+
+.filing a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--text-3);
+  text-decoration: none;
+}
+
+.filing a:hover {
+  color: var(--text-2);
+  text-decoration: underline;
+}
+
 .room {
   max-width: 520px;
   margin: 0 auto;
