@@ -53,11 +53,15 @@ async function main() {
   if ((await replaced).reason !== 'replaced') throw new Error('旧连接没有收到 replaced 通知');
 
   // 旧连接的房间状态已清空：房间内操作报 roomNotFound 而不是卡在 illegalIntent
-  for (const type of ['startGame', 'leaveRoom', 'chooseAction']) {
+  for (const type of ['startGame', 'chooseAction']) {
     const denied = on(host, 'error');
     host.emit('intent', { type, action: 'income' });
     if ((await denied).code !== 'roomNotFound') throw new Error(`旧连接仍可发送 ${type}`);
   }
+  // 不在房间内（被接管 / 房间已超时回收）时离开仍应成功，客户端才能退出残留的房间界面
+  const staleLeft = on(host, 'left');
+  host.emit('intent', { type: 'leaveRoom' });
+  if ((await staleLeft).reason !== 'left') throw new Error('不在房间内时离开没有收到 left');
   const staleMessages = [];
   for (const event of ['gameStarted', 'publicState', 'privateState', 'events']) {
     host.on(event, () => staleMessages.push(event));

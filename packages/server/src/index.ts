@@ -223,16 +223,18 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       break;
     }
     case 'leaveRoom': {
+      // 房间已被超时回收（或服务器重启）时，离开视为已完成，让客户端能清掉残留的房间状态。
       const room = rooms.get(socket.data.roomCode);
-      if (!room) throw new ClientError({ code: 'roomNotFound' });
-      const events = room.leavePlayer(socket.data.playerId, socket.id);
-      if (room.game) {
-        io.to(room.code).emit('events', { events });
-        broadcast(room);
-      } else {
-        broadcastLobby(room);
+      if (room) {
+        const events = room.leavePlayer(socket.data.playerId, socket.id);
+        if (room.game) {
+          io.to(room.code).emit('events', { events });
+          broadcast(room);
+        } else {
+          broadcastLobby(room);
+        }
+        socket.leave(room.code);
       }
-      socket.leave(room.code);
       socket.data.roomCode = undefined;
       socket.data.playerId = undefined;
       socket.emit('left', { reason: 'left' });
