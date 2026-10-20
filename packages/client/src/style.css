@@ -293,12 +293,6 @@ input:focus-visible {
   font-size: 15px;
 }
 
-.left-room-notice {
-  color: var(--err);
-  margin: var(--sp-3) 0;
-  font-size: 14px;
-}
-
 .notice {
   --surface: color-mix(in srgb, var(--gold) 13%, var(--panel));
   background: var(--surface);

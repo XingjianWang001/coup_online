@@ -43,6 +43,7 @@ export interface RoomPlayer {
 }
 
 export interface RoomEvents {
+  // 房间状态变化后的唯一推送出口：所有改变房间的方法结束时都会调用（加入/重连除外，由传输层在连接入房后推送）。
   onBroadcast(room: Room, events: GameEvent[]): void;
   onEmpty(room: Room): void;
 }
@@ -122,6 +123,7 @@ export class Room {
     const p = this.players.get(id)!;
     p.connected = false;
     this.handOffOfflineHost();
+    this.events.onBroadcast(this, []);
     const t = setTimeout(() => {
       if (this.players.get(id) !== p || p.connected || p.socketId !== socketId) return;
       // 游戏结束后（gameOver）断连：对局已定胜负，forfeit 无意义，直接移除玩家让房间能排空回收。
@@ -175,6 +177,7 @@ export class Room {
     this.game = null;
     this.repo.delete(this.code);
     this.clearTimer();
+    this.events.onBroadcast(this, []);
   }
 
   startGame(playerId: string, socketId: string): GameEvent[] {
@@ -194,7 +197,9 @@ export class Room {
     });
     this.repo.save(this.code, this.game);
     this.startTimer(ACTION_TIMEOUT_MS);
-    return [{ type: 'started', turnOrder: entries.map((p) => p.id) }];
+    const events: GameEvent[] = [{ type: 'started', turnOrder: entries.map((p) => p.id) }];
+    this.events.onBroadcast(this, events);
+    return events;
   }
 
   leavePlayer(playerId: string, socketId: string): GameEvent[] {
@@ -202,6 +207,7 @@ export class Room {
     // 牌局结束后离开不算弃权，直接移除。
     const events = this.game && this.game.phase !== 'gameOver' ? this.apply((g) => forfeit(g, playerId)) : [];
     this.removePlayer(playerId);
+    this.events.onBroadcast(this, events);
     return events;
   }
 
@@ -288,6 +294,12 @@ export class Room {
   // 客户端意图分发
   dispatch(playerId: string, socketId: string, intent: { type: string } & Record<string, unknown>): GameEvent[] {
     this.requireCurrentConnection(playerId, socketId);
+    const events = this.applyIntent(playerId, intent);
+    this.events.onBroadcast(this, events);
+    return events;
+  }
+
+  private applyIntent(playerId: string, intent: { type: string } & Record<string, unknown>): GameEvent[] {
     try {
       switch (intent.type) {
         case 'chooseAction':

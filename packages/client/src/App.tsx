@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type CSSProperties,
@@ -30,6 +31,7 @@ import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { wrappedDialogFocus } from './dialog.ts';
 import { scheduleAutoDismiss } from './transient.ts';
+import { initialSession, reduceSession, type Session } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
 import {
   LANGUAGE_OPTIONS,
@@ -54,12 +56,6 @@ const ACTIONS: { type: ActionType; needsTarget: boolean; coins?: string; claim?:
   { type: 'exchange', needsTarget: false, claim: 'ambassador' },
 ];
 
-interface CountdownSnapshot {
-  remainingMs: number | null;
-  deadlineAt: number | null;
-  receivedAt: number;
-}
-
 interface TransientNoticeState {
   id: number;
   descriptor: NoticeDescriptor;
@@ -67,7 +63,14 @@ interface TransientNoticeState {
 
 interface TransientErrorState {
   id: number;
-  error: ServerError;
+  // 离开房间/座位被接管不是服务器错误，但与错误共用同一条红色提示。
+  error: ServerError | { notice: 'leftRoomNotice' | 'replacedRoomNotice' };
+}
+
+type SessionAction = { msg: ServerMessage; now: number } | { patch: Partial<Session> };
+
+function sessionReducer(s: Session, a: SessionAction): Session {
+  return 'msg' in a ? reduceSession(s, a.msg, a.now) : { ...s, ...a.patch };
 }
 
 // 加入链接的 ?room= 参数：仅首次加载读取一次，读后从 URL 清除，避免刷新时重复触发。
@@ -151,29 +154,32 @@ export function App() {
   const nameRef = useRef(name);
   nameRef.current = name;
   const [roomCode, setRoomCode] = useState(() => LINK_ROOM ?? loadRoomCode() ?? '');
-  const [joined, setJoined] = useState<string | null>(null);
-  const [hostId, setHostId] = useState('');
-  const [players, setPlayers] = useState<LobbyPlayer[]>([]);
-  const [publicState, setPublicState] = useState<PublicState | null>(null);
-  const [hand, setHand] = useState<Card[]>([]);
+  const [session, dispatchSession] = useReducer(sessionReducer, initialSession);
+  const {
+    roomCode: joined,
+    hostId,
+    players,
+    publicState,
+    hand,
+    log,
+    countdown: countdownSnapshot,
+    tunnelUrl,
+    canStartTunnel,
+    tunnelLoading,
+    selectedAction,
+    selectedKeep,
+  } = session;
+  const setSelectedAction = useCallback((a: ActionType | null) => dispatchSession({ patch: { selectedAction: a } }), []);
+  const setSelectedKeep = useCallback((ids: string[]) => dispatchSession({ patch: { selectedKeep: ids } }), []);
   const [error, setError] = useState<TransientErrorState | null>(null);
   const errorIdRef = useRef(0);
-  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null);
-  const [canStartTunnel, setCanStartTunnel] = useState(false);
-  const [tunnelLoading, setTunnelLoading] = useState(false);
   const [notice, setNotice] = useState<TransientNoticeState | null>(null);
   const noticeIdRef = useRef(0);
   const [showRules, setShowRules] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [selectedAction, setSelectedAction] = useState<ActionType | null>(null);
-  const [selectedKeep, setSelectedKeep] = useState<string[]>([]);
-  const [hasLeftRoom, setHasLeftRoom] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
-  const [countdownSnapshot, setCountdownSnapshot] = useState<CountdownSnapshot | null>(null);
   const [serverOffsetMs, setServerOffsetMs] = useState<number | null>(null);
   const [clockTick, setClockTick] = useState(0);
-  const [log, setLog] = useState<LogEntry[]>([]);
-  const logIdRef = useRef(0);
   const closeRules = useCallback(() => setShowRules(false), []);
   const closeSettings = useCallback(() => setShowSettings(false), []);
   const closeLeaveConfirmation = useCallback(() => setConfirmLeave(false), []);
@@ -183,54 +189,30 @@ export function App() {
     persistLocale(browserStorage(), nextLocale);
   }
 
+  const showError = (error: TransientErrorState['error']) => {
+    errorIdRef.current += 1;
+    setError({ id: errorIdRef.current, error });
+  };
+
   const showNotice = (descriptor: NoticeDescriptor) => {
     noticeIdRef.current += 1;
     setNotice({ id: noticeIdRef.current, descriptor });
   };
 
+  // 会话状态由 reduceSession 推导；这里只处理副作用：身份持久化、错误与提示。
   useEffect(() => {
     const off = onMessage(socket, (msg: ServerMessage) => {
+      dispatchSession({ msg, now: performance.now() });
       switch (msg.type) {
         case 'joined':
           setError(null);
-          setJoined(msg.roomCode);
-          setHostId(msg.hostId);
-          setPlayers(msg.players);
-          setTunnelUrl(msg.tunnelUrl ?? null);
-          setCanStartTunnel(msg.canStartTunnel);
           setIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveRoomCode(msg.roomCode);
-          setHasLeftRoom(false);
-          break;
-        case 'lobby':
-          // 服务器只在大厅阶段发送 lobby：再来一局后清掉上一局的牌桌。
-          setHostId(msg.hostId);
-          setPlayers(msg.players);
-          setPublicState(null);
-          setCountdownSnapshot(null);
-          setHand([]);
-          setLog([]);
-          setSelectedAction(null);
-          setSelectedKeep([]);
           break;
         case 'gameStarted':
           setError(null);
           showNotice({ key: 'gameStarted' });
-          setLog([]);
-          logIdRef.current = 0;
-          break;
-        case 'publicState':
-          setHostId(msg.hostId);
-          setPublicState(msg.state);
-          setCountdownSnapshot({
-            remainingMs: msg.remainingMs,
-            deadlineAt: msg.deadlineAt,
-            receivedAt: performance.now(),
-          });
-          break;
-        case 'privateState':
-          setHand(msg.hand);
           break;
         case 'events':
           setError(null);
@@ -240,38 +222,25 @@ export function App() {
             if (e.type === 'challengeResolved') showNotice({ key: e.truth ? 'challengeFailed' : 'challengeSucceeded' });
             if (e.type === 'influenceLost') showNotice({ key: 'influenceLostNotice' });
           }
-          {
-            const entries = msg.events.map((event) => ({ id: logIdRef.current++, event }));
-            setLog((prev) => [...prev, ...entries].slice(-500));
-          }
           break;
         case 'error':
-          errorIdRef.current += 1;
-          setError({ id: errorIdRef.current, error: parseServerError(msg) });
-          setTunnelLoading(false);
+          showError(parseServerError(msg));
+          if (msg.code === 'roomNotFound') {
+            clearRoomCode();
+            setConfirmLeave(false);
+          }
           break;
         case 'tunnelUrl':
           setError(null);
-          setTunnelUrl(msg.url);
-          setTunnelLoading(false);
           break;
         case 'left':
-          setError(null);
-          setHasLeftRoom(true);
-          setJoined(null);
-          clearRoomCode();
-          clearIdentity();
+          showError({ notice: msg.reason === 'replaced' ? 'replacedRoomNotice' : 'leftRoomNotice' });
+          // 被其他标签页接管时，localStorage 里的身份属于新标签页，不能清掉。
+          if (msg.reason === 'left') {
+            clearRoomCode();
+            clearIdentity();
+          }
           setIdentity(null);
-          setPublicState(null);
-          setCountdownSnapshot(null);
-          setHand([]);
-          setPlayers([]);
-          setHostId('');
-          setTunnelUrl(null);
-          setCanStartTunnel(false);
-          setTunnelLoading(false);
-          setSelectedAction(null);
-          setSelectedKeep([]);
           setConfirmLeave(false);
           break;
       }
@@ -363,7 +332,7 @@ export function App() {
   }
 
   function startTunnel() {
-    setTunnelLoading(true);
+    dispatchSession({ patch: { tunnelLoading: true } });
     setError(null);
     send(socket, { type: 'startTunnel' });
   }
@@ -424,7 +393,7 @@ export function App() {
         regionClassName="error-region"
         role="alert"
         ariaLive="assertive"
-        render={(visibleError) => localizeServerError(locale, visibleError.error)}
+        render={({ error }) => ('notice' in error ? translate(locale, error.notice) : localizeServerError(locale, error))}
       />
 
       {!joined ? (
@@ -449,7 +418,6 @@ export function App() {
           publicState={publicState}
           hand={hand}
           notice={notice}
-          hasLeftRoom={hasLeftRoom}
           remainingMs={remainingMs}
           deadlineAt={countdownSnapshot?.deadlineAt ?? null}
           serverNow={serverNow}
@@ -761,7 +729,6 @@ interface RoomViewProps {
   publicState: PublicState | null;
   hand: Card[];
   notice: TransientNoticeState | null;
-  hasLeftRoom: boolean;
   selectedAction: ActionType | null;
   setSelectedAction: (a: ActionType | null) => void;
   selectedKeep: string[];
@@ -817,11 +784,6 @@ function RoomView(props: RoomViewProps) {
           <button className="primary" onClick={props.onStart} disabled={props.players.length < 2}>
             {translate(props.locale, 'startGame')} ({translate(props.locale, 'startGameRequirement')})
           </button>
-        )}
-        {props.hasLeftRoom && (
-          <div className="left-room-notice">
-            {translate(props.locale, 'leftRoomNotice')}
-          </div>
         )}
       </div>
     );

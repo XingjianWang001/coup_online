@@ -434,6 +434,7 @@ FodyWeavers.xsd
 !packages/**
 # 但仍需忽略依赖与构建产物（在 re-include 之后覆盖）
 node_modules/
+.pnpm-store/
 dist/
 
 # 本地辅助工具产物（不纳入版本控制）
@@ -449,7 +450,6 @@ PRODUCT.md
 
 
 # coup_online: developer/AI-facing docs (not committed)
-.clinerules/
 .impeccable/
 memory-bank/
 DESIGN.md

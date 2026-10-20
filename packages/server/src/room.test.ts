@@ -383,3 +383,25 @@ describe('Room 牌局结束后', () => {
     expect(events.onBroadcast).toHaveBeenCalledWith(room, []);
   });
 });
+
+describe('Room 推送', () => {
+  it('每次改变房间都经 onBroadcast 推送，并带上对应事件', () => {
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.hostId = alice.id;
+
+    room.startGame(alice.id, 'sock1');
+    expect(events.onBroadcast).toHaveBeenLastCalledWith(room, [expect.objectContaining({ type: 'started' })]);
+
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' });
+    expect(events.onBroadcast).toHaveBeenLastCalledWith(room, expect.arrayContaining([expect.objectContaining({ type: 'actionChosen' })]));
+
+    room.leavePlayer(bob.id, 'sock2');
+    expect(events.onBroadcast).toHaveBeenLastCalledWith(room, expect.arrayContaining([expect.objectContaining({ type: 'gameOver' })]));
+
+    room.rematch(alice.id, 'sock1');
+    expect(events.onBroadcast).toHaveBeenLastCalledWith(room, []);
+    expect(events.onBroadcast).toHaveBeenCalledTimes(4);
+  });
+});

@@ -5,9 +5,9 @@ import { join, extname, normalize, relative, isAbsolute, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Server, type Socket } from 'socket.io';
 import { InMemoryGameRepository } from './repository.ts';
-import { Room } from './room.ts';
+import { Room, type RoomPlayer } from './room.ts';
 import { getTunnelUrl, startTunnel, stopTunnel } from './tunnel.ts';
-import type { ClientIntent } from '@coup/shared';
+import type { ClientIntent, GameEvent } from '@coup/shared';
 import { ClientError, toServerError } from './errors.ts';
 import { reserveRoomCreation } from './room-limits.ts';
 
@@ -100,6 +100,31 @@ function broadcastLobby(room: Room): void {
   io.to(room.code).emit('lobby', { players: room.playerList, hostId: room.hostId });
 }
 
+// 房间状态变化后的唯一推送：先推事件（开局单独推 gameStarted），再按阶段推大厅或牌局状态。
+function publish(room: Room, events: GameEvent[]): void {
+  const started = events.find((e) => e.type === 'started');
+  if (started) io.to(room.code).emit('gameStarted', { turnOrder: started.turnOrder });
+  else if (events.length) io.to(room.code).emit('events', { events });
+  if (room.game) broadcast(room);
+  else broadcastLobby(room);
+}
+
+function emitJoined(socket: Socket, room: Room, player: RoomPlayer): void {
+  socket.join(room.code);
+  socket.data.roomCode = room.code;
+  socket.data.playerId = player.id;
+  socket.emit('joined', {
+    roomCode: room.code,
+    playerId: player.id,
+    secret: player.secret,
+    players: room.playerList,
+    hostId: room.hostId,
+    tunnelUrl: getTunnelUrl() ?? undefined,
+    canStartTunnel: isLoopback(socket.handshake.address),
+  });
+  publish(room, []);
+}
+
 io.on('connection', (socket) => {
   socket.on('timeSync', (ack: (serverNow: number) => void) => {
     if (typeof ack === 'function') ack(Date.now());
@@ -118,12 +143,7 @@ io.on('connection', (socket) => {
     const playerId = socket.data.playerId as string | undefined;
     if (roomCode && playerId) {
       const room = rooms.get(roomCode);
-      if (room) {
-        if (room.markDisconnected(playerId, socket.id)) {
-          if (room.game) broadcast(room);
-          else broadcastLobby(room);
-        }
-      }
+      room?.markDisconnected(playerId, socket.id);
     }
   });
 });
@@ -137,30 +157,14 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       if (socket.data.roomCode) throw new ClientError({ code: 'illegalIntent' });
       const code = genCode();
       const room = new Room(code, '', repo, {
-        onBroadcast: (room, events) => {
-          io.to(room.code).emit('events', { events });
-          if (room.game) broadcast(room);
-          else broadcastLobby(room);
-        },
+        onBroadcast: publish,
         onEmpty: (r) => rooms.delete(r.code),
       });
       const p = room.addPlayer(raw.name, socket.id);
       reserveRoomCreation(clientAddress(socket), rooms.size);
       room.hostId = p.id;
       rooms.set(code, room);
-      socket.join(code);
-      socket.data.roomCode = code;
-      socket.data.playerId = p.id;
-      socket.emit('joined', {
-        roomCode: code,
-        playerId: p.id,
-        secret: p.secret,
-        players: room.playerList,
-        hostId: room.hostId,
-        tunnelUrl: getTunnelUrl() ?? undefined,
-        canStartTunnel: isLoopback(socket.handshake.address),
-      });
-      broadcastLobby(room);
+      emitJoined(socket, room, p);
       break;
     }
     case 'joinRoom': {
@@ -176,22 +180,12 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         const previous = io.sockets.sockets.get(previousId);
         if (previous && previous.data.playerId === p.id && previous.id !== socket.id) {
           previous.leave(room.code);
+          previous.data.roomCode = undefined;
+          previous.data.playerId = undefined;
+          previous.emit('left', { reason: 'replaced' });
         }
       }
-      socket.join(room.code);
-      socket.data.roomCode = room.code;
-      socket.data.playerId = p.id;
-      socket.emit('joined', {
-        roomCode: room.code,
-        playerId: p.id,
-        secret: p.secret,
-        players: room.playerList,
-        hostId: room.hostId,
-        tunnelUrl: getTunnelUrl() ?? undefined,
-        canStartTunnel: isLoopback(socket.handshake.address),
-      });
-      if (room.game) broadcast(room);
-      else broadcastLobby(room);
+      emitJoined(socket, room, p);
       break;
     }
     case 'startTunnel': {
@@ -207,28 +201,19 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
     case 'startGame': {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new ClientError({ code: 'roomNotFound' });
-      const events = room.startGame(socket.data.playerId, socket.id);
-      io.to(room.code).emit('gameStarted', { turnOrder: events[0].type === 'started' ? (events[0] as { turnOrder: string[] }).turnOrder : [] });
-      broadcast(room);
+      room.startGame(socket.data.playerId, socket.id);
       break;
     }
     case 'rematch': {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new ClientError({ code: 'roomNotFound' });
       room.rematch(socket.data.playerId, socket.id);
-      broadcastLobby(room);
       break;
     }
     case 'leaveRoom': {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new ClientError({ code: 'roomNotFound' });
-      const events = room.leavePlayer(socket.data.playerId, socket.id);
-      if (room.game) {
-        io.to(room.code).emit('events', { events });
-        broadcast(room);
-      } else {
-        broadcastLobby(room);
-      }
+      room.leavePlayer(socket.data.playerId, socket.id);
       socket.leave(room.code);
       socket.data.roomCode = undefined;
       socket.data.playerId = undefined;
@@ -238,9 +223,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
     default: {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new ClientError({ code: 'roomNotFound' });
-      const events = room.dispatch(socket.data.playerId, socket.id, raw);
-      io.to(room.code).emit('events', { events });
-      broadcast(room);
+      room.dispatch(socket.data.playerId, socket.id, raw);
     }
   }
 }

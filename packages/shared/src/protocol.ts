@@ -76,6 +76,6 @@ export type ServerMessage =
   | { type: 'privateState'; hand: Card[] }
   | { type: 'events'; events: GameEvent[] }
   | ({ type: 'error' } & ServerError)
-  | { type: 'left'; reason: string };
+  | { type: 'left'; reason: 'left' | 'replaced' };
 
 export type { ActionType, GameEvent, PublicState, PrivateState, Role, Card };
