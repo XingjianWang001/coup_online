@@ -1255,6 +1255,240 @@ input:focus-visible {
   }
 }
 
+/* ---------- 发牌展示：从屏幕上方的牌堆依次发牌、落定、翻开 ---------- */
+.showcase-overlay {
+  z-index: 20;
+  background: oklch(0.1 0.012 155 / 0.84);
+}
+
+.showcase {
+  --w: min(168px, 38vw);
+  --gap: var(--sp-5);
+  --lead: 0ms;
+  --dealt: var(--n);
+  /* 最后一张牌落定的时刻；之后依次翻开 */
+  --landed: calc(var(--lead) + (var(--dealt) - 1) * 150ms + 620ms);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-8);
+}
+.showcase--swap {
+  --lead: 440ms;
+  --dealt: 1;
+}
+
+.showcase-cards {
+  display: flex;
+  gap: var(--gap);
+  perspective: 900px;
+}
+
+.showcase-slot {
+  /* 牌堆点：屏幕上方、两张牌的正中 */
+  --deck-x: calc(((var(--n) - 1) / 2 - var(--i)) * (var(--w) + var(--gap)));
+  --deck-y: calc(-50vh - 120%);
+  position: relative;
+  display: grid;
+  width: var(--w);
+}
+.showcase-slot > * { grid-area: 1 / 1; }
+
+.showcase-flipper {
+  position: relative;
+  display: grid;
+  transform-style: preserve-3d;
+}
+.showcase-flipper > * {
+  grid-area: 1 / 1;
+  backface-visibility: hidden;
+}
+.showcase-flipper .card-back {
+  width: auto;
+  height: auto;
+  border-radius: var(--r-lg);
+  transform: rotateY(180deg);
+  animation: none;
+}
+
+.showcase-flipper.dealt {
+  animation:
+    deal-in 560ms calc(var(--lead) + var(--order) * 150ms) both,
+    flip-up 420ms cubic-bezier(0.33, 1, 0.68, 1) calc(var(--landed) + var(--order) * 150ms) both;
+}
+/* 先越过落点停在其下方，再上移到位同时回正 */
+@keyframes deal-in {
+  0%   { translate: var(--deck-x) var(--deck-y); rotate: -16deg; animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+  65%  { translate: 0 24px; rotate: -5deg; animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1); }
+  100% { translate: 0 0; rotate: 0deg; }
+}
+@keyframes flip-up {
+  from { transform: rotateY(180deg); }
+  to   { transform: rotateY(0deg); }
+}
+
+/* 被质疑过的那张：牌面朝上飞回牌堆 */
+.big-card.leaving {
+  z-index: 1;
+  animation: deal-out 400ms cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+@keyframes deal-out {
+  to { translate: var(--deck-x) var(--deck-y); rotate: 14deg; }
+}
+
+.showcase-face,
+.showcase-face:hover:not(:disabled),
+.showcase-face:active:not(:disabled) {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  border-radius: var(--r-lg);
+  transform: none;
+  cursor: help;
+}
+
+/* 大牌（原型方案 C）：线描图标进圆章，左上 / 右下扑克式角标，内衬一道细框 */
+.big-card {
+  --surface: color-mix(in srgb, currentColor 10%, var(--canvas));
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9%;
+  width: var(--w);
+  aspect-ratio: 5 / 7;
+  border: 2px solid;
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(circle at 50% 40%, color-mix(in srgb, currentColor 20%, transparent), transparent 62%),
+    var(--surface);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.3);
+  container-type: inline-size;
+}
+.big-card::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: var(--r-md);
+  pointer-events: none;
+}
+
+.big-card .glyph { stroke-width: 1.6; }
+.big-card .glyph .f { fill: none; }
+.big-card .glyph .d { stroke: currentColor; stroke-width: 1.6; }
+
+.medallion {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 54%;
+  aspect-ratio: 1;
+  margin-top: 6%;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+.medallion::after {
+  content: '';
+  position: absolute;
+  inset: 5%;
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+  border-radius: 50%;
+}
+.medallion .glyph { width: 62%; }
+
+.big-card .pip {
+  position: absolute;
+  width: 16%;
+  stroke-width: 2.2;
+}
+.big-card .pip .d { stroke-width: 2.2; }
+.big-card .pip.tl { top: 7%; left: 8%; }
+.big-card .pip.br { bottom: 7%; right: 8%; rotate: 180deg; }
+
+.big-card-name {
+  font-family: 'Noto Serif SC', 'Noto Serif', Georgia, serif;
+  font-weight: 600;
+  font-size: 12cqi;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* 功能说明：悬浮 / 键盘聚焦 / 点按显示，角色同色气泡 */
+.showcase-tip {
+  --surface: var(--tip);
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 50%;
+  z-index: 2;
+  width: max-content;
+  max-width: min(220px, 80vw);
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--canvas);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.35);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-50%);
+  translate: 0 4px;
+  transition: opacity 150ms ease, translate 150ms ease;
+}
+.showcase-tip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -5px;
+  border: 5px solid transparent;
+  border-top-color: var(--surface);
+}
+.showcase-tip.open,
+.showcase-slot:has(.showcase-face:focus-visible) .showcase-tip {
+  opacity: 1;
+  translate: 0 0;
+}
+@media (hover: hover) {
+  .showcase-slot:hover .showcase-tip {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.showcase-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.showcase-actions button { min-width: 140px; }
+.showcase-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--gold);
+}
+
+@keyframes fade-out {
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .showcase-flipper.dealt { animation: fade-in 200ms linear var(--lead) both; }
+  .big-card.leaving { animation: fade-out 200ms linear forwards; }
+  .showcase-tip { translate: none; }
+}
+
 /* ---------- 移动端 ---------- */
 @media (max-width: 768px) {
   .card-name[data-fit='desktop'] .full { display: none; }

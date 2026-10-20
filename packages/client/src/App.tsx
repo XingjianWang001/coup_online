@@ -31,7 +31,7 @@ import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { wrappedDialogFocus } from './dialog.ts';
 import { scheduleAutoDismiss } from './transient.ts';
-import { initialSession, reduceSession, type Session } from './session.ts';
+import { initialSession, reduceSession, type Session, type Showcase } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
 import {
   LANGUAGE_OPTIONS,
@@ -103,6 +103,9 @@ function useDialogFocus(
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     const onKeyDown = (event: KeyboardEvent) => {
+      // 对话框叠开时（如发牌展示盖在规则上）只由最上层的那个响应
+      const modals = document.querySelectorAll('[aria-modal="true"]');
+      if (modals[modals.length - 1] !== dialogRef.current) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         onClose();
@@ -168,6 +171,7 @@ export function App() {
     tunnelLoading,
     selectedAction,
     selectedKeep,
+    showcase,
   } = session;
   const setSelectedAction = useCallback((a: ActionType | null) => dispatchSession({ patch: { selectedAction: a } }), []);
   const setSelectedKeep = useCallback((ids: string[]) => dispatchSession({ patch: { selectedKeep: ids } }), []);
@@ -183,6 +187,7 @@ export function App() {
   const closeRules = useCallback(() => setShowRules(false), []);
   const closeSettings = useCallback(() => setShowSettings(false), []);
   const closeLeaveConfirmation = useCallback(() => setConfirmLeave(false), []);
+  const closeShowcase = useCallback(() => dispatchSession({ patch: { showcase: null } }), []);
 
   function changeLocale(nextLocale: Locale) {
     setLocale(nextLocale);
@@ -310,6 +315,11 @@ export function App() {
   const serverNow = serverOffsetMs == null ? null : Date.now() + serverOffsetMs;
 
   const me = identity?.playerId;
+  // 发牌展示期间倒计时照走：轮到我行动时在展示里给出剩余时间
+  const myMove = !!publicState && (
+    (publicState.phase === 'choosingAction' && publicState.currentPlayerId === me) ||
+    (publicState.phase === 'choosingExchange' && publicState.pending?.actorId === me)
+  );
 
   function createRoom() {
     setError(null);
@@ -385,6 +395,15 @@ export function App() {
 
       {confirmLeave && (
         <LeaveConfirmation locale={locale} onConfirm={leaveRoom} onClose={closeLeaveConfirmation} />
+      )}
+
+      {showcase && (
+        <DealShowcase
+          showcase={showcase}
+          locale={locale}
+          countdown={myMove ? describeCountdown(remainingMs, countdownSnapshot?.deadlineAt, serverNow) : null}
+          onClose={closeShowcase}
+        />
       )}
 
       <TransientMessage
@@ -919,6 +938,99 @@ function RoleIcon({ role }: { role: Role }) {
 
 function CardBack({ locale }: { locale: Locale }) {
   return <div className="card-back" role="img" aria-label={translate(locale, 'cardBack')} />;
+}
+
+// 发牌展示：大牌取自 prototype/role-icons 分支（1868656）的方案 C（线描图标 + 圆章 + 扑克式角标），只在这里出现。
+// 动画全在 CSS：--i 为牌位、--n 为牌数，用来算出各牌飞向屏幕上方同一个牌堆点的位移。
+function DealShowcase({ showcase, locale, countdown, onClose }: {
+  showcase: Showcase;
+  locale: Locale;
+  countdown: string | null;
+  onClose: () => void;
+}) {
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [openTip, setOpenTip] = useState<number | null>(null);
+  useDialogFocus(onClose, dialogRef, confirmRef);
+  const swap = showcase.kind === 'swap' ? showcase : null;
+
+  return (
+    <div className="overlay showcase-overlay" onClick={onClose}>
+      <div
+        ref={dialogRef}
+        className={`showcase showcase--${showcase.kind}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={translate(locale, showcase.kind === 'deal' ? 'showcaseDeal' : 'showcaseSwap')}
+        style={{ '--n': showcase.cards.length } as CSSProperties}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpenTip(null);
+        }}
+      >
+        <div className="showcase-cards">
+          {showcase.cards.map((card, i) => {
+            const dealt = !swap || swap.slot === i;
+            const tipId = `showcase-tip-${i}`;
+            return (
+              <div key={i} className="showcase-slot" style={{ '--i': i, '--order': swap ? 0 : i, '--tip': `var(--${card.role})` } as CSSProperties}>
+                {swap?.slot === i && <BigCard role={swap.returned.role} locale={locale} className="leaving" />}
+                <div className={`showcase-flipper${dealt ? ' dealt' : ''}`}>
+                  <div className="card-back" aria-hidden="true" />
+                  <button
+                    type="button"
+                    className="showcase-face"
+                    aria-describedby={tipId}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setOpenTip(openTip === i ? null : i);
+                    }}
+                  >
+                    <BigCard role={card.role} locale={locale} />
+                  </button>
+                </div>
+                <span id={tipId} role="tooltip" className={`showcase-tip${openTip === i ? ' open' : ''}`}>
+                  {roleDescription(locale, card.role)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="showcase-actions">
+          {countdown && (
+            <span className="showcase-timer" role="timer" aria-label={translate(locale, 'timeToAct', { time: countdown })}>
+              <HourglassIcon />
+              {countdown}
+            </span>
+          )}
+          <button ref={confirmRef} onClick={onClose}>{translate(locale, 'confirm')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BigCard({ role, locale, className = '' }: { role: Role; locale: Locale; className?: string }) {
+  return (
+    <span className={`big-card card--${role} ${className}`}>
+      <Glyph className="pip tl">{ROLE_GLYPHS[role]}</Glyph>
+      <span className="medallion"><Glyph>{ROLE_GLYPHS[role]}</Glyph></span>
+      <span className="big-card-name">{roleName(locale, role)}</span>
+      <Glyph className="pip br">{ROLE_GLYPHS[role]}</Glyph>
+    </span>
+  );
+}
+
+// 沙漏
+function HourglassIcon() {
+  return (
+    <Glyph size={16} className="inline-icon">
+      <line x1="6" y1="2.5" x2="18" y2="2.5" />
+      <line x1="6" y1="21.5" x2="18" y2="21.5" />
+      <path className="f" d="M7.5 3 H16.5 Q16.5 8.5 12 12 Q7.5 8.5 7.5 3 Z" />
+      <path d="M12 12 Q16.5 15.5 16.5 21 H7.5 Q7.5 15.5 12 12 Z" />
+    </Glyph>
+  );
 }
 
 // 银元

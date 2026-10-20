@@ -96,6 +96,10 @@ const english = {
   cardBack: 'Hidden card',
   cardFace: '{role} card',
   cardRevealed: '{role} card (revealed)',
+  showcaseDeal: 'Your hand',
+  showcaseSwap: 'You drew a new card',
+  confirm: 'Confirm',
+  timeToAct: '{time} left to act',
   expandLog: 'Expand details for {action}',
   collapseLog: 'Collapse details for {action}',
   narrationAction: '{actor} uses {action}',
@@ -195,6 +199,10 @@ const simplifiedChinese = {
   cardBack: '暗牌',
   cardFace: '{role}牌',
   cardRevealed: '{role}牌（已翻开）',
+  showcaseDeal: '你的手牌',
+  showcaseSwap: '你换到了一张新牌',
+  confirm: '确认',
+  timeToAct: '行动剩余 {time}',
   expandLog: '展开{action}的详情',
   collapseLog: '收起{action}的详情',
   narrationAction: '{actor} 发动{action}',
@@ -232,6 +240,7 @@ interface MessageValues {
   exchangePrompt: { count: number };
   cardFace: { role: string };
   cardRevealed: { role: string };
+  timeToAct: { time: string };
   expandLog: { action: string };
   collapseLog: { action: string };
   narrationAction: { actor: string; action: string };
