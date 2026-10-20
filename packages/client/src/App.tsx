@@ -1384,6 +1384,24 @@ function Actions(props: {
       case 'exchange': return `${name} (${roleName(props.locale, 'ambassador')})`;
     }
   };
+  // 选目标时替换整个行动网格，只留目标与取消可点
+  if (sel?.needsTarget) {
+    const heading =
+      sel.type === 'coup' ? 'chooseCoupTarget' : sel.type === 'assassinate' ? 'chooseAssassinateTarget' : 'chooseStealTarget';
+    return (
+      <div className="actions" role="group" aria-labelledby="target-heading">
+        <p id="target-heading">{translate(props.locale, heading)}</p>
+        {props.targets.map((t, i) => (
+          <button key={t.id} autoFocus={i === 0} onClick={() => props.onAction(sel.type, t.id)}>
+            {t.name}
+          </button>
+        ))}
+        <button className="ghost" onClick={() => props.onSelect(null)}>
+          {translate(props.locale, 'cancel')}
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="actions">
       {mustCoup && <p role="status">{translate(props.locale, 'mandatoryCoup')}</p>}
@@ -1397,7 +1415,6 @@ function Actions(props: {
         return (
           <span key={a.type} className="action-tip-anchor">
             <button
-              className={props.selectedAction === a.type ? 'active' : ''}
               disabled={disabled}
               aria-label={label(a.type)}
               onClick={() => {
@@ -1414,19 +1431,6 @@ function Actions(props: {
           </span>
         );
       })}
-      {sel?.needsTarget && (
-        <div className="row">
-          <span>{translate(props.locale, 'chooseTarget')}</span>
-          {props.targets.map((t) => (
-            <button key={t.id} onClick={() => props.onAction(sel.type, t.id)}>
-              {t.name}
-            </button>
-          ))}
-          <button className="ghost" onClick={() => props.onSelect(null)}>
-            {translate(props.locale, 'cancel')}
-          </button>
-        </div>
-      )}
     </div>
   );
 }
