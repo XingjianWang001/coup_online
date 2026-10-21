@@ -53,6 +53,7 @@ export const initialSession: Session = {
 };
 
 // now 为收到消息时的 performance.now()，用于倒计时按实际经过时间递减。
+// 一次状态变化的消息顺序见 server/src/index.ts 的 publish()：gameStarted 或 events → publicState → 各人的 privateState。
 export function reduceSession(s: Session, msg: ServerMessage, now: number): Session {
   switch (msg.type) {
     case 'joined':
