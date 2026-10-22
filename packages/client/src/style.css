@@ -1653,7 +1653,8 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
   display: grid;
   justify-items: center;
   min-height: 88px;
-  width: min(420px, 100%);
+  /* 下限而非定宽：英文印章比 420px 宽时撑开底部区域，由舞台居中，不会贴左溢出 */
+  min-width: min(420px, 100%);
 }
 .stage-status {
   display: grid;
@@ -1666,9 +1667,10 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
 
 .stage-verdict {
   --v: var(--err);
-  display: grid;
-  align-content: start; /* 否则印章被拉伸到底部区域的最小高度 */
-  justify-items: center;
+  /* flex 列：印章按自身高度排，不被拉伸到底部区域的最小高度 */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   opacity: 0;
 }
 .stage-verdict[data-truth] { --v: var(--role, var(--gold)); }
@@ -1681,7 +1683,7 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
   color: var(--v);
   font-family: 'Noto Serif SC', 'Noto Serif', Georgia, serif;
   font-weight: 600;
-  font-size: clamp(30px, 7vw, 44px);
+  font-size: clamp(22px, 5.6vw, 44px); /* 手机上英文「Challenge succeeded」也要放得下 */
   letter-spacing: 0.08em;
   line-height: 1;
   white-space: nowrap;
