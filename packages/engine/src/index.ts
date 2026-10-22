@@ -28,4 +28,7 @@ export {
   resolveChallengeTimeout,
   resolveExchange,
   resolveLoss,
+  resolveLossTimeout,
+  resolveShowdownTimeout,
+  revealShowdownCard,
 } from './game.ts';

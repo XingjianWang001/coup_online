@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PublicState, ServerMessage } from '@coup/shared';
-import { initialSession, reduceSession, type Session } from './session.ts';
+import { closeShowdown, initialSession, reduceSession, type Session } from './session.ts';
 
 const players = [{ id: 'a', name: '张三', isHost: true, connected: true }];
 const table = { phase: 'choosingAction' } as PublicState;
@@ -59,19 +59,6 @@ describe('房间会话', () => {
     expect(rejoined.showcase).toBeNull();
   });
 
-  it('自己的声称属实被质疑后，展示换来的新牌及其所在牌位；别人被质疑不展示', () => {
-    const [duke, captain, ambassador] = [{ id: 'c1', role: 'duke' as const }, { id: 'c2', role: 'captain' as const }, { id: 'c9', role: 'ambassador' as const }];
-    const holding = run([{ type: 'privateState', hand: [duke, captain] }], { ...inGame, showcase: null });
-    const challenged = (claimantId: string): ServerMessage => ({ type: 'events', events: [{ type: 'challengeResolved', truth: true, loserId: 'b', claimantId }] });
-
-    expect(run([challenged('a'), { type: 'privateState', hand: [captain, ambassador] }], holding).showcase)
-      .toEqual({ kind: 'swap', cards: [ambassador, captain], slot: 0, returned: duke });
-    // 洗回去的牌又被抽回来
-    expect(run([challenged('a'), { type: 'privateState', hand: [captain, duke] }], holding).showcase)
-      .toEqual({ kind: 'swap', cards: [duke, captain], slot: 0, returned: duke });
-    expect(run([challenged('b'), { type: 'privateState', hand: [duke, captain] }], holding).showcase).toBeNull();
-  });
-
   it('牌局结束或自己被淘汰时，收起仍开着的发牌展示', () => {
     const showing = { ...inGame, showcase: { kind: 'deal' as const, cards: [{ id: 'c1', role: 'duke' as const }] } };
     const over = { phase: 'gameOver', players: [{ id: 'a', alive: true }] } as PublicState;
@@ -83,12 +70,60 @@ describe('房间会话', () => {
     expect(run([push(alive)], showing).showcase).not.toBeNull();
   });
 
-  it('重连后不沿用断线前待展示的换牌', () => {
-    const s = run([
-      { type: 'events', events: [{ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a' }] },
+
+});
+
+describe('对质', () => {
+  const [duke, captain, ambassador] = [{ id: 'c1', role: 'duke' as const }, { id: 'c2', role: 'captain' as const }, { id: 'c9', role: 'ambassador' as const }];
+  const showdown = { challengerId: 'b', claimantId: 'a', role: 'duke' as const };
+  const push = (state: Partial<PublicState>): ServerMessage => ({
+    type: 'publicState',
+    state: { players: [{ id: 'a', alive: true, handCount: 2 }, { id: 'b', alive: true, handCount: 1 }], showdown: null, ...state } as PublicState,
+    remainingMs: null,
+    deadlineAt: null,
+    hostId: 'a',
+  });
+  // 一次状态变化的真实消息顺序：events → publicState → privateState
+  const challenge = (sd: typeof showdown): ServerMessage[] => [
+    { type: 'events', events: [{ type: 'challenged', challengerId: sd.challengerId, targetId: sd.claimantId }] },
+    push({ phase: 'showdown', showdown: sd }),
+    { type: 'privateState', hand: [duke, captain] },
+  ];
+  const holding = run([{ type: 'privateState', hand: [duke, captain] }], { ...inGame, showcase: null });
+  const open = run(challenge(showdown), holding);
+  const resolved: ServerMessage = { type: 'events', events: [{ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 0 }] };
+
+  it('进入对质即打开舞台：被质疑者记下翻牌前的手牌，旁观者收到同步的悬停牌位', () => {
+    expect(open.showdown).toEqual({ ...showdown, id: expect.any(Number), slots: 2, hand: [duke, captain], focus: null, reveal: null, newCard: null });
+    const watching = run(challenge({ ...showdown, claimantId: 'b', challengerId: 'a' }), holding);
+    expect(watching.showdown).toMatchObject({ slots: 1, hand: null });
+    expect(run([{ type: 'showdownFocus', slot: 0 }], watching).showdown?.focus).toBe(0);
+  });
+
+  it('被质疑者在对质中刷新重连，手牌到达后仍能选牌', () => {
+    const rejoined = run([
       { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players, hostId: 'a', canStartTunnel: false },
-      { type: 'privateState', hand: [{ id: 'c9', role: 'duke' }] },
-    ], { ...inGame, showcase: null });
+      push({ phase: 'showdown', showdown }),
+      { type: 'privateState', hand: [duke, captain] },
+    ], { ...initialSession });
+    expect(rejoined.showdown?.hand).toEqual([duke, captain]);
+  });
+
+  it('揭晓后舞台留到动画播完；换来的新牌记在原牌位，不再另弹换牌展示', () => {
+    const s = run([resolved, push({ phase: 'choosingLoss', lossPlayerId: 'b' }), { type: 'privateState', hand: [ambassador, captain] }], open);
+    expect(s.showdown).toMatchObject({ reveal: { slot: 0, role: 'duke', truth: true }, newCard: ambassador });
     expect(s.showcase).toBeNull();
+  });
+
+  it('动画播完关闭舞台时，若下一场对质已经开始则接着打开它', () => {
+    const next = { ...showdown, challengerId: 'a', claimantId: 'b' };
+    const animating = run([resolved, ...challenge(next)], open);
+    expect(animating.showdown?.reveal).not.toBeNull();
+    expect(closeShowdown(animating).showdown).toMatchObject({ ...next, reveal: null });
+    expect(closeShowdown(run([resolved, push({ phase: 'choosingLoss', lossPlayerId: 'b' })], open)).showdown).toBeNull();
+  });
+
+  it('对质没有揭晓就结束（有人弃权）时收起舞台', () => {
+    expect(run([push({ phase: 'choosingAction' })], open).showdown).toBeNull();
   });
 });

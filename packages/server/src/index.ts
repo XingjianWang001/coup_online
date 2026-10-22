@@ -220,6 +220,13 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       socket.emit('left', { reason: 'left' });
       break;
     }
+    case 'focusShowdownCard': {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room) throw new ClientError({ code: 'roomNotFound' });
+      const focus = room.focusShowdownCard(socket.data.playerId, socket.id, raw.slot);
+      if (focus) socket.to(room.code).emit('showdownFocus', focus);
+      break;
+    }
     default: {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new ClientError({ code: 'roomNotFound' });

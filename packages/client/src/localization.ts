@@ -77,6 +77,20 @@ const english = {
   winner: '{name} wins!',
   yourTurn: 'Your turn',
   waitingForAction: 'Waiting for {name} to act…',
+  waitingForChallenge: 'Waiting for other players to decide whether to challenge…',
+  waitingForBlock: 'Waiting for {name} to decide whether to block…',
+  waitingForBlockAny: 'Waiting for other players to decide whether to block…',
+  waitingForShowdown: 'Waiting for {name} to choose a card to reveal…',
+  waitingForLoss: 'Waiting for {name} to choose an influence to lose…',
+  waitingForExchange: 'Waiting for {name} to exchange cards…',
+  showdownTitle: '{challenger} challenges {claimant}’s',
+  showdownTitleYou: '{challenger} challenges your',
+  showdownTitleByYou: 'You challenge {claimant}’s',
+  revealThis: 'Reveal this card',
+  showdownRevealOther: 'You have {role}. Reveal the other card anyway?',
+  revealAnyway: 'Reveal anyway',
+  back: 'Back',
+  lossTitle: 'Choose an influence to lose',
   rematch: 'Rematch',
   waitingForRematch: 'Waiting for host {name} to start a rematch…',
   selfMarker: ' (you)',
@@ -91,15 +105,12 @@ const english = {
   passChallenge: 'Do not challenge',
   blockWith: 'Block with {role}',
   passBlock: 'Do not block',
-  chooseInfluenceLoss: 'Choose a hidden card to reveal:',
-  revealRole: 'Reveal {role}',
   exchangePrompt: 'Exchange: choose {count} cards to keep',
   confirmKeep: 'Keep selected cards',
   cardBack: 'Hidden card',
   cardFace: '{role} card',
   cardRevealed: '{role} card (revealed)',
   showcaseDeal: 'Your hand',
-  showcaseSwap: 'You drew a new card',
   confirm: 'Confirm',
   timeToAct: '{time} left to act',
   expandLog: 'Expand details for {action}',
@@ -182,6 +193,20 @@ const simplifiedChinese = {
   winner: '{name} 获胜！',
   yourTurn: '轮到你了',
   waitingForAction: '等待 {name} 行动…',
+  waitingForChallenge: '等待其他玩家决定是否质疑…',
+  waitingForBlock: '等待 {name} 决定是否阻挡…',
+  waitingForBlockAny: '等待其他玩家决定是否阻挡…',
+  waitingForShowdown: '等待 {name} 选择要翻开的牌…',
+  waitingForLoss: '等待 {name} 选择要失去的影响力…',
+  waitingForExchange: '等待 {name} 交换手牌…',
+  showdownTitle: '{challenger} 质疑 {claimant} 的',
+  showdownTitleYou: '{challenger} 质疑你的',
+  showdownTitleByYou: '你质疑 {claimant} 的',
+  revealThis: '翻开这张',
+  showdownRevealOther: '你有{role}，仍要翻开另一张？',
+  revealAnyway: '仍然翻开',
+  back: '返回',
+  lossTitle: '选择要失去的影响力',
   rematch: '再来一局',
   waitingForRematch: '等待房主 {name} 发起再来一局…',
   selfMarker: ' (你)',
@@ -196,15 +221,12 @@ const simplifiedChinese = {
   passChallenge: '不质疑',
   blockWith: '用{role}阻挡',
   passBlock: '不阻挡',
-  chooseInfluenceLoss: '请选择一张暗牌公开翻开：',
-  revealRole: '翻开 {role}',
   exchangePrompt: '交换：请选择保留的 {count} 张牌',
   confirmKeep: '确认保留',
   cardBack: '暗牌',
   cardFace: '{role}牌',
   cardRevealed: '{role}牌（已翻开）',
   showcaseDeal: '你的手牌',
-  showcaseSwap: '你换到了一张新牌',
   confirm: '确认',
   timeToAct: '行动剩余 {time}',
   expandLog: '展开{action}的详情',
@@ -235,12 +257,19 @@ interface MessageValues {
   errorRoomFull: { maximum: number };
   winner: { name: string };
   waitingForAction: { name: string };
+  waitingForBlock: { name: string };
+  waitingForShowdown: { name: string };
+  waitingForLoss: { name: string };
+  waitingForExchange: { name: string };
+  showdownTitle: { challenger: string; claimant: string };
+  showdownTitleYou: { challenger: string };
+  showdownTitleByYou: { claimant: string };
+  showdownRevealOther: { role: string };
   waitingForRematch: { name: string };
   coinCount: { count: number };
   coinCountOne: { count: number };
   influenceCount: { count: number };
   blockWith: { role: string };
-  revealRole: { role: string };
   exchangePrompt: { count: number };
   cardFace: { role: string };
   cardRevealed: { role: string };

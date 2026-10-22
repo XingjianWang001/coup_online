@@ -27,6 +27,7 @@ export type Phase =
   | 'lobby'
   | 'choosingAction'
   | 'awaitingChallenge' // 有声称（行动或阻挡）等待质疑
+  | 'showdown' // 对质：被质疑者选一张暗牌公开翻开
   | 'awaitingBlock' // 行动声称通过（或外援），等待阻挡
   | 'choosingLoss' // 某人须选择亮出一张牌（失去影响力）
   | 'choosingExchange' // 大使交换选牌
@@ -34,6 +35,14 @@ export type Phase =
 
 // 当前等待质疑的声称主体
 export type ChallengeSubject = 'action' | 'block';
+
+// 对质：谁质疑了谁声称的哪个角色；subject 决定翻牌之后流程往哪走
+export interface Showdown {
+  challengerId: string;
+  claimantId: string;
+  role: Role;
+  subject: ChallengeSubject;
+}
 
 export interface PendingAction {
   type: ActionType;
@@ -64,6 +73,7 @@ export interface GameState {
   currentPlayerId: string | null;
   pending: PendingAction | null;
   challengeSubject: ChallengeSubject | null;
+  showdown: Showdown | null;
   lossToResolve: LossToResolve | null;
   exchangeKeepCount: number | null; // 大使交换需保留的牌数
   passed: string[]; // 当前质疑/阻挡窗口中已放弃的玩家 id
@@ -75,7 +85,8 @@ export type GameEvent =
   | { type: 'actionChosen'; actorId: string; action: ActionType; targetId?: string; claimedRole?: Role }
   | { type: 'challenged'; challengerId: string; targetId: string }
   | { type: 'blocked'; blockerId: string; role: Role }
-  | { type: 'challengeResolved'; truth: boolean; loserId: string; claimantId: string }
+  // role / slot：对质中翻开的牌及其在被质疑者手牌中的位置（公开信息，供旁观者播放翻牌）
+  | { type: 'challengeResolved'; truth: boolean; loserId: string; claimantId: string; role: Role; slot: number }
   | { type: 'influenceLost'; playerId: string; role: Role }
   | { type: 'eliminated'; playerId: string }
   | { type: 'coinsChanged'; playerId: string; coins: number }
@@ -106,6 +117,7 @@ export interface PublicState {
     blockRole?: Role;
   } | null;
   challengeSubject: ChallengeSubject | null;
+  showdown: Omit<Showdown, 'subject'> | null;
   lossPlayerId: string | null;
   exchangeKeepCount: number | null;
   passed: string[];

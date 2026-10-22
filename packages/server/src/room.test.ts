@@ -203,7 +203,58 @@ describe('Room 计时结束', () => {
     expect(onBroadcast).toHaveBeenCalledWith(room, expect.arrayContaining([
       expect.objectContaining({ type: 'actionChosen', actorId: alice.id, action: 'coup', targetId: bob.id }),
     ]));
-    expect(room.getDeadlineMs()).toBeNull();
+    expect(room.getDeadlineMs()).toBe(20_000);
+
+    // 超时默认选择：随机失去一张，回合推进
+    vi.advanceTimersByTime(20_000);
+    expect(room.game?.players.find((p) => p.id === bob.id)?.revealed).toHaveLength(1);
+    expect(room.game?.currentPlayerId).toBe(bob.id);
+  });
+
+  it('对质限时 20 秒，超时替持有被声称角色的玩家翻开它；揭晓后下一段计时多出揭晓时间', () => {
+    vi.useFakeTimers();
+    const {
+      room,
+      events: { onBroadcast },
+    } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    room.game!.players.find((p) => p.id === alice.id)!.hand = [
+      { id: 'x-captain', role: 'captain' },
+      { id: 'x-duke', role: 'duke' },
+    ];
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'tax' });
+    room.dispatch(bob.id, 'sock2', { type: 'challenge' });
+    expect(room.game?.phase).toBe('showdown');
+    expect(room.getDeadlineMs()).toBe(20_000);
+
+    vi.advanceTimersByTime(20_000);
+    expect(onBroadcast).toHaveBeenCalledWith(room, expect.arrayContaining([
+      expect.objectContaining({ type: 'challengeResolved', truth: true, slot: 1 }),
+    ]));
+    expect(room.getPublicState()?.lossPlayerId).toBe(bob.id);
+    expect(room.getDeadlineMs()).toBe(26_000);
+  });
+
+  it('被质疑者在对质中翻牌', () => {
+    vi.useFakeTimers();
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    room.game!.players.find((p) => p.id === alice.id)!.hand = [
+      { id: 'x-captain', role: 'captain' },
+      { id: 'x-contessa', role: 'contessa' },
+    ];
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'tax' });
+    room.dispatch(bob.id, 'sock2', { type: 'challenge' });
+    room.dispatch(alice.id, 'sock1', { type: 'revealShowdownCard', cardId: 'x-contessa' });
+    expect(room.getPublicState()?.players.find((p) => p.id === alice.id)?.revealed).toEqual(['contessa']);
+    expect(room.game?.currentPlayerId).toBe(bob.id);
+    expect(room.getDeadlineMs()).toBe(66_000);
   });
 
   it('阻挡窗口超时后广播结算事件和下一回合状态', () => {
@@ -403,5 +454,29 @@ describe('Room 推送', () => {
     room.rematch(alice.id, 'sock1');
     expect(events.onBroadcast).toHaveBeenLastCalledWith(room, []);
     expect(events.onBroadcast).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe('Room 对质悬停同步', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('只转发被质疑者的合法牌位，过密的消息丢弃，非法牌位报错', () => {
+    vi.useFakeTimers();
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    expect(room.focusShowdownCard(alice.id, 'sock1', 0)).toBeNull();
+
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'tax' });
+    room.dispatch(bob.id, 'sock2', { type: 'challenge' });
+    expect(room.focusShowdownCard(bob.id, 'sock2', 0)).toBeNull();
+    expect(room.focusShowdownCard(alice.id, 'sock1', 1)).toEqual({ slot: 1 });
+    expect(room.focusShowdownCard(alice.id, 'sock1', 0)).toBeNull();
+    vi.advanceTimersByTime(100);
+    expect(room.focusShowdownCard(alice.id, 'sock1', null)).toEqual({ slot: null });
+    expect(() => room.focusShowdownCard(alice.id, 'sock1', 2)).toThrow('illegalIntent');
+    expect(() => room.focusShowdownCard(alice.id, 'sock1', '0')).toThrow('illegalIntent');
   });
 });

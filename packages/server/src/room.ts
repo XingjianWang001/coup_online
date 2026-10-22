@@ -15,6 +15,9 @@ import {
   resolveChallengeTimeout,
   resolveExchange,
   resolveLoss,
+  resolveLossTimeout,
+  resolveShowdownTimeout,
+  revealShowdownCard,
 } from '@coup/engine';
 import type { GameRepository } from './repository.ts';
 import type { LobbyPlayer } from '@coup/shared';
@@ -22,6 +25,10 @@ import { ClientError } from './errors.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
+// 对质揭晓后客户端要播完翻牌、换牌或落回座位的动画（约 6 秒），下一段计时顺延这么久，免得倒计时被动画吃掉。
+// 与 client/src/App.tsx 对质舞台的动画时长（SUSPENSE_MS 等）一起改
+const REVEAL_MS = 6_000;
+const FOCUS_MIN_INTERVAL_MS = 50;
 const DISCONNECT_GRACE_MS = 90_000;
 const MAX_PLAYERS = 6;
 const MAX_NAME_LENGTH = 32;
@@ -58,6 +65,7 @@ export class Room {
   players = new Map<string, RoomPlayer>();
   game: GameState | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private lastFocusAt = 0;
   private deadlineAt: number | null = null;
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -219,16 +227,19 @@ export class Room {
     return events;
   }
 
-  private afterMutation(_events: GameEvent[]): void {
+  private afterMutation(events: GameEvent[]): void {
     if (!this.game) return;
     this.handOffOfflineHost();
+    const reveal = events.some((e) => e.type === 'challengeResolved') ? REVEAL_MS : 0;
     switch (this.game.phase) {
       case 'choosingAction':
-        this.startTimer(ACTION_TIMEOUT_MS);
+        this.startTimer(ACTION_TIMEOUT_MS + reveal);
         break;
       case 'awaitingChallenge':
       case 'awaitingBlock':
-        this.startTimer(WINDOW_TIMEOUT_MS);
+      case 'showdown':
+      case 'choosingLoss':
+        this.startTimer(WINDOW_TIMEOUT_MS + reveal);
         break;
       default:
         this.clearTimer();
@@ -269,6 +280,10 @@ export class Room {
         events = this.apply((g) => resolveChallengeTimeout(g));
       } else if (this.game.phase === 'awaitingBlock') {
         events = this.apply((g) => resolveBlockTimeout(g));
+      } else if (this.game.phase === 'showdown') {
+        events = this.apply((g) => resolveShowdownTimeout(g));
+      } else if (this.game.phase === 'choosingLoss') {
+        events = this.apply((g) => resolveLossTimeout(g));
       } else {
         return;
       }
@@ -312,6 +327,8 @@ export class Room {
           return this.apply((g) => block(g, playerId, intent.role as Role));
         case 'passBlock':
           return this.apply((g) => passBlock(g, playerId));
+        case 'revealShowdownCard':
+          return this.apply((g) => revealShowdownCard(g, playerId, intent.cardId as string));
         case 'resolveLoss':
           return this.apply((g) => resolveLoss(g, playerId, intent.cardId as string));
         case 'resolveExchange':
@@ -326,6 +343,22 @@ export class Room {
       }
       throw error;
     }
+  }
+
+  // 对质悬停同步：校验后返回 { slot } 交给传输层转发（slot 为 null 表示不再对准任何牌）；不该转发时返回 null。
+  // 比客户端节流还密的消息直接丢弃，挡住刷屏；转发不进牌局状态。
+  focusShowdownCard(playerId: string, socketId: string, slot: unknown): { slot: number | null } | null {
+    this.requireCurrentConnection(playerId, socketId);
+    const g = this.game;
+    if (g?.phase !== 'showdown' || g.showdown?.claimantId !== playerId) return null;
+    const handSize = g.players.find((p) => p.id === playerId)!.hand.length;
+    if (slot !== null && !(Number.isInteger(slot) && (slot as number) >= 0 && (slot as number) < handSize)) {
+      throw new ClientError({ code: 'illegalIntent' });
+    }
+    const now = Date.now();
+    if (now - this.lastFocusAt < FOCUS_MIN_INTERVAL_MS) return null;
+    this.lastFocusAt = now;
+    return { slot: slot as number | null };
   }
 
   getPublicState() {
