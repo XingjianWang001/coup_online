@@ -26,12 +26,12 @@ import {
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
 import { actionName, coinLegend, roleDescription, roleName, roleShortName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
-import { describeCountdown, describePending, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, remainingSinceReceipt } from './narration.ts';
+import { describeCountdown, describePending, describeWaiting, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, remainingSinceReceipt } from './narration.ts';
 import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { wrappedDialogFocus } from './dialog.ts';
 import { scheduleAutoDismiss } from './transient.ts';
-import { initialSession, reduceSession, type Session } from './session.ts';
+import { closeShowdown, initialSession, reduceSession, type Session, type Showcase, type ShowdownView } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
 import {
   LANGUAGE_OPTIONS,
@@ -67,9 +67,10 @@ interface TransientErrorState {
   error: ServerError | { notice: 'leftRoomNotice' | 'replacedRoomNotice' };
 }
 
-type SessionAction = { msg: ServerMessage; now: number } | { patch: Partial<Session> };
+type SessionAction = { msg: ServerMessage; now: number } | { patch: Partial<Session> } | { closeShowdown: true };
 
 function sessionReducer(s: Session, a: SessionAction): Session {
+  if ('closeShowdown' in a) return closeShowdown(s);
   return 'msg' in a ? reduceSession(s, a.msg, a.now) : { ...s, ...a.patch };
 }
 
@@ -103,6 +104,9 @@ function useDialogFocus(
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     const onKeyDown = (event: KeyboardEvent) => {
+      // 对话框叠开时（如发牌展示盖在规则上）只由最上层的那个响应
+      const modals = document.querySelectorAll('[aria-modal="true"]');
+      if (modals[modals.length - 1] !== dialogRef.current) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         onClose();
@@ -168,6 +172,8 @@ export function App() {
     tunnelLoading,
     selectedAction,
     selectedKeep,
+    showcase,
+    showdown,
   } = session;
   const setSelectedAction = useCallback((a: ActionType | null) => dispatchSession({ patch: { selectedAction: a } }), []);
   const setSelectedKeep = useCallback((ids: string[]) => dispatchSession({ patch: { selectedKeep: ids } }), []);
@@ -183,6 +189,8 @@ export function App() {
   const closeRules = useCallback(() => setShowRules(false), []);
   const closeSettings = useCallback(() => setShowSettings(false), []);
   const closeLeaveConfirmation = useCallback(() => setConfirmLeave(false), []);
+  const closeShowcase = useCallback(() => dispatchSession({ patch: { showcase: null } }), []);
+  const finishShowdown = useCallback(() => dispatchSession({ closeShowdown: true }), []);
 
   function changeLocale(nextLocale: Locale) {
     setLocale(nextLocale);
@@ -219,7 +227,6 @@ export function App() {
           for (const e of msg.events) {
             if (e.type === 'gameOver') showNotice({ key: 'gameEnded' });
             if (e.type === 'eliminated') showNotice({ key: 'playerEliminated' });
-            if (e.type === 'challengeResolved') showNotice({ key: e.truth ? 'challengeFailed' : 'challengeSucceeded' });
             if (e.type === 'influenceLost') showNotice({ key: 'influenceLostNotice' });
           }
           break;
@@ -310,6 +317,11 @@ export function App() {
   const serverNow = serverOffsetMs == null ? null : Date.now() + serverOffsetMs;
 
   const me = identity?.playerId;
+  // 发牌展示期间倒计时照走：轮到我行动时在展示里给出剩余时间
+  const myMove = !!publicState && (
+    (publicState.phase === 'choosingAction' && publicState.currentPlayerId === me) ||
+    (publicState.phase === 'choosingExchange' && publicState.pending?.actorId === me)
+  );
 
   function createRoom() {
     setError(null);
@@ -385,6 +397,39 @@ export function App() {
 
       {confirmLeave && (
         <LeaveConfirmation locale={locale} onConfirm={leaveRoom} onClose={closeLeaveConfirmation} />
+      )}
+
+      {showcase && (
+        <DealShowcase
+          showcase={showcase}
+          locale={locale}
+          countdown={myMove ? describeCountdown(remainingMs, countdownSnapshot?.deadlineAt, serverNow) : null}
+          onClose={closeShowcase}
+        />
+      )}
+
+      {showdown && publicState && (
+        <ShowdownStage
+          key={showdown.id}
+          view={showdown}
+          state={publicState}
+          me={me}
+          locale={locale}
+          countdown={publicState.phase === 'showdown' ? describeCountdown(remainingMs, countdownSnapshot?.deadlineAt, serverNow) : null}
+          onFocus={(slot) => send(socket, { type: 'focusShowdownCard', slot })}
+          onReveal={(cardId) => send(socket, { type: 'revealShowdownCard', cardId })}
+          onDone={finishShowdown}
+        />
+      )}
+
+      {!showdown && publicState?.phase === 'choosingLoss' && publicState.lossPlayerId === me && (
+        <LossStage
+          key={publicState.lossPlayerId}
+          hand={hand}
+          locale={locale}
+          countdown={describeCountdown(remainingMs, countdownSnapshot?.deadlineAt, serverNow)}
+          onLose={(cardId) => send(socket, { type: 'resolveLoss', cardId })}
+        />
       )}
 
       <TransientMessage
@@ -921,6 +966,481 @@ function CardBack({ locale }: { locale: Locale }) {
   return <div className="card-back" role="img" aria-label={translate(locale, 'cardBack')} />;
 }
 
+// 发牌展示：大牌取自 prototype/role-icons 分支（1868656）的方案 C（线描图标 + 圆章 + 扑克式角标），只在这里出现。
+// 动画全在 CSS：--i 为牌位、--n 为牌数，用来算出各牌飞向屏幕上方同一个牌堆点的位移。
+function DealShowcase({ showcase, locale, countdown, onClose }: {
+  showcase: Showcase;
+  locale: Locale;
+  countdown: string | null;
+  onClose: () => void;
+}) {
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [openTip, setOpenTip] = useState<number | null>(null);
+  useDialogFocus(onClose, dialogRef, confirmRef);
+
+  return (
+    <div className="overlay showcase-overlay" onClick={onClose}>
+      <div
+        ref={dialogRef}
+        className="showcase"
+        role="dialog"
+        aria-modal="true"
+        aria-label={translate(locale, 'showcaseDeal')}
+        style={{ '--n': showcase.cards.length } as CSSProperties}
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpenTip(null);
+        }}
+      >
+        <div className="showcase-cards">
+          {showcase.cards.map((card, i) => {
+            const tipId = `showcase-tip-${i}`;
+            return (
+              <div key={i} className="showcase-slot" style={{ '--i': i, '--order': i, '--tip': `var(--${card.role})` } as CSSProperties}>
+                <div className="showcase-flipper dealt">
+                  <div className="card-back" aria-hidden="true" />
+                  <button
+                    type="button"
+                    className="showcase-face"
+                    aria-describedby={tipId}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setOpenTip(openTip === i ? null : i);
+                    }}
+                  >
+                    <BigCard role={card.role} locale={locale} />
+                  </button>
+                </div>
+                <span id={tipId} role="tooltip" className={`showcase-tip${openTip === i ? ' open' : ''}`}>
+                  {roleDescription(locale, card.role)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="showcase-actions">
+          {countdown && (
+            <span className="showcase-timer" role="timer" aria-label={translate(locale, 'timeToAct', { time: countdown })}>
+              <HourglassIcon />
+              {countdown}
+            </span>
+          )}
+          <button ref={confirmRef} onClick={onClose}>{translate(locale, 'confirm')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- 对质舞台与私下选牌（动效方案见 prototype/showdown-motion 分支的 A） ----------
+const prefersReducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const animate = (el: Element, frames: Keyframe[], options: KeyframeAnimationOptions) =>
+  el.animate(frames, { fill: 'forwards', ...options }).finished;
+// 翻牌器从 180°（牌背朝外）转到 0°（牌面朝外）
+const flipTo = (deg: number): Keyframe => ({ transform: `perspective(1000px) rotateY(${deg}deg)` });
+const SUSPENSE_MS = 1900; // 悬念：四周已暗，牌静止，只有牌框升温
+const VERDICT_HOLD_MS = 1300;
+// 整段揭晓（悬念 + 翻牌 + 盖印 + 换牌或落回座位）约 6 秒：改动这里的时长要同步 server/src/room.ts 的 REVEAL_MS
+const FOCUS_SEND_MS = 100;
+
+// 放大展示的一张牌：down 是翻开前朝外的一面，up 是翻开后的牌面；incoming 是质疑失败后换来的新牌
+function StageCard(props: {
+  down: ReactNode;
+  up: ReactNode;
+  incoming?: ReactNode;
+  focus: boolean;
+  picked: boolean;
+  interactive: boolean;
+  label?: string;
+  onFocus?: (on: boolean) => void;
+  onPick?: () => void;
+  slotRef: (el: HTMLElement | null) => void;
+}) {
+  const body = (
+    <>
+      <span className="stage-ring" />
+      <span className="stage-card">
+        <span className="stage-heat" />
+        <span className="stage-flipper">
+          <span className="stage-down">{props.down}</span>
+          <span className="stage-up">{props.up}</span>
+        </span>
+      </span>
+      {props.incoming && <span className="stage-incoming">{props.incoming}</span>}
+    </>
+  );
+  const data = { 'data-focus': props.focus || undefined, 'data-picked': props.picked || undefined };
+  // 标签在整场里不能变，否则揭晓动画会落在被卸载的旧节点上：交互与否只看 aria-disabled
+  if (props.label === undefined) {
+    return <div ref={props.slotRef} className="stage-slot" {...data}>{body}</div>;
+  }
+  return (
+    <button
+      ref={props.slotRef as (el: HTMLButtonElement | null) => void}
+      type="button"
+      className="stage-slot"
+      {...data}
+      aria-pressed={props.picked}
+      aria-disabled={!props.interactive}
+      aria-label={props.label}
+      onMouseEnter={() => props.interactive && props.onFocus?.(true)}
+      onMouseLeave={() => props.interactive && props.onFocus?.(false)}
+      onFocus={() => props.interactive && props.onFocus?.(true)}
+      onBlur={() => props.interactive && props.onFocus?.(false)}
+      onClick={() => props.interactive && props.onPick?.()}
+    >
+      {body}
+    </button>
+  );
+}
+
+const StageBack = () => <span className="card-back stage-back" aria-hidden="true" />;
+
+function StageTimer({ countdown, locale }: { countdown: string | null; locale: Locale }) {
+  if (!countdown) return null;
+  return (
+    <span className="showcase-timer" role="timer" aria-label={translate(locale, 'timeToAct', { time: countdown })}>
+      <HourglassIcon />
+      {countdown}
+    </span>
+  );
+}
+
+// 对质：全场可见。被质疑者在放大的暗牌中选一张翻开，其他人看到牌背、同步的悬停和翻牌。
+// 揭晓后舞台留到动画播完再调用 onDone（会话的 showdown 由此清空）。
+function ShowdownStage(props: {
+  view: ShowdownView;
+  state: PublicState;
+  me: string | undefined;
+  locale: Locale;
+  countdown: string | null;
+  onFocus: (slot: number | null) => void;
+  onReveal: (cardId: string) => void;
+  onDone: () => void;
+}) {
+  const { view, state, locale } = props;
+  const mine = view.claimantId === props.me;
+  const hand = mine ? view.hand ?? [] : [];
+  const [hover, setHover] = useState<number | null>(null);
+  const [picked, setPicked] = useState<number | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [sent, setSent] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const slots = useRef<(HTMLElement | null)[]>([]);
+  const backRef = useRef<HTMLButtonElement>(null);
+  const firstFocus = useRef<HTMLElement | null>(null);
+  const onDone = useRef(props.onDone);
+  onDone.current = props.onDone;
+  useDialogFocus(() => {}, root, firstFocus as RefObject<HTMLElement>);
+
+  const choosing = !view.reveal && !sent;
+  // 被质疑者对准的牌：悬停优先，其次点选；旁观者看服务器转发的。揭晓时被翻开的那张保持抬起，牌不再动
+  const focus = view.reveal ? (mine ? null : view.reveal.slot) : mine ? (sent ? null : hover ?? picked) : view.focus;
+  // 悬停同步每 FOCUS_SEND_MS 最多发一次，尾随补发最后的位置（服务器丢弃更密的消息，丢掉末次会让旁观者看到错的牌抬着）
+  const sentFocus = useRef<{ slot: number | null; at: number; timer?: ReturnType<typeof setTimeout> }>({ slot: null, at: 0 });
+  useEffect(() => {
+    if (!mine || !choosing) return;
+    const relay = sentFocus.current;
+    clearTimeout(relay.timer);
+    const flush = () => {
+      if (relay.slot === focus) return;
+      relay.slot = focus;
+      relay.at = Date.now();
+      props.onFocus(focus);
+    };
+    const wait = FOCUS_SEND_MS - (Date.now() - relay.at);
+    if (wait <= 0) flush();
+    else relay.timer = setTimeout(flush, wait);
+    return () => clearTimeout(relay.timer);
+  }, [mine, choosing, focus]);
+
+  useEffect(() => {
+    if (asking) backRef.current?.focus();
+  }, [asking]);
+  // 超时由服务器默认选择后，二次确认随之作废
+  useEffect(() => {
+    if (view.reveal) setAsking(false);
+  }, [view.reveal]);
+
+  // 揭晓：暗场 → 牌静止、牌框升温 → 快翻 → 盖印 → 换牌或落回座位
+  const played = useRef(false);
+  useEffect(() => {
+    const reveal = view.reveal;
+    if (!reveal || played.current || !root.current) return;
+    played.current = true;
+    let alive = true;
+    const el = root.current;
+    const slot = slots.current[reveal.slot];
+    if (!slot) {
+      onDone.current();
+      return;
+    }
+    const $ = (sel: string, from: Element = el) => from.querySelector<HTMLElement>(sel)!;
+    const card = $('.stage-card', slot);
+    const heat = $('.stage-heat', slot);
+    const others = slots.current.filter((s, i) => s && i !== reveal.slot) as HTMLElement[];
+    const reduced = prefersReducedMotion();
+    // 焦点从牌上移回舞台本身，免得已不可选的牌还留着焦点外圈
+    el.focus();
+
+    (async () => {
+      const r = slot.getBoundingClientRect();
+      const spot = $('.stage-spot');
+      spot.style.setProperty('--sx', `${r.left + r.width / 2}px`);
+      spot.style.setProperty('--sy', `${r.top + r.height / 2}px`);
+      for (const other of others) animate(other, [{ opacity: 0.15 }], { duration: 450 });
+      animate($('.stage-title'), [{ opacity: 0.5 }], { duration: 450 });
+      animate(spot, [{ opacity: 1 }], { duration: 600, easing: 'ease-out' });
+      animate(heat, [{ opacity: 0 }, { opacity: 1 }], { duration: SUSPENSE_MS, easing: 'cubic-bezier(0.6, 0, 0.9, 0.5)' });
+      await sleep(SUSPENSE_MS);
+      if (!alive) return;
+      const flipper = $('.stage-flipper', slot);
+      if (reduced) flipper.animate([flipTo(0)], { duration: 0, fill: 'forwards' });
+      else await animate(flipper, [flipTo(0)], { duration: 340, easing: 'cubic-bezier(0.3, 0, 0.1, 1)' });
+      animate(heat, [{ opacity: 0 }], { duration: 500 });
+      if (reveal.truth) {
+        // 属实：角色色从牌后漫开
+        animate($('.stage-flood', slot.parentElement!), [{ opacity: 0.95, transform: 'scale(0.3)' }, { opacity: 0.45, transform: 'scale(1)' }], {
+          duration: 1100,
+          easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+        });
+      } else {
+        animate($('.stage-up', slot), [{ filter: 'saturate(0.25) brightness(0.65)' }], { duration: 800, easing: 'ease-out' });
+        if (!reduced) animate(card, [{ transform: 'translateY(14px)' }], { duration: 700, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' });
+      }
+      const verdict = $('.stage-verdict');
+      animate(verdict, [{ opacity: 0 }, { opacity: 1 }], { duration: 200 });
+      if (!reduced) {
+        animate($('.stage-stamp'), [{ transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 260, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)' });
+      }
+      await sleep(VERDICT_HOLD_MS);
+      if (!alive) return;
+
+      if (reveal.truth) {
+        // 证明牌洗回牌堆，新牌从牌堆发回：旁观者看到牌背，本人看到牌面
+        const incoming = $('.stage-incoming', slot);
+        if (reduced) {
+          await animate(card, [{ opacity: 0 }], { duration: 250 });
+          await animate(incoming, [{ opacity: 0 }, { opacity: 1 }], { duration: 250 });
+        } else {
+          await animate(card, [{ transform: 'translateY(-80vh) rotate(14deg)' }], { duration: 420, easing: 'cubic-bezier(0.7, 0, 0.84, 0)' });
+          await animate(incoming, [
+            { opacity: 1, transform: 'translateY(-80vh) rotate(-16deg)', easing: 'cubic-bezier(0.16, 1, 0.3, 1)' },
+            { opacity: 1, transform: 'translateY(24px) rotate(-5deg)', offset: 0.65, easing: 'cubic-bezier(0.45, 0, 0.55, 1)' },
+            { opacity: 1, transform: 'none' },
+          ], { duration: 620 });
+        }
+        await sleep(1000);
+        if (!alive) return;
+        await animate(el, [{ opacity: 0 }], { duration: 300 });
+      } else {
+        // 翻开的牌缩回被质疑者座位，成为明牌
+        for (const fading of [$('.stage-backdrop'), spot, $('.stage-title'), verdict, ...others]) {
+          animate(fading, [{ opacity: 0 }], { duration: 450, easing: 'ease-out' });
+        }
+        const target = document.querySelector(`[data-seat="${view.claimantId}"] .cards-row > :last-child`)?.getBoundingClientRect();
+        const cur = card.getBoundingClientRect();
+        if (target && !reduced) {
+          const dx = target.left + target.width / 2 - (cur.left + cur.width / 2);
+          const dy = target.top + target.height / 2 - (cur.top + cur.height / 2);
+          await animate(card, [{ transform: `translate(${dx}px, ${dy}px) scale(${target.width / cur.width})`, opacity: 0.4 }], {
+            duration: 650,
+            easing: 'cubic-bezier(0.65, 0, 0.35, 1)',
+          });
+        } else {
+          await animate(card, [{ opacity: 0 }], { duration: 300 });
+        }
+      }
+      if (alive) onDone.current();
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [view.reveal]);
+
+  function confirm() {
+    if (picked === null) return;
+    if (hand.some((c) => c.role === view.role) && hand[picked].role !== view.role) setAsking(true);
+    else reveal();
+  }
+  function reveal() {
+    setAsking(false);
+    setSent(true);
+    props.onReveal(hand[picked!].id);
+  }
+
+  const truth = view.reveal?.truth ?? false;
+  const roleLabel = roleName(locale, view.role);
+  const challenger = nameOf(state, view.challengerId);
+  const claimant = nameOf(state, view.claimantId);
+  const title = mine
+    ? translate(locale, 'showdownTitleYou', { challenger })
+    : view.challengerId === props.me
+      ? translate(locale, 'showdownTitleByYou', { claimant })
+      : translate(locale, 'showdownTitle', { challenger, claimant });
+
+  return (
+    <div
+      ref={root}
+      className="overlay stage-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${title} ${roleLabel}`}
+      tabIndex={-1}
+      data-revealing={sent || !!view.reveal || undefined}
+    >
+      <div className="stage-backdrop" />
+      <div className="stage-spot" />
+      <div className="stage">
+        <h2 className="stage-title">
+          <span>{title}</span>
+          <span className={`stage-claim role--${view.role}`}><RoleIcon role={view.role} />{roleLabel}</span>
+        </h2>
+        <div className="stage-cards">
+          {Array.from({ length: view.slots }, (_, i) => {
+            const own = hand[i];
+            const upRole = own?.role ?? (view.reveal?.slot === i ? view.reveal.role : null);
+            const swapped = view.reveal?.truth && view.reveal.slot === i;
+            return (
+              <div key={i} className="stage-cell" style={upRole ? ({ '--role': `var(--${upRole})` } as CSSProperties) : undefined}>
+                <span className="stage-flood" />
+                <StageCard
+                  slotRef={(el) => {
+                    slots.current[i] = el;
+                    if (i === 0 && mine) firstFocus.current = el;
+                  }}
+                  down={own ? <BigCard role={own.role} locale={locale} /> : <StageBack />}
+                  up={upRole ? <BigCard role={upRole} locale={locale} /> : <StageBack />}
+                  incoming={swapped ? (mine && view.newCard ? <BigCard role={view.newCard.role} locale={locale} /> : <StageBack />) : undefined}
+                  focus={focus === i}
+                  picked={!view.reveal ? picked === i : mine && view.reveal.slot === i}
+                  interactive={choosing}
+                  label={own && roleName(locale, own.role)}
+                  onFocus={(on) => setHover((h) => (on ? i : h === i ? null : h))}
+                  onPick={() => setPicked(i)}
+                />
+              </div>
+            );
+          })}
+        </div>
+        <div className="stage-foot">
+          {view.reveal ? (
+            <div className="stage-verdict" data-truth={truth || undefined}>
+              <span className="stage-stamp">{translate(locale, truth ? 'challengeFailed' : 'challengeSucceeded')}</span>
+            </div>
+          ) : (
+            <div className="stage-status">
+              {/* 旁观者必须看到在等谁，否则会以为要自己操作 */}
+              {!mine && <p>{translate(locale, 'waitingForShowdown', { name: claimant })}</p>}
+              <div className="stage-actions">
+                <StageTimer countdown={props.countdown} locale={locale} />
+                {mine && (
+                  <button className="primary" disabled={picked === null || sent} onClick={confirm}>
+                    {translate(locale, 'revealThis')}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {asking && (
+            <div className="stage-ask" role="alertdialog" aria-labelledby="stage-ask-text">
+              <p id="stage-ask-text">{translate(locale, 'showdownRevealOther', { role: roleLabel })}</p>
+              <div className="stage-actions">
+                <button ref={backRef} onClick={() => setAsking(false)}>{translate(locale, 'back')}</button>
+                <button className="primary" onClick={reveal}>{translate(locale, 'revealAnyway')}</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 失去影响力（政变、暗杀、质疑失败的质疑者）：只有本人看到的放大选牌；翻开的牌褪色下沉后才发出意图
+function LossStage(props: { hand: Card[]; locale: Locale; countdown: string | null; onLose: (cardId: string) => void }) {
+  const { hand, locale } = props;
+  const [picked, setPicked] = useState<number | null>(null);
+  const [sent, setSent] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const firstFocus = useRef<HTMLElement | null>(null);
+  const slots = useRef<(HTMLElement | null)[]>([]);
+  useDialogFocus(() => {}, root, firstFocus as RefObject<HTMLElement>);
+
+  async function lose() {
+    if (picked === null || sent) return;
+    setSent(true);
+    const slot = slots.current[picked];
+    if (slot && !prefersReducedMotion()) {
+      await animate(slot.querySelector('.stage-card')!, [{ transform: 'translateY(14px)', filter: 'saturate(0.25) brightness(0.65)' }], {
+        duration: 450,
+        easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
+      });
+    }
+    props.onLose(hand[picked].id);
+  }
+
+  const title = translate(locale, 'lossTitle');
+  return (
+    <div ref={root} className="overlay stage-overlay" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="stage-backdrop" />
+      <div className="stage">
+        <h2 className="stage-title">{title}</h2>
+        <div className="stage-cards">
+          {hand.map((card, i) => (
+            <div key={card.id} className="stage-cell">
+              <StageCard
+                slotRef={(el) => {
+                  slots.current[i] = el;
+                  if (i === 0) firstFocus.current = el;
+                }}
+                down={<BigCard role={card.role} locale={locale} />}
+                up={<BigCard role={card.role} locale={locale} />}
+                focus={false}
+                picked={picked === i}
+                interactive={!sent}
+                label={roleName(locale, card.role)}
+                onPick={() => setPicked(i)}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="stage-foot">
+          <div className="stage-actions">
+            <StageTimer countdown={props.countdown} locale={locale} />
+            <button className="primary" disabled={picked === null || sent} onClick={lose}>{translate(locale, 'revealThis')}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BigCard({ role, locale, className = '' }: { role: Role; locale: Locale; className?: string }) {
+  return (
+    <span className={`big-card card--${role} ${className}`}>
+      <Glyph className="pip tl">{ROLE_GLYPHS[role]}</Glyph>
+      <span className="medallion"><Glyph>{ROLE_GLYPHS[role]}</Glyph></span>
+      <span className="big-card-name">{roleName(locale, role)}</span>
+      <Glyph className="pip br">{ROLE_GLYPHS[role]}</Glyph>
+    </span>
+  );
+}
+
+// 沙漏
+function HourglassIcon() {
+  return (
+    <Glyph size={16} className="inline-icon">
+      <line x1="6" y1="2.5" x2="18" y2="2.5" />
+      <line x1="6" y1="21.5" x2="18" y2="21.5" />
+      <path className="f" d="M7.5 3 H16.5 Q16.5 8.5 12 12 Q7.5 8.5 7.5 3 Z" />
+      <path d="M12 12 Q16.5 15.5 16.5 21 H7.5 Q7.5 15.5 12 12 Z" />
+    </Glyph>
+  );
+}
+
 // 银元
 function CoinIcon() {
   return (
@@ -1028,16 +1548,17 @@ function GameBoard(props: {
         ? pending?.blockById === me
         : false;
 
-  const canChallenge = state.phase === 'awaitingChallenge' && !!myView?.alive && !meIsClaimant;
+  const passed = !!me && state.passed.includes(me);
+  const canChallenge = state.phase === 'awaitingChallenge' && !!myView?.alive && !meIsClaimant && !passed;
 
   let canBlock = false;
   let canBlockRoles: Role[] = [];
   if (state.phase === 'awaitingBlock' && pending) {
     if (pending.action === 'foreignAid') {
-      canBlock = pending.actorId !== me && !!myView?.alive;
+      canBlock = pending.actorId !== me && !!myView?.alive && !passed;
       canBlockRoles = ['duke'];
     } else {
-      canBlock = pending.targetId === me && !!myView?.alive;
+      canBlock = pending.targetId === me && !!myView?.alive && !passed;
       canBlockRoles =
         pending.action === 'assassinate' ? ['contessa'] : pending.action === 'steal' ? ['captain', 'ambassador'] : [];
     }
@@ -1045,6 +1566,8 @@ function GameBoard(props: {
 
   const amLosing = state.phase === 'choosingLoss' && state.lossPlayerId === me;
   const amExchanging = state.phase === 'choosingExchange' && pending?.actorId === me;
+  // 对质时等待提示由对质舞台给出，控制区不再重复
+  const waiting = me && state.phase !== 'showdown' ? describeWaiting(state, me, props.locale) : null;
 
   const narration = describePending(state, props.locale);
   const countdown = describeCountdown(props.remainingMs, props.deadlineAt, props.serverNow);
@@ -1060,10 +1583,13 @@ function GameBoard(props: {
   // angle 缺省即自己的座位（近端）
   const renderSeat = (p: SeatPlayer, angle?: number) => {
     const isCurrent = p.id === state.currentPlayerId;
+    // 正在私下选牌失去影响力的人：座位高亮，配合控制区的等待提示
+    const isLosing = state.phase === 'choosingLoss' && p.id === state.lossPlayerId;
     return (
       <div
         key={p.id}
-        className={`seat ${angle == null ? 'self' : 'opponent'}${isCurrent ? ' current' : ''}${p.alive ? '' : ' dead'}`}
+        data-seat={p.id}
+        className={`seat ${angle == null ? 'self' : 'opponent'}${isCurrent ? ' current' : ''}${isLosing ? ' losing' : ''}${p.alive ? '' : ' dead'}`}
         aria-current={isCurrent ? 'true' : undefined}
         style={angle == null ? undefined : ({ '--seat-angle': `${angle}deg` } as CSSProperties)}
       >
@@ -1175,21 +1701,6 @@ function GameBoard(props: {
           </div>
         )}
 
-        {amLosing && (
-          <div className="row">
-            <p>{translate(props.locale, 'chooseInfluenceLoss')}</p>
-            {props.hand.map((c) => (
-              <button
-                key={c.id}
-                className={`role-btn role--${c.role}`}
-                onClick={() => props.onIntent({ type: 'resolveLoss', cardId: c.id })}
-              >
-                {translate(props.locale, 'revealRole', { role: roleName(props.locale, c.role) })}
-              </button>
-            ))}
-          </div>
-        )}
-
         {amExchanging && (
           <ExchangeControl
             hand={props.hand}
@@ -1209,9 +1720,7 @@ function GameBoard(props: {
           <div className="waiting">{translate(props.locale, 'waitingForRematch', { name: nameOf(state, props.hostId) })}</div>
         ))}
 
-        {!isMyTurn && !canChallenge && !canBlock && !amLosing && !amExchanging && state.phase !== 'gameOver' && (
-          <div className="waiting">{translate(props.locale, 'waitingForAction', { name: nameOf(state, state.currentPlayerId) })}</div>
-        )}
+        {waiting && <div className="waiting">{waiting}</div>}
       </div>
 
         {groups.length > 0 && (
@@ -1272,6 +1781,24 @@ function Actions(props: {
       case 'exchange': return `${name} (${roleName(props.locale, 'ambassador')})`;
     }
   };
+  // 选目标时替换整个行动网格，只留目标与取消可点
+  if (sel?.needsTarget) {
+    const heading =
+      sel.type === 'coup' ? 'chooseCoupTarget' : sel.type === 'assassinate' ? 'chooseAssassinateTarget' : 'chooseStealTarget';
+    return (
+      <div className="actions" role="group" aria-labelledby="target-heading">
+        <p id="target-heading">{translate(props.locale, heading)}</p>
+        {props.targets.map((t, i) => (
+          <button key={t.id} autoFocus={i === 0} onClick={() => props.onAction(sel.type, t.id)}>
+            {t.name}
+          </button>
+        ))}
+        <button className="ghost" onClick={() => props.onSelect(null)}>
+          {translate(props.locale, 'cancel')}
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="actions">
       {mustCoup && <p role="status">{translate(props.locale, 'mandatoryCoup')}</p>}
@@ -1285,7 +1812,6 @@ function Actions(props: {
         return (
           <span key={a.type} className="action-tip-anchor">
             <button
-              className={props.selectedAction === a.type ? 'active' : ''}
               disabled={disabled}
               aria-label={label(a.type)}
               onClick={() => {
@@ -1302,19 +1828,6 @@ function Actions(props: {
           </span>
         );
       })}
-      {sel?.needsTarget && (
-        <div className="row">
-          <span>{translate(props.locale, 'chooseTarget')}</span>
-          {props.targets.map((t) => (
-            <button key={t.id} onClick={() => props.onAction(sel.type, t.id)}>
-              {t.name}
-            </button>
-          ))}
-          <button className="ghost" onClick={() => props.onSelect(null)}>
-            {translate(props.locale, 'cancel')}
-          </button>
-        </div>
-      )}
     </div>
   );
 }

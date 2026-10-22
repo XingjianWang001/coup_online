@@ -12,6 +12,9 @@ export type ClientIntent =
   | { type: 'passChallenge' }
   | { type: 'block'; role: Role }
   | { type: 'passBlock' }
+  | { type: 'revealShowdownCard'; cardId: string }
+  // 对质中被质疑者当前对准哪张牌（悬停 / 键盘焦点 / 点选），只转发给房间，不进牌局状态
+  | { type: 'focusShowdownCard'; slot: number | null }
   | { type: 'resolveLoss'; cardId: string }
   | { type: 'resolveExchange'; keepIds: string[] }
   | { type: 'leaveRoom' };
@@ -75,6 +78,7 @@ export type ServerMessage =
   | { type: 'publicState'; state: PublicState; remainingMs: number | null; deadlineAt: number | null; hostId: string }
   | { type: 'privateState'; hand: Card[] }
   | { type: 'events'; events: GameEvent[] }
+  | { type: 'showdownFocus'; slot: number | null }
   | ({ type: 'error' } & ServerError)
   | { type: 'left'; reason: 'left' | 'replaced' };
 

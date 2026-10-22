@@ -40,6 +40,34 @@ export function describePending(state: PublicState, locale: Locale = 'zh-CN'): s
   return text;
 }
 
+/** 别人在表态时的等待提示：说出在等谁、等什么；轮到自己表态（或牌局结束）时返回 null。 */
+export function describeWaiting(state: PublicState, me: string, locale: Locale = 'zh-CN'): string | null {
+  const p = state.pending;
+  const name = (id: string | null | undefined) => ({ name: nameOf(state, id) });
+  const alive = state.players.find((x) => x.id === me)?.alive ?? false;
+  const passed = state.passed.includes(me);
+  switch (state.phase) {
+    case 'choosingAction':
+      return state.currentPlayerId === me ? null : translate(locale, 'waitingForAction', name(state.currentPlayerId));
+    case 'awaitingChallenge': {
+      const claimant = state.challengeSubject === 'block' ? p?.blockById : p?.actorId;
+      return alive && claimant !== me && !passed ? null : translate(locale, 'waitingForChallenge');
+    }
+    case 'awaitingBlock': {
+      if (p?.action === 'foreignAid') return alive && p.actorId !== me && !passed ? null : translate(locale, 'waitingForBlockAny');
+      return p?.targetId === me && alive && !passed ? null : translate(locale, 'waitingForBlock', name(p?.targetId));
+    }
+    case 'showdown':
+      return state.showdown?.claimantId === me ? null : translate(locale, 'waitingForShowdown', name(state.showdown?.claimantId));
+    case 'choosingLoss':
+      return state.lossPlayerId === me ? null : translate(locale, 'waitingForLoss', name(state.lossPlayerId));
+    case 'choosingExchange':
+      return p?.actorId === me ? null : translate(locale, 'waitingForExchange', name(p?.actorId));
+    default:
+      return null;
+  }
+}
+
 /** 收到状态后以单调时钟计算，浏览器延迟调用计时器时也能追上实际时间。 */
 export function remainingSinceReceipt(remainingMs: number | null, receivedAt: number, now: number): number | null {
   if (remainingMs == null) return null;

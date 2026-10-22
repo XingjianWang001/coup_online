@@ -12,6 +12,9 @@ import {
   resolveChallengeTimeout,
   resolveExchange,
   resolveLoss,
+  resolveLossTimeout,
+  resolveShowdownTimeout,
+  revealShowdownCard,
 } from './index.ts';
 import type { GameState, Role } from './types.ts';
 
@@ -134,21 +137,67 @@ describe('resolveLoss', () => {
   });
 });
 
-describe('声称行动与质疑', () => {
-  it('征税声称公爵，被质疑且为真 → 质疑者掉影响力，行动继续', () => {
-    const s = setup({
-      a: ['duke', 'captain'],
-      b: ['ambassador', 'ambassador'],
-      c: ['contessa', 'contessa'],
-    });
+describe('对质', () => {
+  it('质疑后进入对质：等被质疑者翻牌，质疑结果未定', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'] });
     chooseAction(s, 'a', 'tax');
-    expect(s.phase).toBe('awaitingChallenge');
-    challenge(s, 'b');
-    expect(s.phase).toBe('choosingLoss');
-    expect(s.lossToResolve?.playerId).toBe('b');
-    expect(s.players.find((p) => p.id === 'a')!.hand).toHaveLength(2);
+    const events = challenge(s, 'b');
+    expect(s.phase).toBe('showdown');
+    expect(publicState(s).showdown).toEqual({ challengerId: 'b', claimantId: 'a', role: 'duke' });
+    expect(events).toEqual([{ type: 'challenged', challengerId: 'b', targetId: 'a' }]);
+    expect(s.players.find((p) => p.id === 'a')!.hand.map((c) => c.role)).toEqual(['duke', 'captain']);
   });
 
+  it('翻出被声称的角色 → 质疑失败：该牌洗回牌堆、原位换新牌，质疑者失去影响力', () => {
+    const s = setup({ a: ['captain', 'duke'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'tax');
+    challenge(s, 'b');
+    const a = s.players.find((p) => p.id === 'a')!;
+    const [captain, duke] = a.hand;
+    const events = revealShowdownCard(s, 'a', duke.id);
+    expect(events).toContainEqual({ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 1 });
+    expect(a.hand).toHaveLength(2);
+    expect(a.hand[0]).toBe(captain);
+    expect(a.revealed).toHaveLength(0);
+    expect(s.deck).toHaveLength(15 - 6);
+    expect(s.showdown).toBeNull();
+    expect(s.lossToResolve).toMatchObject({ playerId: 'b', continuation: { kind: 'proceedAction' } });
+  });
+});
+
+describe('默认选择', () => {
+  it('对质超时：持有被声称的角色就替他翻开这张', () => {
+    const s = setup({ a: ['captain', 'duke'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'tax');
+    challenge(s, 'b');
+    const events = resolveShowdownTimeout(s);
+    expect(events[0]).toMatchObject({ type: 'challengeResolved', truth: true, slot: 1 });
+    expect(s.lossToResolve?.playerId).toBe('b');
+  });
+
+  it('对质超时：没有被声称的角色就随机翻开一张', () => {
+    const s = setup({ a: ['captain', 'contessa'], b: ['ambassador', 'ambassador'], c: ['duke', 'duke'] });
+    chooseAction(s, 'a', 'tax');
+    challenge(s, 'b');
+    resolveShowdownTimeout(s);
+    const a = s.players.find((p) => p.id === 'a')!;
+    expect(a.hand).toHaveLength(1);
+    expect(a.revealed).toHaveLength(1);
+  });
+
+  it('选牌失去影响力超时：随机失去一张', () => {
+    const s = setup({ a: ['duke', 'duke'], b: ['captain', 'contessa'], c: ['ambassador', 'ambassador'] });
+    s.players.find((p) => p.id === 'a')!.coins = 7;
+    chooseAction(s, 'a', 'coup', 'b');
+    resolveLossTimeout(s);
+    const b = s.players.find((p) => p.id === 'b')!;
+    expect(b.hand).toHaveLength(1);
+    expect(b.revealed).toHaveLength(1);
+    expect(s.currentPlayerId).toBe('b');
+  });
+});
+
+describe('声称行动与质疑', () => {
   it('声称角色被质疑且为假 → 行动作废，声称者掉影响力', () => {
     const s = setup({
       a: ['captain', 'captain'], // 没有 duke
@@ -157,8 +206,45 @@ describe('声称行动与质疑', () => {
     });
     chooseAction(s, 'a', 'tax');
     challenge(s, 'b');
-    expect(s.phase).toBe('choosingLoss');
-    expect(s.lossToResolve?.playerId).toBe('a');
+    const a = s.players.find((p) => p.id === 'a')!;
+    const events = revealShowdownCard(s, 'a', a.hand[1].id);
+    expect(events.slice(0, 2)).toEqual([
+      { type: 'challengeResolved', truth: false, loserId: 'a', claimantId: 'a', role: 'captain', slot: 1 },
+      { type: 'influenceLost', playerId: 'a', role: 'captain' },
+    ]);
+    expect(a.revealed.map((c) => c.role)).toEqual(['captain']);
+    expect(coins(s, 'a')).toBe(2);
+    expect(s.currentPlayerId).toBe('b');
+  });
+
+  it('持有被声称的角色却翻开另一张 → 质疑成立', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'tax');
+    challenge(s, 'b');
+    const a = s.players.find((p) => p.id === 'a')!;
+    revealShowdownCard(s, 'a', a.hand[1].id);
+    expect(a.hand.map((c) => c.role)).toEqual(['duke']);
+    expect(a.revealed.map((c) => c.role)).toEqual(['captain']);
+    expect(coins(s, 'a')).toBe(2);
+  });
+
+  it('只有被质疑者能在对质中翻牌', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'tax');
+    challenge(s, 'b');
+    const b = s.players.find((p) => p.id === 'b')!;
+    expect(() => revealShowdownCard(s, 'b', b.hand[0].id)).toThrow();
+  });
+
+  it('对质中翻开最后一张暗牌即被淘汰，剩一人则牌局结束', () => {
+    const s = setup({ a: ['captain', 'captain'], b: ['ambassador', 'ambassador'] });
+    s.players.find((p) => p.id === 'a')!.revealed.push(s.players.find((p) => p.id === 'a')!.hand.pop()!);
+    chooseAction(s, 'a', 'tax');
+    challenge(s, 'b');
+    const events = revealShowdownCard(s, 'a', s.players.find((p) => p.id === 'a')!.hand[0].id);
+    expect(events).toContainEqual({ type: 'eliminated', playerId: 'a' });
+    expect(s.phase).toBe('gameOver');
+    expect(s.winnerId).toBe('b');
   });
 
   it('付费角色行动被成功质疑时退还全部费用', () => {
@@ -172,13 +258,10 @@ describe('声称行动与质疑', () => {
     chooseAction(s, 'a', 'assassinate', 'b');
     expect(coins(s, 'a')).toBe(2);
 
-    const events = challenge(s, 'b');
+    challenge(s, 'b');
+    const events = revealShowdownCard(s, 'a', s.players.find((p) => p.id === 'a')!.hand[0].id);
     expect(coins(s, 'a')).toBe(5);
     expect(events).toContainEqual({ type: 'coinsChanged', playerId: 'a', coins: 5 });
-    expect(s.lossToResolve).toMatchObject({ playerId: 'a', continuation: { kind: 'cancelAction' } });
-
-    const card = s.players.find((p) => p.id === 'a')!.hand[0];
-    resolveLoss(s, 'a', card.id);
     expect(s.currentPlayerId).toBe('b');
     expect(s.players.find((p) => p.id === 'b')!.hand).toHaveLength(2);
   });
@@ -286,9 +369,33 @@ describe('暗杀与偷窃', () => {
     resolveChallengeTimeout(s);
     block(s, 'b', 'contessa');
     challenge(s, 'a');
+    revealShowdownCard(s, 'b', s.players.find((p) => p.id === 'b')!.hand[0].id);
 
     expect(coins(s, 'a')).toBe(2);
     expect(s.lossToResolve).toMatchObject({ playerId: 'a', continuation: { kind: 'cancelAction' } });
+  });
+
+  it('谎称女伯爵阻挡暗杀被质疑：目标先失去翻开的牌，暗杀照常结算再失去一张，不退费', () => {
+    const s = setup({
+      a: ['assassin', 'captain'],
+      b: ['captain', 'ambassador'],
+      c: ['duke', 'duke'],
+    });
+    s.players.find((p) => p.id === 'a')!.coins = 5;
+
+    chooseAction(s, 'a', 'assassinate', 'b');
+    resolveChallengeTimeout(s);
+    block(s, 'b', 'contessa');
+    challenge(s, 'a');
+    const b = s.players.find((p) => p.id === 'b')!;
+    revealShowdownCard(s, 'b', b.hand[0].id);
+    expect(b.revealed.map((c) => c.role)).toEqual(['captain']);
+    expect(s.lossToResolve).toMatchObject({ playerId: 'b', continuation: { kind: 'endTurn' } });
+
+    resolveLoss(s, 'b', b.hand[0].id);
+    expect(b.revealed).toHaveLength(2);
+    expect(b.alive).toBe(false);
+    expect(coins(s, 'a')).toBe(2);
   });
 
   it('偷窃转移 2 金币', () => {
@@ -333,6 +440,39 @@ describe('forfeit', () => {
     expect(b.alive).toBe(false);
     expect(b.hand).toHaveLength(0);
     expect(b.revealed).toHaveLength(2);
+  });
+});
+
+describe('对质中弃权', () => {
+  it('被质疑者弃权：行动作废，轮到下一位', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'tax');
+    challenge(s, 'b');
+    forfeit(s, 'a');
+    expect(s.showdown).toBeNull();
+    expect(coins(s, 'a')).toBe(2);
+    expect(s.currentPlayerId).toBe('b');
+  });
+
+  it('质疑阻挡的人弃权：阻挡成立，行动不结算，轮到下一位', () => {
+    const s = setup({ a: ['captain', 'captain'], b: ['ambassador', 'ambassador'], c: ['duke', 'contessa'] });
+    chooseAction(s, 'a', 'foreignAid');
+    block(s, 'c', 'duke');
+    challenge(s, 'b');
+    forfeit(s, 'b');
+    expect(s.showdown).toBeNull();
+    expect(coins(s, 'a')).toBe(2);
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('质疑者弃权：质疑作废，行动照常结算', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'tax');
+    challenge(s, 'b');
+    forfeit(s, 'b');
+    expect(s.showdown).toBeNull();
+    expect(coins(s, 'a')).toBe(5);
+    expect(s.currentPlayerId).toBe('c');
   });
 });
 

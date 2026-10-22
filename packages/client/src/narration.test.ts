@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { GameEvent, PublicState } from '@coup/shared';
-import { describeAction, describeCountdown, describeEvent, describePending, estimateServerOffset, groupLog, remainingSinceReceipt } from './narration.ts';
+import { describeAction, describeCountdown, describeEvent, describePending, describeWaiting, estimateServerOffset, groupLog, remainingSinceReceipt } from './narration.ts';
 
 function state(overrides: Partial<PublicState>): PublicState {
   return {
@@ -12,6 +12,7 @@ function state(overrides: Partial<PublicState>): PublicState {
     currentPlayerId: 'a',
     pending: null,
     challengeSubject: null,
+    showdown: null,
     lossPlayerId: null,
     exchangeKeepCount: null,
     passed: [],
@@ -109,13 +110,13 @@ describe('describeEvent', () => {
   });
 
   it('描述质疑失败（声称者确实有该角色）', () => {
-    expect(describeEvent({ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a' }, s)).toBe(
+    expect(describeEvent({ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 0 }, s)).toBe(
       '质疑失败：李四 失去影响力',
     );
   });
 
   it('描述质疑成功（声称者在撒谎）', () => {
-    expect(describeEvent({ type: 'challengeResolved', truth: false, loserId: 'a', claimantId: 'a' }, s)).toBe(
+    expect(describeEvent({ type: 'challengeResolved', truth: false, loserId: 'a', claimantId: 'a', role: 'duke', slot: 0 }, s)).toBe(
       '质疑成功：张三 失去影响力',
     );
   });
@@ -173,7 +174,7 @@ describe('groupLog', () => {
       [
         { id: 0, event: { type: 'actionChosen', actorId: 'a', action: 'tax', claimedRole: 'duke' } },
         { id: 1, event: { type: 'challenged', challengerId: 'b', targetId: 'a' } },
-        { id: 2, event: { type: 'challengeResolved', truth: false, loserId: 'a', claimantId: 'a' } },
+        { id: 2, event: { type: 'challengeResolved', truth: false, loserId: 'a', claimantId: 'a', role: 'duke', slot: 0 } },
         { id: 3, event: { type: 'influenceLost', playerId: 'a', role: 'assassin' } },
         { id: 4, event: { type: 'turnChanged', playerId: 'b' } },
       ],
@@ -218,7 +219,7 @@ describe('groupLog', () => {
     const events: { id: number; event: GameEvent }[] = [
       { id: 0, event: { type: 'actionChosen', actorId: 'a', action: 'assassinate', targetId: 'b', claimedRole: 'assassin' } },
       { id: 1, event: { type: 'challenged', challengerId: 'b', targetId: 'a' } },
-      { id: 2, event: { type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a' } },
+      { id: 2, event: { type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 0 } },
       { id: 3, event: { type: 'blocked', blockerId: 'b', role: 'contessa' } },
       { id: 4, event: { type: 'influenceLost', playerId: 'b', role: 'duke' } },
       { id: 5, event: { type: 'eliminated', playerId: 'b' } },
@@ -244,5 +245,35 @@ describe('groupLog', () => {
       ]),
     );
     expect(events).toEqual(snapshot);
+  });
+});
+
+describe('describeWaiting', () => {
+  const tax = { action: 'tax' as const, actorId: 'a', claimedRole: 'duke' as const };
+
+  it('轮到自己表态时不显示等待', () => {
+    expect(describeWaiting(state({}), 'a')).toBeNull();
+    expect(describeWaiting(state({ phase: 'awaitingChallenge', challengeSubject: 'action', pending: tax }), 'b')).toBeNull();
+    expect(describeWaiting(state({ phase: 'choosingLoss', lossPlayerId: 'b' }), 'b')).toBeNull();
+  });
+
+  it('说出正在等谁、等什么', () => {
+    expect(describeWaiting(state({}), 'b')).toBe('等待 张三 行动…');
+    expect(describeWaiting(state({ phase: 'choosingLoss', lossPlayerId: 'b' }), 'a')).toBe('等待 李四 选择要失去的影响力…');
+    expect(describeWaiting(state({ phase: 'showdown', showdown: { challengerId: 'b', claimantId: 'a', role: 'duke' } }), 'b')).toBe('等待 张三 选择要翻开的牌…');
+    expect(describeWaiting(state({ phase: 'choosingExchange', pending: { action: 'exchange', actorId: 'a', claimedRole: 'ambassador' } }), 'b')).toBe('等待 张三 交换手牌…');
+  });
+
+  it('声称者本人或已放弃的玩家等其他人决定是否质疑', () => {
+    const s = state({ phase: 'awaitingChallenge', challengeSubject: 'action', pending: tax, passed: ['b'] });
+    expect(describeWaiting(s, 'a')).toBe('等待其他玩家决定是否质疑…');
+    expect(describeWaiting(s, 'b')).toBe('等待其他玩家决定是否质疑…');
+  });
+
+  it('阻挡窗口：暗杀等目标，外援等其他玩家', () => {
+    const assassinate = { action: 'assassinate' as const, actorId: 'a', targetId: 'b', claimedRole: 'assassin' as const };
+    expect(describeWaiting(state({ phase: 'awaitingBlock', pending: assassinate }), 'a')).toBe('等待 李四 决定是否阻挡…');
+    expect(describeWaiting(state({ phase: 'awaitingBlock', pending: assassinate }), 'b')).toBeNull();
+    expect(describeWaiting(state({ phase: 'awaitingBlock', pending: { action: 'foreignAid', actorId: 'a' } }), 'a')).toBe('等待其他玩家决定是否阻挡…');
   });
 });

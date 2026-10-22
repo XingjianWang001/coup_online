@@ -84,6 +84,7 @@ function checkWin(state: GameState): GameEvent[] {
     state.currentPlayerId = null;
     state.pending = null;
     state.challengeSubject = null;
+    state.showdown = null;
     state.lossToResolve = null;
     state.exchangeKeepCount = null;
     state.passed = [];
@@ -113,18 +114,6 @@ function addCoins(state: GameState, id: string, delta: number): GameEvent[] {
   return [{ type: 'coinsChanged', playerId: id, coins: p.coins }];
 }
 
-// 声称被质疑且为真时：把声称的牌放回牌堆、洗牌、重抽一张（手牌保持隐藏）
-function swapClaimedCard(state: GameState, id: string, role: Role): void {
-  const p = getPlayer(state, id);
-  const i = p.hand.findIndex((c) => c.role === role);
-  if (i < 0) throw new Error(`${id} 手牌中没有 ${role}`);
-  const [card] = p.hand.splice(i, 1);
-  state.deck.push(card);
-  shuffle(state.deck);
-  const [newCard] = draw(state, 1);
-  p.hand.push(newCard);
-}
-
 function advanceTurn(state: GameState): GameEvent[] {
   if (state.phase === 'gameOver') return [];
   const next = nextAliveAfter(state, state.currentPlayerId);
@@ -132,6 +121,7 @@ function advanceTurn(state: GameState): GameEvent[] {
   state.phase = 'choosingAction';
   state.pending = null;
   state.challengeSubject = null;
+  state.showdown = null;
   state.lossToResolve = null;
   state.exchangeKeepCount = null;
   state.passed = [];
@@ -252,6 +242,7 @@ export function createGame(
     currentPlayerId: players[startingPlayerIndex].id,
     pending: null,
     challengeSubject: null,
+    showdown: null,
     lossToResolve: null,
     exchangeKeepCount: null,
     passed: [],
@@ -325,25 +316,57 @@ export function challenge(state: GameState, challengerId: string): GameEvent[] {
   if (challengerId === claimantId) throw new GameRuleError('cannot challenge self');
   if (!getPlayer(state, challengerId).alive) throw new GameRuleError('challenger eliminated');
 
-  const claimant = getPlayer(state, claimantId);
-  const truth = claimant.hand.some((c) => c.role === claimedRole);
   state.challengeSubject = null;
   state.passed = [];
+  state.phase = 'showdown';
+  state.showdown = { challengerId, claimantId, role: claimedRole, subject };
+  return [{ type: 'challenged', challengerId, targetId: claimantId }];
+}
 
-  const events: GameEvent[] = [{ type: 'challenged', challengerId, targetId: claimantId }];
+// 对质：被质疑者翻开一张暗牌。是被声称的角色 → 质疑失败，该牌洗回牌堆、原位换一张新牌，质疑者失去影响力；
+// 否则质疑成立，翻开的这张即失去的影响力。持有被声称的角色却翻另一张也算质疑成立。
+export function revealShowdownCard(state: GameState, playerId: string, cardId: string): GameEvent[] {
+  if (state.phase !== 'showdown') throw new GameRuleError('not in showdown phase');
+  const showdown = state.showdown!;
+  if (playerId !== showdown.claimantId) throw new GameRuleError('not your showdown');
+  const claimant = getPlayer(state, playerId);
+  const slot = claimant.hand.findIndex((c) => c.id === cardId);
+  if (slot < 0) throw new GameRuleError('card not in hand');
+
+  const truth = claimant.hand[slot].role === showdown.role;
+  state.showdown = null;
+  const resolved: GameEvent = { type: 'challengeResolved', truth, loserId: truth ? showdown.challengerId : playerId, claimantId: playerId, role: claimant.hand[slot].role, slot };
 
   if (truth) {
-    swapClaimedCard(state, claimantId, claimedRole);
-    startLoss(state, challengerId, subject === 'action' ? { kind: 'proceedAction' } : { kind: 'cancelAction' });
-    events.push({ type: 'challengeResolved', truth, loserId: challengerId, claimantId });
-  } else {
-    startLoss(state, claimantId, subject === 'action' ? { kind: 'cancelAction' } : { kind: 'resolveEffect' });
-    events.push({ type: 'challengeResolved', truth, loserId: claimantId, claimantId });
-    if (subject === 'action' && pending.type === 'assassinate') {
-      events.push(...addCoins(state, pending.actorId, ASSASSINATE_COST));
-    }
+    state.deck.push(claimant.hand[slot]);
+    shuffle(state.deck);
+    claimant.hand[slot] = draw(state, 1)[0];
+    startLoss(state, showdown.challengerId, showdown.subject === 'action' ? { kind: 'proceedAction' } : { kind: 'cancelAction' });
+    return [resolved];
   }
-  return events;
+  const events: GameEvent[] = [resolved];
+  if (showdown.subject === 'action' && state.pending!.type === 'assassinate') {
+    events.push(...addCoins(state, state.pending!.actorId, ASSASSINATE_COST));
+  }
+  return events.concat(loseCard(state, playerId, slot, showdown.subject === 'action' ? { kind: 'cancelAction' } : { kind: 'resolveEffect' }));
+}
+
+const randomCard = (p: Player) => p.hand[Math.floor(Math.random() * p.hand.length)];
+
+// 对质超时的默认选择：持有被声称的角色就翻它，否则随机翻一张
+export function resolveShowdownTimeout(state: GameState): GameEvent[] {
+  if (state.phase !== 'showdown') throw new GameRuleError('not in showdown phase');
+  const { claimantId, role } = state.showdown!;
+  const claimant = getPlayer(state, claimantId);
+  const card = claimant.hand.find((c) => c.role === role) ?? randomCard(claimant);
+  return revealShowdownCard(state, claimantId, card.id);
+}
+
+// 选牌失去影响力超时的默认选择：随机失去一张
+export function resolveLossTimeout(state: GameState): GameEvent[] {
+  if (state.phase !== 'choosingLoss') throw new GameRuleError('not in choosingLoss phase');
+  const { playerId } = state.lossToResolve!;
+  return resolveLoss(state, playerId, randomCard(getPlayer(state, playerId)).id);
 }
 
 // 当前质疑窗口中有资格表态的玩家（存活且非声称者）
@@ -429,17 +452,19 @@ export function resolveBlockTimeout(state: GameState): GameEvent[] {
 export function resolveLoss(state: GameState, playerId: string, cardId: string): GameEvent[] {
   if (state.phase !== 'choosingLoss') throw new GameRuleError('not in choosingLoss phase');
   if (state.lossToResolve?.playerId !== playerId) throw new GameRuleError('not your turn to lose influence');
-  const p = getPlayer(state, playerId);
-  const i = p.hand.findIndex((c) => c.id === cardId);
+  const i = getPlayer(state, playerId).hand.findIndex((c) => c.id === cardId);
   if (i < 0) throw new GameRuleError('card not in hand');
+  const { continuation } = state.lossToResolve;
+  state.lossToResolve = null;
+  return loseCard(state, playerId, i, continuation);
+}
 
+// 翻开第 i 张暗牌成为明牌（失去影响力），掉到 0 则淘汰，然后执行后续动作
+function loseCard(state: GameState, playerId: string, i: number, cont: LossContinuation): GameEvent[] {
+  const p = getPlayer(state, playerId);
   const [card] = p.hand.splice(i, 1);
   p.revealed.push(card);
   const events: GameEvent[] = [{ type: 'influenceLost', playerId, role: card.role }];
-
-  const cont = state.lossToResolve.continuation;
-  state.lossToResolve = null;
-
   if (p.hand.length === 0) {
     p.alive = false;
     events.push({ type: 'eliminated', playerId });
@@ -496,6 +521,12 @@ export function forfeit(state: GameState, playerId: string): GameEvent[] {
         state.pending.blockById === playerId));
 
   if (involved) return events.concat(advanceTurn(state));
+  // 质疑者在对质中弃权：质疑作废，等同无人质疑
+  if (state.showdown?.challengerId === playerId) {
+    const { subject } = state.showdown;
+    state.showdown = null;
+    return events.concat(subject === 'action' ? proceedAction(state) : advanceTurn(state));
+  }
   return events;
 }
 
@@ -522,6 +553,7 @@ export function publicState(state: GameState): PublicState {
         }
       : null,
     challengeSubject: state.challengeSubject,
+    showdown: state.showdown && { challengerId: state.showdown.challengerId, claimantId: state.showdown.claimantId, role: state.showdown.role },
     lossPlayerId: state.lossToResolve?.playerId ?? null,
     exchangeKeepCount: state.exchangeKeepCount,
     passed: state.passed,
