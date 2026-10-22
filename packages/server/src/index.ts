@@ -211,10 +211,12 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       break;
     }
     case 'leaveRoom': {
+      // 房间已被超时回收（或服务器重启）时，离开视为已完成，让客户端能清掉残留的房间状态。
       const room = rooms.get(socket.data.roomCode);
-      if (!room) throw new ClientError({ code: 'roomNotFound' });
-      room.leavePlayer(socket.data.playerId, socket.id);
-      socket.leave(room.code);
+      if (room) {
+        room.leavePlayer(socket.data.playerId, socket.id);
+        socket.leave(room.code);
+      }
       socket.data.roomCode = undefined;
       socket.data.playerId = undefined;
       socket.emit('left', { reason: 'left' });
