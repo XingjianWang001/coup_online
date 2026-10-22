@@ -375,6 +375,29 @@ describe('暗杀与偷窃', () => {
     expect(s.lossToResolve).toMatchObject({ playerId: 'a', continuation: { kind: 'cancelAction' } });
   });
 
+  it('谎称女伯爵阻挡暗杀被质疑：目标先失去翻开的牌，暗杀照常结算再失去一张，不退费', () => {
+    const s = setup({
+      a: ['assassin', 'captain'],
+      b: ['captain', 'ambassador'],
+      c: ['duke', 'duke'],
+    });
+    s.players.find((p) => p.id === 'a')!.coins = 5;
+
+    chooseAction(s, 'a', 'assassinate', 'b');
+    resolveChallengeTimeout(s);
+    block(s, 'b', 'contessa');
+    challenge(s, 'a');
+    const b = s.players.find((p) => p.id === 'b')!;
+    revealShowdownCard(s, 'b', b.hand[0].id);
+    expect(b.revealed.map((c) => c.role)).toEqual(['captain']);
+    expect(s.lossToResolve).toMatchObject({ playerId: 'b', continuation: { kind: 'endTurn' } });
+
+    resolveLoss(s, 'b', b.hand[0].id);
+    expect(b.revealed).toHaveLength(2);
+    expect(b.alive).toBe(false);
+    expect(coins(s, 'a')).toBe(2);
+  });
+
   it('偷窃转移 2 金币', () => {
     const s = setup({
       a: ['captain', 'captain'],
@@ -429,6 +452,17 @@ describe('对质中弃权', () => {
     expect(s.showdown).toBeNull();
     expect(coins(s, 'a')).toBe(2);
     expect(s.currentPlayerId).toBe('b');
+  });
+
+  it('质疑阻挡的人弃权：阻挡成立，行动不结算，轮到下一位', () => {
+    const s = setup({ a: ['captain', 'captain'], b: ['ambassador', 'ambassador'], c: ['duke', 'contessa'] });
+    chooseAction(s, 'a', 'foreignAid');
+    block(s, 'c', 'duke');
+    challenge(s, 'b');
+    forfeit(s, 'b');
+    expect(s.showdown).toBeNull();
+    expect(coins(s, 'a')).toBe(2);
+    expect(s.currentPlayerId).toBe('c');
   });
 
   it('质疑者弃权：质疑作废，行动照常结算', () => {

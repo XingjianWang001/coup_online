@@ -115,15 +115,45 @@ describe('对质', () => {
     expect(s.showcase).toBeNull();
   });
 
+  // a 的公爵属实：b 私下失去影响力 → a 征税结算 → 轮到 b
+  const afterTruth: ServerMessage[] = [
+    resolved,
+    push({ phase: 'choosingLoss', lossPlayerId: 'b' }),
+    { type: 'privateState', hand: [ambassador, captain] },
+    { type: 'events', events: [{ type: 'influenceLost', playerId: 'b', role: 'captain' }, { type: 'coinsChanged', playerId: 'a', coins: 5 }, { type: 'turnChanged', playerId: 'b' }] },
+    push({ phase: 'choosingAction', currentPlayerId: 'b' }),
+    { type: 'privateState', hand: [ambassador, captain] },
+  ];
+
   it('动画播完关闭舞台时，若下一场对质已经开始则接着打开它', () => {
     const next = { ...showdown, challengerId: 'a', claimantId: 'b' };
-    const animating = run([resolved, ...challenge(next)], open);
+    const animating = run([
+      ...afterTruth,
+      { type: 'events', events: [{ type: 'actionChosen', actorId: 'b', action: 'tax', claimedRole: 'duke' }] },
+      push({ phase: 'awaitingChallenge', challengeSubject: 'action', currentPlayerId: 'b' }),
+      { type: 'privateState', hand: [ambassador, captain] },
+      ...challenge(next),
+    ], open);
     expect(animating.showdown?.reveal).not.toBeNull();
     expect(closeShowdown(animating).showdown).toMatchObject({ ...next, reveal: null });
-    expect(closeShowdown(run([resolved, push({ phase: 'choosingLoss', lossPlayerId: 'b' })], open)).showdown).toBeNull();
+    expect(closeShowdown(run(afterTruth, open)).showdown).toBeNull();
   });
 
-  it('对质没有揭晓就结束（有人弃权）时收起舞台', () => {
-    expect(run([push({ phase: 'choosingAction' })], open).showdown).toBeNull();
+  it('对质没有揭晓就结束（被质疑者弃权）时收起舞台', () => {
+    const forfeited = run([
+      { type: 'events', events: [
+        { type: 'influenceLost', playerId: 'a', role: 'duke' },
+        { type: 'influenceLost', playerId: 'a', role: 'captain' },
+        { type: 'eliminated', playerId: 'a' },
+        { type: 'turnChanged', playerId: 'b' },
+      ] },
+      push({
+        phase: 'choosingAction',
+        currentPlayerId: 'b',
+        players: [{ id: 'a', alive: false, handCount: 0 }, { id: 'b', alive: true, handCount: 1 }] as PublicState['players'],
+      }),
+      { type: 'privateState', hand: [] },
+    ], open);
+    expect(forfeited.showdown).toBeNull();
   });
 });
