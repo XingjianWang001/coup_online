@@ -32,9 +32,9 @@ function Read-DeployConfig {
 
   if ($config.Host -notmatch '^[A-Za-z0-9][A-Za-z0-9.-]*$') { throw 'Invalid server host in deploy config.' }
   if ($config.User -notmatch '^[A-Za-z_][A-Za-z0-9_-]*$') { throw 'Invalid SSH user in deploy config.' }
-  # 可选 Domain：设置后以 Caddy 公网 HTTPS 发布，不再开 SSH 隧道
-  $domain = if ($config.PSObject.Properties['Domain']) { ([string]$config.Domain).ToLowerInvariant() } else { '' }
-  if ($domain -and $domain -notmatch '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$') { throw 'Invalid Domain in deploy config.' }
+  # 可选 Domain：设置后以 Caddy 公网 HTTPS 发布，不再开 SSH 隧道；多个域名用逗号分隔，同一个 app 同时用这些域名提供
+  $domain = if ($config.PSObject.Properties['Domain']) { ([string]$config.Domain).ToLowerInvariant() -replace '\s', '' } else { '' }
+  if ($domain -and $domain -notmatch '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(,([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})*$') { throw 'Invalid Domain in deploy config.' }
   $config | Add-Member -NotePropertyName Domain -NotePropertyValue $domain -Force
   $key = Get-Item -LiteralPath $config.KeyPath -ErrorAction Stop
   if ($key.PSIsContainer) { throw 'The PEM path must be a file.' }
@@ -42,14 +42,14 @@ function Read-DeployConfig {
 
   if (-not (Test-Path -LiteralPath $configPath)) {
     $config | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8
-    Write-Host "Saved server settings in $configPath (the PEM itself stays on Windows)."
+    Write-Host "Saved server settings in $configPath (the PEM itself stays on this computer)."
   }
   return $config
 }
 
 try {
   Set-Location $repoRoot
-  foreach ($command in @('git.exe', 'ssh.exe', 'scp.exe')) {
+  foreach ($command in @('git', 'ssh', 'scp')) {
     if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { throw "$command is required." }
   }
   if ($AccessOnly -and ($Revision -or $Check)) { throw '-AccessOnly cannot be combined with -Revision or -Check.' }
@@ -57,16 +57,16 @@ try {
   if (-not $AccessOnly) {
   if ($Revision) {
     if ($Revision -notmatch '^[0-9a-fA-F]{40}$') { throw '-Revision needs a full 40-character Git commit SHA.' }
-    $commit = (& git.exe rev-parse --verify "${Revision}^{commit}").Trim()
+    $commit = (& git rev-parse --verify "${Revision}^{commit}").Trim()
     Assert-ExitCode 'Looking up the requested revision'
   } else {
-    & git.exe fetch --no-tags origin refs/heads/dev
+    & git fetch --no-tags origin refs/heads/dev
     Assert-ExitCode 'Fetching origin/dev'
-    $commit = (& git.exe rev-parse --verify 'FETCH_HEAD^{commit}').Trim()
+    $commit = (& git rev-parse --verify 'FETCH_HEAD^{commit}').Trim()
     Assert-ExitCode 'Resolving origin/dev'
   }
 
-  $trackedFiles = @(& git.exe ls-tree -r --name-only $commit)
+  $trackedFiles = @(& git ls-tree -r --name-only $commit)
   Assert-ExitCode 'Reading the release file list'
   foreach ($required in @('compose.yaml', 'Dockerfile', 'packages/server/src/index.ts')) {
     if ($trackedFiles -cnotcontains $required) { throw "$commit lacks $required. Merge the deployment files into dev first." }
@@ -79,7 +79,7 @@ try {
   }
 
   $archive = Join-Path ([IO.Path]::GetTempPath()) "coup-online-$commit-$([guid]::NewGuid()).tar"
-  & git.exe archive --format=tar "--output=$archive" $commit
+  & git archive --format=tar "--output=$archive" $commit
   Assert-ExitCode 'Creating the release archive'
   Write-Host "Prepared dev release $commit. Uncommitted files are excluded."
   if ($Check) { return }
@@ -89,8 +89,13 @@ try {
   $target = "$($config.User)@$($config.Host)"
   $keyCopy = Join-Path ([IO.Path]::GetTempPath()) "coup-online-$([guid]::NewGuid()).pem"
   Copy-Item -LiteralPath $config.KeyPath -Destination $keyCopy
-  $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-  & icacls.exe $keyCopy /inheritance:r /grant:r "${identity}:F" | Out-Null
+  # Windows PowerShell 5.1 没有 $IsWindows，StrictMode 下不能直接引用
+  if ($env:OS -eq 'Windows_NT') {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    & icacls.exe $keyCopy /inheritance:r /grant:r "${identity}:F" | Out-Null
+  } else {
+    & chmod 600 $keyCopy
+  }
   Assert-ExitCode 'Restricting the temporary PEM copy'
 
   if (-not $AccessOnly) {
@@ -98,23 +103,24 @@ try {
     '-o', 'PasswordAuthentication=no', '-o', 'ServerAliveInterval=30',
     '-o', 'ServerAliveCountMax=3')
   Write-Host "Connecting to $target..."
-  & ssh.exe @sshOptions -i $keyCopy $target "mkdir -p .coup-online/uploads/$commit .coup-online/releases/$commit"
+  & ssh @sshOptions -i $keyCopy $target "mkdir -p .coup-online/uploads/$commit .coup-online/releases/$commit"
   Assert-ExitCode 'Preparing the server release directory'
   Write-Host 'Uploading the release...'
-  & scp.exe @sshOptions -C -i $keyCopy $archive $remoteScript "${target}:.coup-online/uploads/$commit/"
+  & scp @sshOptions -C -i $keyCopy $archive $remoteScript "${target}:.coup-online/uploads/$commit/"
   Assert-ExitCode 'Uploading the release archive'
   Write-Host 'Building and starting the server app...'
   $archiveName = Split-Path -Leaf $archive
-  & ssh.exe @sshOptions -tt -i $keyCopy $target "cd && bash .coup-online/uploads/$commit/deploy-private-remote.sh $commit $archiveName $($config.Domain)"
+  & ssh @sshOptions -tt -i $keyCopy $target "cd && bash .coup-online/uploads/$commit/deploy-private-remote.sh $commit $archiveName $($config.Domain)"
   Assert-ExitCode 'Deploying and checking the server'
   }
 
   if ($config.Domain -and -not $AccessOnly) {
-    $publicUrl = "https://$($config.Domain)"
-    $healthy = $false
-    $lastError = 'no response'
     # Windows PowerShell 5.1 可能默认不启用 TLS 1.2
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    foreach ($name in $config.Domain -split ',') {
+    $publicUrl = "https://$name"
+    $healthy = $false
+    $lastError = 'no response'
     # Caddy 首次签发证书需要一些时间
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
       try {
@@ -128,11 +134,13 @@ try {
       Start-Sleep -Seconds 2
     }
     if (-not $healthy) { throw "$publicUrl/healthz did not answer ok ($lastError). Check DNS, firewall ports 80/443 and 'docker compose -p coup-online logs caddy'." }
-    Write-Host "Deployment and public access verified: $publicUrl"
+    Write-Host "Public access verified: $publicUrl"
+    }
+    Write-Host 'Deployment verified on every domain.'
     return
   }
 
-  $sshPath = (Get-Command ssh.exe).Source
+  $sshPath = (Get-Command ssh).Source
   $tunnelArgs = @('-N', '-i', ('"' + $keyCopy + '"'), '-o', 'ConnectTimeout=20',
     '-o', 'ConnectionAttempts=3',
     '-o', 'PasswordAuthentication=no', '-o', 'ServerAliveInterval=30',
@@ -151,11 +159,11 @@ try {
     } catch { }
     Start-Sleep -Milliseconds 500
   }
-  if (-not $healthy) { throw 'The Windows tunnel did not reach the app health endpoint.' }
+  if (-not $healthy) { throw 'The SSH tunnel did not reach the app health endpoint.' }
   if ($AccessOnly) {
-    Write-Host 'Windows access verified: http://127.0.0.1:18887'
+    Write-Host 'Local access verified: http://127.0.0.1:18887'
   } else {
-    Write-Host 'Deployment and Windows access verified: http://127.0.0.1:18887'
+    Write-Host 'Deployment and local access verified: http://127.0.0.1:18887'
   }
   Write-Host 'Leave this window open to use the private site. Press Ctrl+C to close the tunnel.'
   while (-not $tunnel.HasExited) { Start-Sleep -Seconds 1 }
