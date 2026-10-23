@@ -33,7 +33,7 @@ function Read-DeployConfig {
   if ($config.Host -notmatch '^[A-Za-z0-9][A-Za-z0-9.-]*$') { throw 'Invalid server host in deploy config.' }
   if ($config.User -notmatch '^[A-Za-z_][A-Za-z0-9_-]*$') { throw 'Invalid SSH user in deploy config.' }
   # 可选 Domain：设置后以 Caddy 公网 HTTPS 发布，不再开 SSH 隧道；多个域名用逗号分隔，同一个 app 同时用这些域名提供
-  $domain = if ($config.PSObject.Properties['Domain']) { ([string]$config.Domain).ToLowerInvariant() -replace '\s', '' } else { '' }
+  $domain = if ($config.PSObject.Properties['Domain']) { ([string]$config.Domain).ToLowerInvariant().Trim() -replace '\s*,\s*', ',' } else { '' }
   if ($domain -and $domain -notmatch '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(,([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})*$') { throw 'Invalid Domain in deploy config.' }
   $config | Add-Member -NotePropertyName Domain -NotePropertyValue $domain -Force
   $key = Get-Item -LiteralPath $config.KeyPath -ErrorAction Stop
