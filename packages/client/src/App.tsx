@@ -709,21 +709,34 @@ function EntryForm(props: {
   );
 }
 
-// 备案号为官方编号，任何语言下都不翻译
+// 备案号为官方编号，任何语言下都不翻译；只在登记过的域名显示，未登记的域名（含 localhost、SSH 隧道）不显示页脚
+const FILINGS: Record<string, { icp: string; police?: { code: string; label: string } }> = {
+  'coup.davidxjwang.com': {
+    icp: '粤ICP备2026157913号-1',
+    police: { code: '44010602017448', label: '粤公网安备44010602017448号' },
+  },
+  // 公安联网备案审核中，批下后补 police
+  'coup.surwhy.com': { icp: '粤ICP备2026157913号-2' },
+};
+
 function FilingFooter() {
+  const filing = FILINGS[location.hostname];
+  if (!filing) return null;
   return (
     <footer className="filing">
       <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">
-        粤ICP备2026157913号-1
+        {filing.icp}
       </a>
-      <a
-        href="https://beian.mps.gov.cn/#/query/webSearch?code=44010602017448"
-        target="_blank"
-        rel="noreferrer"
-      >
-        <img src="/beian-police.png" alt="" width={14} height={15} />
-        粤公网安备44010602017448号
-      </a>
+      {filing.police && (
+        <a
+          href={`https://beian.mps.gov.cn/#/query/webSearch?code=${filing.police.code}`}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <img src="/beian-police.png" alt="" width={14} height={15} />
+          {filing.police.label}
+        </a>
+      )}
     </footer>
   );
 }
