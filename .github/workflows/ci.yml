@@ -41,6 +41,9 @@ jobs:
       - name: Build client
         run: pnpm build:client
 
+      - name: Check deployment package without Windows
+        run: ./deploy.sh -Check -Revision "$GITHUB_SHA"
+
   deploy-scripts:
     runs-on: windows-latest
     timeout-minutes: 5
