@@ -6,7 +6,9 @@ archive_name=${2:?An archive name is required}
 [[ $revision =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid release commit.' >&2; exit 1; }
 [[ $archive_name =~ ^coup-online-[0-9a-f]{40}-[0-9a-f-]+\.tar$ ]] || { echo 'Invalid archive name.' >&2; exit 1; }
 domain=${3:-}
-[[ -z $domain || $domain =~ ^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$ ]] || { echo 'Invalid domain.' >&2; exit 1; }
+# 多个域名用逗号分隔，同一个 app 同时用这些域名提供
+name='([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}'
+[[ -z $domain || $domain =~ ^$name(,$name)*$ ]] || { echo 'Invalid domain.' >&2; exit 1; }
 
 root="$HOME/.coup-online"
 release="$root/releases/$revision"
@@ -40,7 +42,8 @@ sudo env BUILDKIT_PROGRESS=plain docker compose -p coup-online -f compose.yaml b
 if [[ -n $domain ]]; then
   # 每个 release 目录都是新的：.env 每次重写，EDGE_DIR 用固定绝对路径；其他站点从 ~/.edge 接入同一个 Caddy（ADR-0010）
   mkdir -p "$HOME/.edge/sites" "$HOME/.edge/www"
-  printf 'SITE_DOMAIN=%s\nTRUST_PROXY=1\nEDGE_DIR=%s\n' "$domain" "$HOME/.edge" > .env
+  # Caddyfile 的 {$SITE_DOMAIN} 在解析前展开，"a, b" 即两个站点地址
+  printf 'SITE_DOMAIN=%s\nTRUST_PROXY=1\nEDGE_DIR=%s\n' "${domain//,/, }" "$HOME/.edge" > .env
   sudo docker compose -p coup-online -f compose.yaml --profile public up -d --no-build
 else
   # 删去 Domain 后，停掉之前公网发布留下的 Caddy，80/443 不再对外

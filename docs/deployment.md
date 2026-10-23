@@ -2,13 +2,13 @@
 
 本配置适用于一台 Ubuntu 24.04 云服务器。Node 服务同时提供网页和 Socket.IO；Docker Compose 默认仅将端口绑定到服务器的 `127.0.0.1:8787`。不需要数据库，房间及对局在服务重启后清空。
 
-## 从 Windows 一键私有部署
+## 一键私有部署（Windows / Mac）
 
-在仓库根目录的 Windows PowerShell 中运行 `.\deploy.cmd`。首次运行输入服务器 IPv4 地址或域名、SSH 用户名（默认 `ubuntu`）和本机 PEM 文件完整路径；设置保存在 Git 忽略的 `.deploy-private.local.json`，PEM 文件始终留在 Windows。之后每次运行相同命令即可更新。
+在仓库根目录运行：Windows PowerShell 中为 `.\deploy.cmd`，Mac 上为 `./deploy.sh`（需要 PowerShell 7：`brew install powershell`）。两者运行同一个 `scripts/deploy-private.ps1`，下文的 `-Revision`、`-AccessOnly` 等参数用法相同。首次运行输入服务器 IPv4 地址或域名、SSH 用户名（默认 `ubuntu`）和本机 PEM 文件完整路径；设置保存在 Git 忽略的 `.deploy-private.local.json`，其中只记录 PEM 的路径，PEM 文件始终留在本机。每次连接时脚本使用一份收紧权限的临时副本，结束后删除。之后每次运行相同命令即可更新。
 
-命令从 `origin/dev` 取得最新提交，只打包该提交中的文件，不包含未提交改动；通过 SSH 上传、在 Ubuntu 24.04 上检查或安装 Docker、构建并启动应用，然后检查服务器和 Windows 隧道两端的 `/healthz`。成功后打开 `http://127.0.0.1:18887`，保持命令窗口运行；按 `Ctrl+C` 关闭隧道；若 Windows 继续询问 `Terminate batch job (Y/N)?`，输入 `Y`。之后只想重新打开私有访问而不更新服务器时，运行 `.\deploy.cmd -AccessOnly`。SSH 密钥口令或远端 `sudo` 密码如有要求，会在运行时提示，不会保存。
+命令从 `origin/dev` 取得最新提交，只打包该提交中的文件，不包含未提交改动；通过 SSH 上传、在 Ubuntu 24.04 上检查或安装 Docker、构建并启动应用，然后检查服务器和本机隧道两端的 `/healthz`。成功后打开 `http://127.0.0.1:18887`，保持命令窗口运行；按 `Ctrl+C` 关闭隧道；若 Windows 继续询问 `Terminate batch job (Y/N)?`，输入 `Y`。之后只想重新打开私有访问而不更新服务器时，运行 `.\deploy.cmd -AccessOnly`（Mac 为 `./deploy.sh -AccessOnly`）。SSH 密钥口令或远端 `sudo` 密码如有要求，会在运行时提示，不会保存。
 
-更新前请确认无人正在对局。构建失败不会替换正在运行的容器；如果启动或健康检查失败，命令会报错并显示日志，不会自动回滚。需要恢复时可运行 `.\deploy.cmd -Revision <上次成功的完整提交 SHA>`，上次成功的 SHA 记录在服务器的 `~/.coup-online/current`。服务器上的旧版本目录会保留；磁盘空间不足时需人工清理。Windows 需要 Git 和 OpenSSH 客户端，服务器需要能访问软件源和 Docker 镜像仓库。
+更新前请确认无人正在对局。构建失败不会替换正在运行的容器；如果启动或健康检查失败，命令会报错并显示日志，不会自动回滚。需要恢复时可运行 `.\deploy.cmd -Revision <上次成功的完整提交 SHA>`，上次成功的 SHA 记录在服务器的 `~/.coup-online/current`。服务器上的旧版本目录会保留；磁盘空间不足时需人工清理。本机需要 Git 和 OpenSSH 客户端，服务器需要能访问软件源和 Docker 镜像仓库。
 
 ## 私有部署与验证
 
@@ -57,9 +57,9 @@
 
 取得域名并完成公开发布所需手续后，将域名的 A 记录指向服务器公网 IP，并在腾讯云轻量应用服务器的防火墙开放 TCP 80 和 443。
 
-使用 `deploy.cmd` 时，在 `.deploy-private.local.json` 中加入 `"Domain": "实际域名"`（例如 `"coup.davidxjwang.com"`），再运行 `.\deploy.cmd`。脚本每次发布都会在新版本目录写入 `SITE_DOMAIN` 与 `TRUST_PROXY=1`，以 `public` 配置同时启动应用和 Caddy，最后从 Windows 检查 `https://实际域名/healthz`，成功后直接退出，不再开 SSH 隧道。删去 `Domain` 后再次部署会移除 Caddy 容器、恢复私有部署行为；`.\deploy.cmd -AccessOnly` 仍可打开 SSH 隧道排查问题。首页底部显示的 ICP 与公安备案号写在 `packages/client/src/App.tsx` 的 `FilingFooter` 中，更换域名或备案主体时需同步修改。
+使用一键部署时，在 `.deploy-private.local.json` 中加入 `"Domain": "实际域名"`（例如 `"coup.davidxjwang.com"`），再运行部署命令。同一个应用可用多个域名访问，用逗号分隔，例如 `"coup.davidxjwang.com,coup.surwhy.com"`；各域名共用同一批房间。脚本每次发布都会在新版本目录写入 `SITE_DOMAIN` 与 `TRUST_PROXY=1`，以 `public` 配置同时启动应用和 Caddy，最后从本机逐个检查 `https://域名/healthz`，任一域名失败即报错并指出该域名；全部成功后直接退出，不再开 SSH 隧道。新增域名时先配置 A 记录，再部署。删去 `Domain` 后再次部署会移除 Caddy 容器、恢复私有部署行为；`.\deploy.cmd -AccessOnly` 仍可打开 SSH 隧道排查问题。首页底部的 ICP 与公安备案号按访问域名取自 `packages/client/src/App.tsx` 的 `FILINGS`；未登记的域名（含 localhost 和 SSH 隧道）不显示页脚。新增或更换域名、备案主体时需同步修改，并且要先合入 `dev` 再部署。
 
-手动部署时，在项目目录的 `.env` 写入 `SITE_DOMAIN=实际域名` 与 `TRUST_PROXY=1`，然后执行：
+手动部署时，在项目目录的 `.env` 写入 `SITE_DOMAIN=实际域名` 与 `TRUST_PROXY=1`（多个域名写成 `SITE_DOMAIN=a.example.com, b.example.com`，逗号后须有空格），然后执行：
 
 ```bash
 sudo docker compose --profile public up -d --build

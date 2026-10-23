@@ -12,7 +12,7 @@
 
 满足任一条件时，按 [#26](https://github.com/XingjianWang001/coup_online/issues/26) 把 Caddy 拆成独立的 edge 仓库／compose 项目，本仓库只保留 `app`：
 
-- (a) 服务器上出现第三个站点；
+- (a) 服务器上出现第三个站点（同一个 coup 应用以 `Domain` 多填的域名，如 `coup.surwhy.com`，不算新站点：它们共用 `app` 与房间，只是 Caddy 多签一张证书）；
 - (b) 需要单独停掉 coup 或去掉它的 `Domain`，同时其他站点不能停；
 - (c) 某个站点不再是纯静态，需要自己的后端容器。
 
