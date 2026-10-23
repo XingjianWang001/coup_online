@@ -10,3 +10,5 @@
 - **回环信任边界。** `startTunnel` 仅接受回环来源（`127.0.0.1`/`::1`）的 socket。隧道是服务器级资源，若服务器已被隧道暴露到公网，前端「隐藏按钮」无法阻止恶意客户端直接 emit `startTunnel` 在主机上 spawn 进程，故在服务器侧校验 `socket.handshake.address`。
 
 **Considered Options**: 曾考虑「链接打开后自动加入（复用本地身份重连）」。弃用原因：需扩展加入流程、引入「何时算已就绪」的复杂度，与「零摩擦但保留昵称约束」的目标相比收益有限，属后续可选升级。
+
+云服务器部署改用固定域名，见 [ADR 0009](0009-private-cloud-staging-and-fixed-domain.md)；本机临时分享仍按本决策。
