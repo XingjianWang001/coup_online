@@ -149,7 +149,7 @@ function applyContinuation(state: GameState, cont: LossContinuation): GameEvent[
 // 行动声称通过（或外援）后继续：可阻挡则进阻挡窗口，否则结算效果
 function proceedAction(state: GameState): GameEvent[] {
   const pending = state.pending!;
-  if (BLOCK_ROLES[pending.type].length > 0) {
+  if (BLOCK_ROLES[pending.type].length > 0 && eligibleBlockers(state).length > 0) {
     state.phase = 'awaitingBlock';
     return [];
   }
@@ -159,6 +159,8 @@ function proceedAction(state: GameState): GameEvent[] {
 // 结算行动效果（此时声称已通过、阻挡已失败或无阻挡）
 function resolveEffect(state: GameState): GameEvent[] {
   const pending = state.pending!;
+  // 目标已在本回合的质疑中被淘汰：行动对其不再生效
+  if (pending.targetId && !getPlayer(state, pending.targetId).alive) return advanceTurn(state);
   const actor = getPlayer(state, pending.actorId);
   const events: GameEvent[] = [];
   switch (pending.type) {
@@ -260,6 +262,8 @@ export function chooseAction(
   if (actorId !== state.currentPlayerId) throw new GameRuleError('not your turn');
   const actor = getPlayer(state, actorId);
   if (!actor.alive) throw new GameRuleError('actor eliminated');
+
+  if (!Object.hasOwn(ACTION_CLAIM, action)) throw new GameRuleError(`unknown action ${String(action)}`);
 
   if (actor.coins >= 10 && action !== 'coup') {
     throw new GameRuleError('持有 10 枚以上金币必须发动政变');
@@ -416,9 +420,9 @@ export function block(state: GameState, blockerId: string, role: Role): GameEven
   const pending = state.pending!;
   if (!BLOCK_ROLES[pending.type].includes(role)) throw new GameRuleError(`无法用 ${role} 阻挡 ${pending.type}`);
 
+  if (!getPlayer(state, blockerId).alive) throw new GameRuleError('blocker eliminated');
   if (pending.type === 'foreignAid') {
     if (blockerId === pending.actorId) throw new GameRuleError('不能阻挡自己的外援');
-    if (!getPlayer(state, blockerId).alive) throw new GameRuleError('blocker eliminated');
   } else {
     if (blockerId !== pending.targetId) throw new GameRuleError('只有目标可以阻挡');
   }
@@ -509,11 +513,17 @@ export function forfeit(state: GameState, playerId: string): GameEvent[] {
   const win = checkWin(state);
   if (state.phase === 'gameOver') return events.concat(win);
 
-  // 该玩家若正处于待处理状态（当前回合 / 待失去影响力 / 待交换 / 行动相关），
+  // 该玩家正待失去影响力：弃权已翻开全部暗牌，按原定后续继续（如质疑失败者离开，被质疑者的行动照常结算）
+  if (state.lossToResolve?.playerId === playerId) {
+    const { continuation } = state.lossToResolve;
+    state.lossToResolve = null;
+    return events.concat(applyContinuation(state, continuation));
+  }
+
+  // 该玩家若正处于待处理状态（当前回合 / 待交换 / 行动相关），
   // 作废当前行动并推进回合，避免游戏卡在无人可解的状态。
   const involved =
     state.currentPlayerId === playerId ||
-    state.lossToResolve?.playerId === playerId ||
     (state.phase === 'choosingExchange' && state.pending?.actorId === playerId) ||
     (state.pending &&
       (state.pending.actorId === playerId ||
