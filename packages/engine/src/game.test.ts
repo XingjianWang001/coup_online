@@ -5,6 +5,7 @@ import {
   chooseAction,
   createGame,
   forfeit,
+  GameRuleError,
   passBlock,
   passChallenge,
   publicState,
@@ -487,3 +488,64 @@ describe('publicState 不泄露暗牌', () => {
   });
 });
 
+
+describe('目标已被淘汰', () => {
+  // a 暗杀只剩 1 张牌的 b（3 人局，b 淘汰后游戏仍继续）
+  function assassinateOneCardTarget() {
+    const s = setup({ a: ['assassin', 'captain'], b: ['captain', 'ambassador'], c: ['duke', 'duke'] });
+    s.players.find((p) => p.id === 'a')!.coins = 5;
+    s.players.find((p) => p.id === 'b')!.hand.pop();
+    chooseAction(s, 'a', 'assassinate', 'b');
+    return s;
+  }
+
+  it('目标的女伯爵阻挡被质疑成立而淘汰：暗杀不再要求其失去影响力，轮到下一位', () => {
+    const s = assassinateOneCardTarget();
+    resolveChallengeTimeout(s);
+    block(s, 'b', 'contessa');
+    challenge(s, 'a');
+    revealShowdownCard(s, 'b', s.players.find((p) => p.id === 'b')!.hand[0].id);
+    expect(s.players.find((p) => p.id === 'b')!.alive).toBe(false);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.lossToResolve).toBeNull();
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('目标质疑暗杀失败而淘汰：跳过阻挡窗口，轮到下一位', () => {
+    const s = assassinateOneCardTarget();
+    challenge(s, 'b');
+    revealShowdownCard(s, 'a', s.players.find((p) => p.id === 'a')!.hand[0].id);
+    resolveLoss(s, 'b', s.players.find((p) => p.id === 'b')!.hand[0].id);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('已淘汰的目标不能阻挡', () => {
+    const s = assassinateOneCardTarget();
+    resolveChallengeTimeout(s);
+    s.players.find((p) => p.id === 'b')!.alive = false;
+    expect(() => block(s, 'b', 'contessa')).toThrow(GameRuleError);
+  });
+});
+
+describe('失去影响力时弃权', () => {
+  it('质疑失败者在选牌前弃权：被质疑者的行动照常结算', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'assassin'] });
+    chooseAction(s, 'a', 'tax');
+    challenge(s, 'c');
+    revealShowdownCard(s, 'a', s.players.find((p) => p.id === 'a')!.hand[0].id);
+    expect(s.lossToResolve?.playerId).toBe('c');
+    forfeit(s, 'c');
+    expect(coins(s, 'a')).toBe(5);
+    expect(s.lossToResolve).toBeNull();
+    expect(s.currentPlayerId).toBe('b');
+  });
+});
+
+describe('非法行动', () => {
+  it.each(['bogus', '__proto__', 'toString'])('拒绝未知行动 %s', (action) => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'] });
+    expect(() => chooseAction(s, 'a', action as never)).toThrow(GameRuleError);
+    expect(s.phase).toBe('choosingAction');
+  });
+});
