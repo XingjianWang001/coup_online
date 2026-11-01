@@ -151,9 +151,9 @@ function proceedAction(state: GameState): GameEvent[] {
 // 结算行动效果（此时声称已通过、阻挡已失败或无阻挡）
 function resolveEffect(state: GameState): GameEvent[] {
   const pending = state.pending!;
-  // 目标已在本回合的质疑中被淘汰：行动对其不再生效
-  if (pending.targetId && !getPlayer(state, pending.targetId).alive) return advanceTurn(state);
   const actor = getPlayer(state, pending.actorId);
+  // 行动者或目标已在本回合的质疑中被淘汰：行动不再生效
+  if (!actor.alive || (pending.targetId && !getPlayer(state, pending.targetId).alive)) return advanceTurn(state);
   const events: GameEvent[] = [];
   switch (pending.type) {
     case 'foreignAid':
@@ -518,17 +518,17 @@ export function forfeit(state: GameState, playerId: string): GameEvent[] {
     return events.concat(applyContinuation(state, continuation));
   }
 
-  // 该玩家若正处于待处理状态（当前回合 / 待交换 / 行动相关），
-  // 作废当前行动并推进回合，避免游戏卡在无人可解的状态。
-  const involved =
-    state.currentPlayerId === playerId ||
-    (state.phase === 'choosingExchange' && state.pending?.actorId === playerId) ||
-    (state.pending &&
-      (state.pending.actorId === playerId ||
-        state.pending.targetId === playerId ||
-        state.pending.blockById === playerId));
-
-  if (involved) return events.concat(advanceTurn(state));
+  // 弃权只作废弃权者自己的声称与行动；其他玩家已欠下的失去影响力照常结算，结算后再按下面的规则继续。
+  // 行动者（即当前玩家）或行动目标弃权：行动作废，回合结束。
+  // 阻挡者弃权（只会是外援的阻挡者，其余行动只有目标能阻挡）：阻挡作废，行动照常结算。
+  const voidsAction = state.currentPlayerId === playerId || state.pending?.targetId === playerId;
+  if (voidsAction || state.pending?.blockById === playerId) {
+    if (state.lossToResolve) {
+      state.lossToResolve.continuation = { kind: voidsAction ? 'cancelAction' : 'resolveEffect' };
+      return events;
+    }
+    return events.concat(voidsAction ? advanceTurn(state) : resolveEffect(state));
+  }
   // 质疑者在对质中弃权：质疑作废，等同无人质疑
   if (state.showdown?.challengerId === playerId) {
     const { subject } = state.showdown;

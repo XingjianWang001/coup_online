@@ -559,6 +559,98 @@ describe('失去影响力时弃权', () => {
   });
 });
 
+describe('弃权只作废弃权者自己的声称与行动', () => {
+  const hand = (s: GameState, id: string) => s.players.find((p) => p.id === id)!.hand;
+
+  it('征税者在质疑失败者选牌前弃权：质疑者照常失去影响力，征税作废，回合结束', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'assassin'] });
+    chooseAction(s, 'a', 'tax');
+    challenge(s, 'b');
+    revealShowdownCard(s, 'a', hand(s, 'a')[0].id);
+    forfeit(s, 'a');
+    expect(s.lossToResolve?.playerId).toBe('b');
+    resolveLoss(s, 'b', hand(s, 'b')[0].id);
+    expect(hand(s, 'b')).toHaveLength(1);
+    expect(coins(s, 'a')).toBe(2);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.currentPlayerId).toBe('b');
+  });
+
+  it.each(['coup', 'assassinate'] as const)('%s 的发动者在目标选牌前弃权：目标照常失去影响力', (action) => {
+    const s = setup({ a: ['assassin', 'captain'], b: ['duke', 'duke'], c: ['contessa', 'contessa'] });
+    s.players.find((p) => p.id === 'a')!.coins = 7;
+    chooseAction(s, 'a', action, 'b');
+    if (action === 'assassinate') {
+      resolveChallengeTimeout(s);
+      resolveBlockTimeout(s);
+    }
+    forfeit(s, 'a');
+    expect(s.lossToResolve?.playerId).toBe('b');
+    resolveLoss(s, 'b', hand(s, 'b')[0].id);
+    expect(hand(s, 'b')).toHaveLength(1);
+    expect(s.currentPlayerId).toBe('b');
+  });
+
+  it('阻挡外援者在对质中弃权：阻挡作废，外援照常结算', () => {
+    const s = setup({ a: ['captain', 'captain'], b: ['duke', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'foreignAid');
+    block(s, 'b', 'duke');
+    challenge(s, 'a');
+    forfeit(s, 'b');
+    expect(coins(s, 'a')).toBe(4);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('阻挡外援者在无人质疑前弃权：阻挡作废，外援照常结算', () => {
+    const s = setup({ a: ['captain', 'captain'], b: ['duke', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'foreignAid');
+    block(s, 'b', 'duke');
+    forfeit(s, 'b');
+    expect(coins(s, 'a')).toBe(4);
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('阻挡外援者对质胜出后弃权：质疑者照常失去影响力，外援照常结算', () => {
+    const s = setup({ a: ['captain', 'captain'], b: ['duke', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'foreignAid');
+    block(s, 'b', 'duke');
+    challenge(s, 'c');
+    revealShowdownCard(s, 'b', hand(s, 'b')[0].id);
+    forfeit(s, 'b');
+    expect(s.lossToResolve?.playerId).toBe('c');
+    resolveLoss(s, 'c', hand(s, 'c')[0].id);
+    expect(hand(s, 'c')).toHaveLength(1);
+    expect(coins(s, 'a')).toBe(4);
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('质疑阻挡失败的外援者因此失去最后一张牌：外援不再结算', () => {
+    const s = setup({ a: ['captain'], b: ['duke', 'ambassador'], c: ['contessa', 'contessa'], d: ['assassin', 'assassin'] });
+    chooseAction(s, 'a', 'foreignAid');
+    block(s, 'b', 'duke');
+    challenge(s, 'a');
+    revealShowdownCard(s, 'b', hand(s, 'b')[0].id);
+    forfeit(s, 'b');
+    resolveLoss(s, 'a', hand(s, 'a')[0].id);
+    expect(coins(s, 'a')).toBe(2);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('行动目标弃权：行动作废，轮到下一位', () => {
+    const s = setup({ a: ['assassin', 'captain'], b: ['contessa', 'duke'], c: ['duke', 'duke'] });
+    s.players.find((p) => p.id === 'a')!.coins = 3;
+    chooseAction(s, 'a', 'assassinate', 'b');
+    resolveChallengeTimeout(s);
+    expect(s.phase).toBe('awaitingBlock');
+    forfeit(s, 'b');
+    expect(s.phase).toBe('choosingAction');
+    expect(s.lossToResolve).toBeNull();
+    expect(s.currentPlayerId).toBe('c');
+  });
+});
+
 describe('非法行动', () => {
   it.each(['bogus', '__proto__', 'toString'])('拒绝未知行动 %s', (action) => {
     const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'] });
