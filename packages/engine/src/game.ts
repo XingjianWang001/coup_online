@@ -93,18 +93,10 @@ function checkWin(state: GameState): GameEvent[] {
   return [];
 }
 
-// 从牌堆抽 n 张；牌堆不足时用明牌（弃牌）回填再抽。
+// 从牌堆抽 n 张。15 张牌、牌堆外最多 14 张（6 人 12 张 + 交换时多摸的 2 张），牌堆不会被抽空。
 function draw(state: GameState, n: number): Card[] {
   const out: Card[] = [];
-  for (let i = 0; i < n; i++) {
-    if (state.deck.length === 0) {
-      const revealed = state.players.flatMap((p) => p.revealed);
-      state.players.forEach((p) => (p.revealed = []));
-      state.deck = shuffle(revealed);
-      if (state.deck.length === 0) break;
-    }
-    out.push(state.deck.pop()!);
-  }
+  for (let i = 0; i < n; i++) out.push(state.deck.pop()!);
   return out;
 }
 
