@@ -442,6 +442,23 @@ describe('forfeit', () => {
     expect(b.hand).toHaveLength(0);
     expect(b.revealed).toHaveLength(2);
   });
+
+  it('交换选牌中弃权：摸到的牌放回牌堆，只翻开原有手牌', () => {
+    const s = setup({ a: ['ambassador', 'captain'], b: ['duke', 'duke'], c: ['contessa', 'contessa'] });
+    const deckCount = s.deck.length;
+    chooseAction(s, 'a', 'exchange');
+    resolveChallengeTimeout(s);
+    expect(s.phase).toBe('choosingExchange');
+    expect(s.deck).toHaveLength(deckCount - 2);
+
+    const events = forfeit(s, 'a');
+    const a = s.players.find((p) => p.id === 'a')!;
+    expect(a.revealed.map((c) => c.role).sort()).toEqual(['ambassador', 'captain']);
+    expect(events.filter((e) => e.type === 'influenceLost')).toHaveLength(2);
+    expect(s.deck).toHaveLength(deckCount);
+    expect(s.exchangeKeepCount).toBeNull();
+    expect(s.currentPlayerId).toBe('b');
+  });
 });
 
 describe('对质中弃权', () => {

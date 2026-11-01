@@ -501,6 +501,12 @@ export function resolveExchange(state: GameState, playerId: string, keepIds: str
 export function forfeit(state: GameState, playerId: string): GameEvent[] {
   const p = getPlayer(state, playerId);
   if (!p.alive) return [];
+  // 交换选牌中弃权：摸到的牌先放回牌堆，只翻开原有手牌
+  if (state.phase === 'choosingExchange' && state.pending?.actorId === playerId) {
+    state.deck.push(...p.hand.splice(state.exchangeKeepCount!));
+    shuffle(state.deck);
+    state.exchangeKeepCount = null;
+  }
   const events: GameEvent[] = [];
   while (p.hand.length > 0) {
     const c = p.hand.pop()!;
