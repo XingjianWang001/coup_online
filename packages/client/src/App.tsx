@@ -258,9 +258,9 @@ export function App() {
   // 重连：socket 重新连接后，若本地有身份与房间码，自动重新加入
   useEffect(() => {
     const onConnect = () => {
-      if (LINK_ROOM) return; // 链接指定了房间：仅预填，不自动重连旧房间
       const id = loadIdentity();
       const code = loadRoomCode();
+      if (LINK_ROOM && LINK_ROOM !== code) return; // 链接指定了别的房间：仅预填，不自动重连旧房间
       if (id && code) {
         send(socket, { type: 'joinRoom', roomCode: code, name: id.name, playerId: id.playerId, secret: id.secret });
       }
