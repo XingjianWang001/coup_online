@@ -143,6 +143,7 @@ export class Room {
         this.events.onBroadcast(this, events);
       }
       this.disconnectTimers.delete(id);
+      if (!this.hasPresentPlayer()) this.scheduleEmptyCleanup();
     }, DISCONNECT_GRACE_MS);
     this.disconnectTimers.set(id, t);
     return true;
@@ -159,12 +160,20 @@ export class Room {
   removePlayer(id: string): void {
     this.players.delete(id);
     this.clearDisconnectTimer(id);
-    if (this.players.size === 0) {
-      this.scheduleEmptyCleanup();
-    } else if (id === this.hostId) {
+    if (!this.hasPresentPlayer()) this.scheduleEmptyCleanup();
+    if (this.players.size > 0 && id === this.hostId) {
       this.hostId = this.players.keys().next().value!;
       this.handOffOfflineHost();
     }
+  }
+
+  // 在场：在线，或断线但仍在宽限期内。宽限期已到而弃权的座位只是留着，不算在场。
+  private isPresent(p: RoomPlayer): boolean {
+    return p.connected || this.disconnectTimers.has(p.id);
+  }
+
+  private hasPresentPlayer(): boolean {
+    return [...this.players.values()].some((p) => this.isPresent(p));
   }
 
   // 牌局结束后房主离线：再来一局的权利立即交给最早加入的在线玩家，不等宽限期。
@@ -180,7 +189,7 @@ export class Room {
     if (playerId !== this.hostId) throw new ClientError({ code: 'hostOnly' });
     // 牌局中宽限期已到而弃权的玩家仍占着座位且没有计时器，不带进新的大厅阶段。
     for (const p of [...this.players.values()]) {
-      if (!p.connected && !this.disconnectTimers.has(p.id)) this.removePlayer(p.id);
+      if (!this.isPresent(p)) this.removePlayer(p.id);
     }
     this.game = null;
     this.repo.delete(this.code);
@@ -375,11 +384,11 @@ export class Room {
   private scheduleEmptyCleanup(): void {
     if (this.emptyTimer) return;
     this.emptyTimer = setTimeout(() => {
-      if (this.players.size === 0) {
+      if (!this.hasPresentPlayer()) {
         this.repo.delete(this.code);
         this.events.onEmpty(this);
       }
       this.emptyTimer = null;
-    }, 5 * 60_000); // 空房 5 分钟清理
+    }, 5 * 60_000); // 无人在场 5 分钟后清理
   }
 }
