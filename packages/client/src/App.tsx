@@ -86,6 +86,8 @@ const LINK_ROOM = (() => {
   }
   return room;
 })();
+// 加入任意房间后链接已用完，之后断线重连按本地保存的房间码自动回到原座位。
+let pendingLinkRoom = LINK_ROOM;
 
 function browserStorage(): Storage | null {
   try {
@@ -217,6 +219,7 @@ export function App() {
           setIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveRoomCode(msg.roomCode);
+          pendingLinkRoom = null;
           break;
         case 'gameStarted':
           setError(null);
@@ -260,7 +263,7 @@ export function App() {
     const onConnect = () => {
       const id = loadIdentity();
       const code = loadRoomCode();
-      if (LINK_ROOM && LINK_ROOM !== code) return; // 链接指定了别的房间：仅预填，不自动重连旧房间
+      if (pendingLinkRoom && pendingLinkRoom !== code) return; // 链接指定了别的房间：仅预填，不自动重连旧房间
       if (id && code) {
         send(socket, { type: 'joinRoom', roomCode: code, name: id.name, playerId: id.playerId, secret: id.secret });
       }

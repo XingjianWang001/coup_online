@@ -489,7 +489,7 @@ export function resolveExchange(state: GameState, playerId: string, keepIds: str
   return advanceTurn(state);
 }
 
-// 断线弃权：翻开全部暗牌、淘汰，并清理所有指向该玩家的待处理状态，避免死锁。
+// 弃权（断线超时或牌局中离开）：翻开全部暗牌、淘汰；只作废该玩家自己的声称与行动，他人欠下的失去影响力照常结算。
 export function forfeit(state: GameState, playerId: string): GameEvent[] {
   const p = getPlayer(state, playerId);
   if (!p.alive) return [];
