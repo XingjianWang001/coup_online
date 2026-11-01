@@ -34,6 +34,68 @@ describe('Room 断连清理', () => {
     expect(repo.delete).toHaveBeenCalledWith('ABC123');
     expect(events.onEmpty).toHaveBeenCalled();
   });
+
+  function startedRoom() {
+    const made = makeRoom({ startingPlayerRandom: () => 0 });
+    const { room } = made;
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    const carol = room.addPlayer('Carol', 'sock3');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    return { ...made, alice, bob, carol };
+  }
+
+  it('牌局中全员断线：弃权的座位不算在场，宽限期加 5 分钟后空房回收', () => {
+    vi.useFakeTimers();
+    const { room, events, alice, bob, carol } = startedRoom();
+    for (const [p, sock] of [[alice, 'sock1'], [bob, 'sock2'], [carol, 'sock3']] as const) room.markDisconnected(p.id, sock);
+
+    vi.advanceTimersByTime(90_000);
+    expect(room.game?.phase).toBe('gameOver');
+    vi.advanceTimersByTime(5 * 60_000 - 1);
+    expect(events.onEmpty).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(events.onEmpty).toHaveBeenCalledWith(room);
+  });
+
+  it('两人先后断线弃权、最后一人离开：空房 5 分钟后回收', () => {
+    vi.useFakeTimers();
+    const { room, repo, events, alice, bob, carol } = startedRoom();
+    room.markDisconnected(carol.id, 'sock3');
+    vi.advanceTimersByTime(90_000);
+    room.markDisconnected(bob.id, 'sock2');
+    vi.advanceTimersByTime(90_000);
+    expect(room.game?.phase).toBe('gameOver');
+    room.leavePlayer(alice.id, 'sock1');
+
+    vi.advanceTimersByTime(5 * 60_000);
+    expect(repo.delete).toHaveBeenCalledWith('ABC123');
+    expect(events.onEmpty).toHaveBeenCalledWith(room);
+  });
+
+  it('回收计时到点时仍有玩家在宽限期内：房间保留，等其宽限期过后再回收', () => {
+    vi.useFakeTimers();
+    const { room, events, alice, bob, carol } = startedRoom();
+    room.markDisconnected(carol.id, 'sock3');
+    vi.advanceTimersByTime(90_000);
+    room.markDisconnected(bob.id, 'sock2');
+    vi.advanceTimersByTime(90_000);
+    room.leavePlayer(alice.id, 'sock1');
+
+    // 已弃权的 Bob 回来看结果，又在回收计时到点前断线
+    vi.advanceTimersByTime(4 * 60_000);
+    room.addPlayer('Bob', 'sock2b', { id: bob.id, secret: bob.secret });
+    room.markDisconnected(bob.id, 'sock2b');
+    vi.advanceTimersByTime(60_000);
+    expect(events.onEmpty).not.toHaveBeenCalled();
+    room.addPlayer('Bob', 'sock2c', { id: bob.id, secret: bob.secret });
+    expect(room.players.has(bob.id)).toBe(true);
+
+    room.markDisconnected(bob.id, 'sock2c');
+    vi.advanceTimersByTime(90_000 + 5 * 60_000);
+    expect(events.onEmpty).toHaveBeenCalledWith(room);
+  });
 });
 
 describe('Room 连接归属', () => {
