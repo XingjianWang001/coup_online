@@ -19,8 +19,8 @@ const inGame = run([
 
 describe('房间会话', () => {
   it('再来一局回到大厅阶段：清空牌桌与选择，保留房间信息', () => {
-    const s = run([{ type: 'lobby', players, hostId: 'a' }], { ...inGame, selectedAction: 'coup', selectedKeep: ['c1'] });
-    expect(s).toMatchObject({ roomCode: 'ABC123', tunnelUrl: 'https://t', publicState: null, countdown: null, hand: [], log: [], selectedAction: null, selectedKeep: [], showcase: null });
+    const s = run([{ type: 'lobby', players, hostId: 'a' }], { ...inGame, selectedAction: 'coup' });
+    expect(s).toMatchObject({ roomCode: 'ABC123', tunnelUrl: 'https://t', publicState: null, countdown: null, hand: [], log: [], selectedAction: null, showcase: null });
   });
 
   it('离开后回到初始会话', () => {

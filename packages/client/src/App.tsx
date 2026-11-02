@@ -173,12 +173,10 @@ export function App() {
     canStartTunnel,
     tunnelLoading,
     selectedAction,
-    selectedKeep,
     showcase,
     showdown,
   } = session;
   const setSelectedAction = useCallback((a: ActionType | null) => dispatchSession({ patch: { selectedAction: a } }), []);
-  const setSelectedKeep = useCallback((ids: string[]) => dispatchSession({ patch: { selectedKeep: ids } }), []);
   const [error, setError] = useState<TransientErrorState | null>(null);
   const errorIdRef = useRef(0);
   const [notice, setNotice] = useState<TransientNoticeState | null>(null);
@@ -435,6 +433,17 @@ export function App() {
         />
       )}
 
+      {/* 公开状态先于手牌到达：等抽到的牌进了手牌再开，免得先闪一下旧手牌 */}
+      {!showdown && publicState?.phase === 'choosingExchange' && publicState.pending?.actorId === me && hand.length > (publicState.exchangeKeepCount ?? 0) && (
+        <ExchangeStage
+          hand={hand}
+          keepCount={publicState.exchangeKeepCount ?? 0}
+          locale={locale}
+          countdown={describeCountdown(remainingMs, countdownSnapshot?.deadlineAt, serverNow)}
+          onKeep={(keepIds) => send(socket, { type: 'resolveExchange', keepIds })}
+        />
+      )}
+
       <TransientMessage
         value={error}
         className="error"
@@ -472,8 +481,6 @@ export function App() {
           log={log}
           selectedAction={selectedAction}
           setSelectedAction={setSelectedAction}
-          selectedKeep={selectedKeep}
-          setSelectedKeep={setSelectedKeep}
           onStart={startGame}
           onAction={chooseAction}
           socket={socket}
@@ -792,8 +799,6 @@ interface RoomViewProps {
   notice: TransientNoticeState | null;
   selectedAction: ActionType | null;
   setSelectedAction: (a: ActionType | null) => void;
-  selectedKeep: string[];
-  setSelectedKeep: (ids: string[]) => void;
   onStart: () => void;
   onAction: (action: ActionType, targetId?: string) => void;
   socket: ReturnType<typeof connect>;
@@ -863,8 +868,6 @@ function RoomView(props: RoomViewProps) {
       log={props.log}
       selectedAction={props.selectedAction}
       setSelectedAction={props.setSelectedAction}
-      selectedKeep={props.selectedKeep}
-      setSelectedKeep={props.setSelectedKeep}
       onAction={props.onAction}
       onIntent={(i) => send(props.socket, i)}
       locale={props.locale}
@@ -1434,6 +1437,78 @@ function LossStage(props: { hand: Card[]; locale: Locale; countdown: string | nu
   );
 }
 
+// 大使交换：只有本人看到的放大选牌；弃牌像对质换牌一样飞回牌堆后才发出意图
+function ExchangeStage(props: {
+  hand: Card[];
+  keepCount: number;
+  locale: Locale;
+  countdown: string | null;
+  onKeep: (cardIds: string[]) => void;
+}) {
+  const { hand, keepCount, locale } = props;
+  const [kept, setKept] = useState<string[]>([]);
+  const [sent, setSent] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const firstFocus = useRef<HTMLElement | null>(null);
+  const slots = useRef<(HTMLElement | null)[]>([]);
+  useDialogFocus(() => {}, root, firstFocus as RefObject<HTMLElement>);
+
+  // 选满后再点未选的牌不响应，须先取消一张
+  const toggle = (id: string) =>
+    setKept((k) => (k.includes(id) ? k.filter((x) => x !== id) : k.length < keepCount ? [...k, id] : k));
+
+  async function keep() {
+    if (kept.length !== keepCount || sent) return;
+    setSent(true);
+    const reduced = prefersReducedMotion();
+    await Promise.all(
+      hand.flatMap((card, i) => {
+        const el = kept.includes(card.id) ? null : slots.current[i]?.querySelector('.stage-card');
+        if (!el) return [];
+        return reduced
+          ? animate(el, [{ opacity: 0 }], { duration: 250 })
+          : animate(el, [{ transform: 'translateY(-80vh) rotate(14deg)' }], { duration: 420, easing: 'cubic-bezier(0.7, 0, 0.84, 0)' });
+      }),
+    );
+    props.onKeep(hand.filter((c) => kept.includes(c.id)).map((c) => c.id));
+  }
+
+  const title = translate(locale, 'exchangePrompt', { count: keepCount });
+  return (
+    <div ref={root} className="overlay stage-overlay" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="stage-backdrop" />
+      <div className="stage">
+        <h2 className="stage-title">{title}</h2>
+        <div className="stage-cards">
+          {hand.map((card, i) => (
+            <div key={card.id} className="stage-cell">
+              <StageCard
+                slotRef={(el) => {
+                  slots.current[i] = el;
+                  if (i === 0) firstFocus.current = el;
+                }}
+                down={<BigCard role={card.role} locale={locale} />}
+                up={<BigCard role={card.role} locale={locale} />}
+                focus={false}
+                picked={kept.includes(card.id)}
+                interactive={!sent}
+                label={roleName(locale, card.role)}
+                onPick={() => toggle(card.id)}
+              />
+            </div>
+          ))}
+        </div>
+        <div className="stage-foot">
+          <div className="stage-actions">
+            <StageTimer countdown={props.countdown} locale={locale} />
+            <button className="primary" disabled={kept.length !== keepCount || sent} onClick={keep}>{translate(locale, 'confirmKeep')}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BigCard({ role, locale, className = '' }: { role: Role; locale: Locale; className?: string }) {
   return (
     <span className={`big-card card--${role} ${className}`}>
@@ -1541,8 +1616,6 @@ function GameBoard(props: {
   notice: TransientNoticeState | null;
   selectedAction: ActionType | null;
   setSelectedAction: (a: ActionType | null) => void;
-  selectedKeep: string[];
-  setSelectedKeep: (ids: string[]) => void;
   onAction: (action: ActionType, targetId?: string) => void;
   onIntent: (i: Parameters<typeof send>[1]) => void;
   remainingMs: number | null;
@@ -1601,6 +1674,8 @@ function GameBoard(props: {
     const isCurrent = p.id === state.currentPlayerId;
     // 正在私下选牌失去影响力的人：座位高亮，配合控制区的等待提示
     const isLosing = state.phase === 'choosingLoss' && p.id === state.lossPlayerId;
+    // 交换选牌期间手里暂时多出抽到的牌，影响力仍是原来的张数
+    const influence = state.phase === 'choosingExchange' && p.id === pending?.actorId ? (state.exchangeKeepCount ?? p.handCount) : p.handCount;
     return (
       <div
         key={p.id}
@@ -1616,7 +1691,7 @@ function GameBoard(props: {
           </span>
           <span className="coins" role="img" aria-label={localizeCoinCount(props.locale, p.coins)}><CoinIcon /> {p.coins}</span>
         </div>
-        <div className="cards-row" role="group" aria-label={translate(props.locale, 'influenceCount', { count: p.handCount })}>
+        <div className="cards-row" role="group" aria-label={translate(props.locale, 'influenceCount', { count: influence })}>
           {p.id === me
             ? props.hand.map((c) => <CardView key={c.id} role={c.role} locale={props.locale} />)
             : Array.from({ length: p.handCount }, (_, i) => <CardBack key={`back-${i}`} locale={props.locale} />)}
@@ -1715,17 +1790,6 @@ function GameBoard(props: {
               {translate(props.locale, 'passBlock')}
             </button>
           </div>
-        )}
-
-        {amExchanging && (
-          <ExchangeControl
-            hand={props.hand}
-            keepCount={state.exchangeKeepCount ?? 0}
-            selectedKeep={props.selectedKeep}
-            setSelectedKeep={props.setSelectedKeep}
-            onConfirm={(ids) => props.onIntent({ type: 'resolveExchange', keepIds: ids })}
-            locale={props.locale}
-          />
         )}
 
         {state.phase === 'gameOver' && (me === props.hostId ? (
@@ -1847,50 +1911,3 @@ function Actions(props: {
     </div>
   );
 }
-
-function ExchangeControl(props: {
-  hand: Card[];
-  keepCount: number;
-  selectedKeep: string[];
-  setSelectedKeep: (ids: string[]) => void;
-  onConfirm: (ids: string[]) => void;
-  locale: Locale;
-}) {
-  const [confirming, setConfirming] = useState(false);
-  const toggle = (id: string) => {
-    if (props.selectedKeep.includes(id)) {
-      props.setSelectedKeep(props.selectedKeep.filter((x) => x !== id));
-    } else if (props.selectedKeep.length < props.keepCount) {
-      props.setSelectedKeep([...props.selectedKeep, id]);
-    }
-  };
-  const confirm = (ids: string[]) => {
-    setConfirming(true);
-    props.onConfirm(ids);
-  };
-  return (
-    <div className="row">
-      <p>{translate(props.locale, 'exchangePrompt', { count: props.keepCount })}</p>
-      {props.hand.map((c) => {
-        const keep = props.selectedKeep.includes(c.id);
-        return (
-          <button
-            key={c.id}
-            className={`role-btn role--${c.role}${keep ? ' active' : ''}${confirming && !keep ? ' discard' : ''}`}
-            onClick={() => toggle(c.id)}
-            disabled={confirming}
-          >
-            {roleName(props.locale, c.role)}
-          </button>
-        );
-      })}
-      <button
-        disabled={props.selectedKeep.length !== props.keepCount || confirming}
-        onClick={() => confirm(props.selectedKeep)}
-      >
-        {translate(props.locale, 'confirmKeep')}
-      </button>
-    </div>
-  );
-}
-

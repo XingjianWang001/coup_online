@@ -591,6 +591,22 @@ input:focus-visible {
   height: 82px;
 }
 
+/* 大使交换时手里暂有 4 张：超过 2 张就叠成扇形，不撑破座位框。
+   ponytail: 负边距按一行最多 4 张（2 影响力 + 2 抽牌）调好，牌宽或座位宽变了要跟着改 */
+.cards-row:has(> :nth-child(3)) > * + * {
+  margin-left: -24px;
+}
+
+/* 叠放时明牌压在牌背上：半透明会透出底下的斜纹，改为不透明的压暗 */
+.cards-row:has(> :nth-child(3)) .card.unavailable {
+  opacity: 1;
+  filter: saturate(0.4) brightness(0.45);
+}
+
+.seat.opponent .cards-row:has(> :nth-child(3)) > * + * {
+  margin-left: -40px;
+}
+
 .card {
   display: flex;
   align-items: center;
@@ -1209,21 +1225,10 @@ input:focus-visible {
 }
 .panel { animation: panel-in 260ms cubic-bezier(0.16, 1, 0.3, 1); }
 
-/* 换牌：选中上浮 + 角色色高亮（不打勾）；未保留牌滑回淡出 */
 .role-btn {
   transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease,
     background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
-.role-btn.active {
-  outline: none;
-  transform: translateY(-3px);
-  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 60%, transparent),
-    0 6px 16px color-mix(in srgb, currentColor 30%, transparent);
-}
-@keyframes discard-out {
-  to { opacity: 0; transform: translateY(12px); }
-}
-.role-btn.discard { animation: discard-out 200ms ease forwards; }
 
 /* ---------- 减少动态效果：保留透明度/颜色反馈，去掉位移与翻转 ---------- */
 @media (prefers-reduced-motion: reduce) {
@@ -1236,8 +1241,7 @@ input:focus-visible {
   .controls,
   .log,
   .overlay,
-  .panel,
-  .role-btn.discard {
+  .panel {
     animation: none;
   }
   .notice,
@@ -1251,10 +1255,6 @@ input:focus-visible {
   /* 不呼吸，但保留「快到时」的状态：静态琥珀 */
   .narration-timer.urgent { animation: none; color: var(--warn); }
   .role-btn { transition: none; }
-  .role-btn.active {
-    transform: none;
-    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 60%, transparent);
-  }
   .notice-region {
     transition: grid-template-rows 1ms linear 119ms;
   }
@@ -1539,7 +1539,13 @@ input:focus-visible {
 .stage-cards {
   --w: min(168px, 38vw);
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: var(--sp-6);
+}
+/* 交换的 4 张放不下一行时排成 2×2，不出现 3+1 */
+@media (max-width: 775px) {
+  .stage-cards:has(> :nth-child(4)) { max-width: calc(2 * var(--w) + var(--sp-6)); }
 }
 .stage-cell {
   position: relative;
@@ -1848,6 +1854,10 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
 
   .seat.opponent .cards-row {
     gap: var(--sp-1);
+  }
+
+  .seat.opponent .cards-row:has(> :nth-child(3)) > * + * {
+    margin-left: -28px;
   }
 
   .seat.opponent .card,
