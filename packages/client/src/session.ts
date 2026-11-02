@@ -38,7 +38,6 @@ export interface Session {
   canStartTunnel: boolean;
   tunnelLoading: boolean;
   selectedAction: ActionType | null;
-  selectedKeep: string[];
   // 下一份手牌到达时要展示的发牌类型
   awaitingShowcase: Showcase['kind'] | null;
   showcase: Showcase | null;
@@ -59,7 +58,6 @@ export const initialSession: Session = {
   canStartTunnel: false,
   tunnelLoading: false,
   selectedAction: null,
-  selectedKeep: [],
   awaitingShowcase: null,
   showcase: null,
   showdown: null,
@@ -91,7 +89,6 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
         hand: [],
         log: [],
         selectedAction: null,
-        selectedKeep: [],
         awaitingShowcase: null,
         showcase: null,
         showdown: null,
