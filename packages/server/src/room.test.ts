@@ -35,6 +35,32 @@ describe('Room 断连清理', () => {
     expect(events.onEmpty).toHaveBeenCalled();
   });
 
+  it('房主离开空房间后，下一位加入者成为房主并能开局', () => {
+    vi.useFakeTimers();
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.leavePlayer(alice.id, 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.addPlayer('Carol', 'sock3');
+    expect(room.hostId).toBe(bob.id);
+    room.startGame(bob.id, 'sock2');
+    expect(room.game).not.toBeNull();
+  });
+
+  it('空房间有人加入后重置空房计时：再次变空后满 5 分钟才回收', () => {
+    vi.useFakeTimers();
+    const { room, events } = makeRoom();
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.leavePlayer(alice.id, 'sock1');
+    vi.advanceTimersByTime(4 * 60_000);
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.leavePlayer(bob.id, 'sock2');
+    vi.advanceTimersByTime(5 * 60_000 - 1);
+    expect(events.onEmpty).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(events.onEmpty).toHaveBeenCalledWith(room);
+  });
+
   function startedRoom() {
     const made = makeRoom({ startingPlayerRandom: () => 0 });
     const { room } = made;

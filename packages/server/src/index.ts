@@ -162,7 +162,6 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       });
       const p = room.addPlayer(raw.name, socket.id);
       reserveRoomCreation(clientAddress(socket), rooms.size);
-      room.hostId = p.id;
       rooms.set(code, room);
       emitJoined(socket, room, p);
       break;
