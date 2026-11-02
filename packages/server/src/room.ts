@@ -103,6 +103,7 @@ export class Room {
         existing.connected = true;
         if (name) existing.name = name;
         this.clearDisconnectTimer(reconnect.id);
+        this.clearEmptyTimer();
         this.handOffOfflineHost();
         return existing;
       }
@@ -114,6 +115,9 @@ export class Room {
     }
     const p: RoomPlayer = { id: genId(), secret: genSecret(), name, socketId, connected: true };
     this.players.set(p.id, p);
+    // 房主已离开（含最后一人离开后空房被重新加入）：由这位新玩家接任。
+    if (!this.players.has(this.hostId)) this.hostId = p.id;
+    this.clearEmptyTimer();
     return p;
   }
 
@@ -379,6 +383,12 @@ export class Room {
     // 防御：玩家不在对局中时返回 null 而非抛错，避免 broadcast 因脏数据拖垮服务器。
     if (!this.game.players.some((p) => p.id === playerId)) return null;
     return privateState(this.game, playerId);
+  }
+
+  // 有人加入就重置空房计时，房间再次变空时重新计满 5 分钟。
+  private clearEmptyTimer(): void {
+    if (this.emptyTimer) clearTimeout(this.emptyTimer);
+    this.emptyTimer = null;
   }
 
   private scheduleEmptyCleanup(): void {
