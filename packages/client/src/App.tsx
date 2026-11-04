@@ -31,7 +31,7 @@ import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { wrappedDialogFocus } from './dialog.ts';
 import { scheduleAutoDismiss } from './transient.ts';
-import { closeShowdown, initialSession, reduceSession, type Session, type Showcase, type ShowdownView } from './session.ts';
+import { closeShowdown, initialSession, reduceSession, type CountdownSnapshot, type Session, type Showcase, type ShowdownView } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
 import {
   LANGUAGE_OPTIONS,
@@ -185,7 +185,6 @@ export function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [serverOffsetMs, setServerOffsetMs] = useState<number | null>(null);
-  const [clockTick, setClockTick] = useState(0);
   const closeRules = useCallback(() => setShowRules(false), []);
   const closeSettings = useCallback(() => setShowSettings(false), []);
   const closeLeaveConfirmation = useCallback(() => setConfirmLeave(false), []);
@@ -304,18 +303,8 @@ export function App() {
     };
   }, [socket]);
 
-  // 浏览器暂停计时器后按实际经过时间重新计算，避免每次回调只减一秒造成滞后。
-  useEffect(() => {
-    if (countdownSnapshot?.remainingMs == null) return;
-    const interval = setInterval(() => setClockTick((value) => value + 1), 250);
-    return () => clearInterval(interval);
-  }, [countdownSnapshot]);
-
-  const remainingMs = useMemo(() => {
-    if (!countdownSnapshot) return null;
-    return remainingSinceReceipt(countdownSnapshot.remainingMs, countdownSnapshot.receivedAt, performance.now());
-  }, [countdownSnapshot, clockTick]);
-  const serverNow = serverOffsetMs == null ? null : Date.now() + serverOffsetMs;
+  // 倒计时的 tick 留在显示它的小组件里（useCountdown），App 只传快照，免得整棵树每 250ms 重渲染（#17）
+  const clock = useMemo<Clock>(() => ({ snapshot: countdownSnapshot, serverOffsetMs }), [countdownSnapshot, serverOffsetMs]);
 
   const me = identity?.playerId;
   // 发牌展示期间倒计时照走：轮到我行动时在展示里给出剩余时间
@@ -404,7 +393,7 @@ export function App() {
         <DealShowcase
           showcase={showcase}
           locale={locale}
-          countdown={myMove ? describeCountdown(remainingMs, countdownSnapshot?.deadlineAt, serverNow) : null}
+          clock={myMove ? clock : null}
           onClose={closeShowcase}
         />
       )}
@@ -416,7 +405,7 @@ export function App() {
           state={publicState}
           me={me}
           locale={locale}
-          countdown={publicState.phase === 'showdown' ? describeCountdown(remainingMs, countdownSnapshot?.deadlineAt, serverNow) : null}
+          clock={publicState.phase === 'showdown' ? clock : null}
           onFocus={(slot) => send(socket, { type: 'focusShowdownCard', slot })}
           onReveal={(cardId) => send(socket, { type: 'revealShowdownCard', cardId })}
           onDone={finishShowdown}
@@ -428,7 +417,7 @@ export function App() {
           key={publicState.lossPlayerId}
           hand={hand}
           locale={locale}
-          countdown={describeCountdown(remainingMs, countdownSnapshot?.deadlineAt, serverNow)}
+          clock={clock}
           onLose={(cardId) => send(socket, { type: 'resolveLoss', cardId })}
         />
       )}
@@ -439,7 +428,7 @@ export function App() {
           hand={hand}
           keepCount={publicState.exchangeKeepCount ?? 0}
           locale={locale}
-          countdown={describeCountdown(remainingMs, countdownSnapshot?.deadlineAt, serverNow)}
+          clock={clock}
           onKeep={(keepIds) => send(socket, { type: 'resolveExchange', keepIds })}
         />
       )}
@@ -475,9 +464,7 @@ export function App() {
           publicState={publicState}
           hand={hand}
           notice={notice}
-          remainingMs={remainingMs}
-          deadlineAt={countdownSnapshot?.deadlineAt ?? null}
-          serverNow={serverNow}
+          clock={clock}
           log={log}
           selectedAction={selectedAction}
           setSelectedAction={setSelectedAction}
@@ -803,9 +790,7 @@ interface RoomViewProps {
   onAction: (action: ActionType, targetId?: string) => void;
   socket: ReturnType<typeof connect>;
   identity: { playerId: string; name: string } | null;
-  remainingMs: number | null;
-  deadlineAt: number | null;
-  serverNow: number | null;
+  clock: Clock;
   log: LogEntry[];
   tunnelUrl: string | null;
   canStartTunnel: boolean;
@@ -862,9 +847,7 @@ function RoomView(props: RoomViewProps) {
       me={me}
       hostId={props.hostId}
       notice={props.notice}
-      remainingMs={props.remainingMs}
-      deadlineAt={props.deadlineAt}
-      serverNow={props.serverNow}
+      clock={props.clock}
       log={props.log}
       selectedAction={props.selectedAction}
       setSelectedAction={props.setSelectedAction}
@@ -987,10 +970,10 @@ function CardBack({ locale }: { locale: Locale }) {
 
 // 发牌展示：大牌取自 prototype/role-icons 分支（1868656）的方案 C（线描图标 + 圆章 + 扑克式角标），只在这里出现。
 // 动画全在 CSS：--i 为牌位、--n 为牌数，用来算出各牌飞向屏幕上方同一个牌堆点的位移。
-function DealShowcase({ showcase, locale, countdown, onClose }: {
+function DealShowcase({ showcase, locale, clock, onClose }: {
   showcase: Showcase;
   locale: Locale;
-  countdown: string | null;
+  clock: Clock | null;
   onClose: () => void;
 }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
@@ -1039,12 +1022,7 @@ function DealShowcase({ showcase, locale, countdown, onClose }: {
           })}
         </div>
         <div className="showcase-actions">
-          {countdown && (
-            <span className="showcase-timer" role="timer" aria-label={translate(locale, 'timeToAct', { time: countdown })}>
-              <HourglassIcon />
-              {countdown}
-            </span>
-          )}
+          <StageTimer clock={clock} locale={locale} />
           <button ref={confirmRef} onClick={onClose}>{translate(locale, 'confirm')}</button>
         </div>
       </div>
@@ -1117,7 +1095,39 @@ function StageCard(props: {
 
 const StageBack = () => <span className="card-back stage-back" aria-hidden="true" />;
 
-function StageTimer({ countdown, locale }: { countdown: string | null; locale: Locale }) {
+interface Clock {
+  snapshot: CountdownSnapshot | null;
+  serverOffsetMs: number | null;
+}
+
+// 只在显示倒计时的组件里 tick；浏览器暂停计时器后按实际经过时间重新计算，避免每次回调只减一秒造成滞后。
+function useCountdown(clock: Clock | null): { countdown: string | null; urgent: boolean } {
+  const snapshot = clock?.snapshot ?? null;
+  const serverOffsetMs = clock?.serverOffsetMs ?? null;
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (snapshot?.remainingMs == null) return;
+    const interval = setInterval(() => setTick((value) => value + 1), 250);
+    return () => clearInterval(interval);
+  }, [snapshot]);
+  if (!snapshot) return { countdown: null, urgent: false };
+  const remainingMs = remainingSinceReceipt(snapshot.remainingMs, snapshot.receivedAt, performance.now());
+  const serverNow = serverOffsetMs == null ? null : Date.now() + serverOffsetMs;
+  const effectiveRemaining = effectiveRemainingMs(remainingMs, snapshot.deadlineAt, serverNow);
+  return {
+    countdown: describeCountdown(remainingMs, snapshot.deadlineAt, serverNow),
+    urgent: effectiveRemaining != null && effectiveRemaining <= 3000,
+  };
+}
+
+function NarrationTimer({ clock }: { clock: Clock }) {
+  const { countdown, urgent } = useCountdown(clock);
+  if (!countdown) return null;
+  return <span className={`narration-timer${urgent ? ' urgent' : ''}`}>{countdown}</span>;
+}
+
+function StageTimer({ clock, locale }: { clock: Clock | null; locale: Locale }) {
+  const { countdown } = useCountdown(clock);
   if (!countdown) return null;
   return (
     <span className="showcase-timer" role="timer" aria-label={translate(locale, 'timeToAct', { time: countdown })}>
@@ -1134,7 +1144,7 @@ function ShowdownStage(props: {
   state: PublicState;
   me: string | undefined;
   locale: Locale;
-  countdown: string | null;
+  clock: Clock | null;
   onFocus: (slot: number | null) => void;
   onReveal: (cardId: string) => void;
   onDone: () => void;
@@ -1354,7 +1364,7 @@ function ShowdownStage(props: {
               {/* 旁观者必须看到在等谁，否则会以为要自己操作 */}
               {!mine && <p>{translate(locale, 'waitingForShowdown', { name: claimant })}</p>}
               <div className="stage-actions">
-                <StageTimer countdown={props.countdown} locale={locale} />
+                <StageTimer clock={props.clock} locale={locale} />
                 {mine && (
                   <button className="primary" disabled={picked === null || sent} onClick={confirm}>
                     {translate(locale, 'revealThis')}
@@ -1379,7 +1389,7 @@ function ShowdownStage(props: {
 }
 
 // 失去影响力（政变、暗杀、质疑失败的质疑者）：只有本人看到的放大选牌；翻开的牌褪色下沉后才发出意图
-function LossStage(props: { hand: Card[]; locale: Locale; countdown: string | null; onLose: (cardId: string) => void }) {
+function LossStage(props: { hand: Card[]; locale: Locale; clock: Clock | null; onLose: (cardId: string) => void }) {
   const { hand, locale } = props;
   const [picked, setPicked] = useState<number | null>(null);
   const [sent, setSent] = useState(false);
@@ -1428,7 +1438,7 @@ function LossStage(props: { hand: Card[]; locale: Locale; countdown: string | nu
         </div>
         <div className="stage-foot">
           <div className="stage-actions">
-            <StageTimer countdown={props.countdown} locale={locale} />
+            <StageTimer clock={props.clock} locale={locale} />
             <button className="primary" disabled={picked === null || sent} onClick={lose}>{translate(locale, 'revealThis')}</button>
           </div>
         </div>
@@ -1442,7 +1452,7 @@ function ExchangeStage(props: {
   hand: Card[];
   keepCount: number;
   locale: Locale;
-  countdown: string | null;
+  clock: Clock | null;
   onKeep: (cardIds: string[]) => void;
 }) {
   const { hand, keepCount, locale } = props;
@@ -1500,7 +1510,7 @@ function ExchangeStage(props: {
         </div>
         <div className="stage-foot">
           <div className="stage-actions">
-            <StageTimer countdown={props.countdown} locale={locale} />
+            <StageTimer clock={props.clock} locale={locale} />
             <button className="primary" disabled={kept.length !== keepCount || sent} onClick={keep}>{translate(locale, 'confirmKeep')}</button>
           </div>
         </div>
@@ -1618,9 +1628,7 @@ function GameBoard(props: {
   setSelectedAction: (a: ActionType | null) => void;
   onAction: (action: ActionType, targetId?: string) => void;
   onIntent: (i: Parameters<typeof send>[1]) => void;
-  remainingMs: number | null;
-  deadlineAt: number | null;
-  serverNow: number | null;
+  clock: Clock;
   log: LogEntry[];
   locale: Locale;
 }) {
@@ -1659,9 +1667,6 @@ function GameBoard(props: {
   const waiting = me && state.phase !== 'showdown' ? describeWaiting(state, me, props.locale) : null;
 
   const narration = describePending(state, props.locale);
-  const countdown = describeCountdown(props.remainingMs, props.deadlineAt, props.serverNow);
-  const effectiveRemaining = effectiveRemainingMs(props.remainingMs, props.deadlineAt, props.serverNow);
-  const urgent = effectiveRemaining != null && effectiveRemaining <= 3000;
   const centerText = narration ?? (isMyTurn && state.phase === 'choosingAction' ? translate(props.locale, 'yourTurn') : null);
 
   type SeatPlayer = PublicState['players'][number];
@@ -1750,9 +1755,7 @@ function GameBoard(props: {
           <span className="narration-text" aria-live="polite">
             {centerText && <span key={centerText} className="narration-line">{centerText}</span>}
           </span>
-          {centerText && countdown && (
-            <span className={`narration-timer${urgent ? ' urgent' : ''}`}>{countdown}</span>
-          )}
+          {centerText && <NarrationTimer clock={props.clock} />}
         </div>
       </div>
 
