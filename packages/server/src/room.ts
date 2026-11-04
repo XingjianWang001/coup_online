@@ -115,8 +115,8 @@ export class Room {
     }
     const p: RoomPlayer = { id: genId(), secret: genSecret(), name, socketId, connected: true };
     this.players.set(p.id, p);
-    // 房主已离开（含最后一人离开后空房被重新加入）：由这位新玩家接任。
-    if (!this.players.has(this.hostId)) this.hostId = p.id;
+    // 房主已离开或离线（含最后一人离开后空房被重新加入）：由在线的玩家接任。
+    this.handOffOfflineHost();
     this.clearEmptyTimer();
     return p;
   }
@@ -180,9 +180,9 @@ export class Room {
     return [...this.players.values()].some((p) => this.isPresent(p));
   }
 
-  // 牌局结束后房主离线：再来一局的权利立即交给最早加入的在线玩家，不等宽限期。
+  // 大厅阶段或牌局结束后房主离线：开局或再来一局的权利立即交给最早加入的在线玩家，不等宽限期。
   private handOffOfflineHost(): void {
-    if (this.game?.phase !== 'gameOver' || this.players.get(this.hostId)?.connected) return;
+    if ((this.game && this.game.phase !== 'gameOver') || this.players.get(this.hostId)?.connected) return;
     const next = [...this.players.values()].find((p) => p.connected);
     if (next) this.hostId = next.id;
   }
@@ -234,15 +234,24 @@ export class Room {
 
   apply(fn: (g: GameState) => GameEvent[]): GameEvent[] {
     if (!this.game) throw new ClientError({ code: 'gameNotStarted' });
+    const before = this.timerKey();
     const events = fn(this.game);
     this.repo.save(this.code, this.game);
-    this.afterMutation(events);
+    this.afterMutation(events, before);
     return events;
   }
 
-  private afterMutation(events: GameEvent[]): void {
+  // 计时归属：阶段 + 该阶段要行动的玩家（失去影响力者、被质疑者或当前玩家）
+  private timerKey(): string {
+    const g = this.game!;
+    return `${g.phase}:${g.lossToResolve?.playerId ?? g.showdown?.claimantId ?? g.currentPlayerId}`;
+  }
+
+  private afterMutation(events: GameEvent[], timerKeyBefore: string): void {
     if (!this.game) return;
     this.handOffOfflineHost();
+    // 时限从进入阶段起算：有人放弃回应、已淘汰者弃权等不换阶段也不换行动者的变化不重新计时
+    if (this.timerKey() === timerKeyBefore) return;
     const reveal = events.some((e) => e.type === 'challengeResolved') ? REVEAL_MS : 0;
     switch (this.game.phase) {
       case 'choosingAction':

@@ -345,6 +345,30 @@ describe('Room 计时结束', () => {
     expect(room.getDeadlineMs()).toBe(66_000);
   });
 
+  it('问询窗口时限从进入窗口起算：重复放弃或已淘汰者弃权不重新计时，进入新阶段才重新计时', () => {
+    vi.useFakeTimers();
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    const carol = room.addPlayer('Carol', 'sock3');
+    const dave = room.addPlayer('Dave', 'sock4');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    room.apply((g) => forfeit(g, dave.id));
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'tax' });
+    vi.advanceTimersByTime(5_000);
+    room.dispatch(bob.id, 'sock2', { type: 'passChallenge' });
+    expect(room.getDeadlineMs()).toBe(15_000);
+    vi.advanceTimersByTime(5_000);
+    room.dispatch(bob.id, 'sock2', { type: 'passChallenge' });
+    room.apply((g) => forfeit(g, dave.id));
+    expect(room.getDeadlineMs()).toBe(10_000);
+
+    room.dispatch(carol.id, 'sock3', { type: 'passChallenge' });
+    expect(room.game?.currentPlayerId).toBe(bob.id);
+    expect(room.getDeadlineMs()).toBe(60_000);
+  });
+
   it('阻挡窗口超时后广播结算事件和下一回合状态', () => {
     vi.useFakeTimers();
     const {
@@ -415,6 +439,32 @@ describe('Room 意图错误', () => {
     vi.mocked(repo.save).mockImplementationOnce(() => { throw failure; });
 
     expect(() => room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' })).toThrow(failure);
+  });
+});
+
+describe('Room 大厅阶段', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('房主断线时开局权立即交给下一位在线玩家，原房主重连后是普通玩家', () => {
+    vi.useFakeTimers();
+    const { room } = makeRoom();
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    expect(room.hostId).toBe(alice.id);
+    room.markDisconnected(alice.id, 'sock1');
+    expect(room.hostId).toBe(bob.id);
+    room.addPlayer('Alice', 'sock1b', { id: alice.id, secret: alice.secret });
+    expect(room.hostId).toBe(bob.id);
+    expect(() => room.startGame(alice.id, 'sock1b')).toThrow('hostOnly');
+  });
+
+  it('全员断线后新玩家加入即成为房主', () => {
+    vi.useFakeTimers();
+    const { room } = makeRoom();
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.markDisconnected(alice.id, 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    expect(room.hostId).toBe(bob.id);
   });
 });
 
