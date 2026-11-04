@@ -651,10 +651,48 @@ describe('弃权只作废弃权者自己的声称与行动', () => {
   });
 });
 
+describe('问询窗口中弃权', () => {
+  it('其余玩家都已放弃质疑后有人弃权：窗口关闭，行动照常结算', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'tax');
+    passChallenge(s, 'b');
+    forfeit(s, 'c');
+    expect(coins(s, 'a')).toBe(5);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.currentPlayerId).toBe('b');
+  });
+
+  it('其余玩家都已放弃阻挡后有人弃权：窗口关闭，外援照常结算', () => {
+    const s = setup({ a: ['captain', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'foreignAid');
+    passBlock(s, 'b');
+    forfeit(s, 'c');
+    expect(coins(s, 'a')).toBe(4);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.currentPlayerId).toBe('b');
+  });
+
+  it('还有人未表态时弃权：窗口保持', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'], d: ['assassin', 'assassin'] });
+    chooseAction(s, 'a', 'tax');
+    passChallenge(s, 'b');
+    forfeit(s, 'c');
+    expect(s.phase).toBe('awaitingChallenge');
+    expect(coins(s, 'a')).toBe(2);
+  });
+});
+
 describe('非法行动', () => {
   it.each(['bogus', '__proto__', 'toString'])('拒绝未知行动 %s', (action) => {
     const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'] });
     expect(() => chooseAction(s, 'a', action as never)).toThrow(GameRuleError);
     expect(s.phase).toBe('choosingAction');
+  });
+
+  it.each(['income', 'foreignAid', 'tax', 'exchange'] as const)('拒绝给无目标行动 %s 指定目标', (action) => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'] });
+    expect(() => chooseAction(s, 'a', action, 'b')).toThrow(GameRuleError);
+    expect(s.phase).toBe('choosingAction');
+    expect(coins(s, 'a')).toBe(1);
   });
 });
