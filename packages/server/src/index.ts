@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { Server, type Socket } from 'socket.io';
 import { InMemoryGameRepository } from './repository.ts';
 import { Room, type RoomPlayer } from './room.ts';
-import { getTunnelUrl, startTunnel, stopTunnel } from './tunnel.ts';
+import { canStartTunnel, getTunnelUrl, startTunnel, stopTunnel } from './tunnel.ts';
 import type { ClientIntent, GameEvent } from '@coup/shared';
 import { ClientError, toServerError } from './errors.ts';
 import { reserveRoomCreation } from './room-limits.ts';
@@ -33,11 +33,6 @@ function genCode(): string {
     code = randomBytes(3).toString('hex').toUpperCase(); // 6 位房间码
   } while (rooms.has(code));
   return code;
-}
-
-// 仅允许回环来源启动隧道：防止公网（经隧道）可达的客户端在主机上 spawn cloudflared。
-function isLoopback(address: string | undefined): boolean {
-  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 }
 
 const httpServer = createServer((req, res) => {
@@ -120,7 +115,7 @@ function emitJoined(socket: Socket, room: Room, player: RoomPlayer): void {
     players: room.playerList,
     hostId: room.hostId,
     tunnelUrl: getTunnelUrl() ?? undefined,
-    canStartTunnel: isLoopback(socket.handshake.address),
+    canStartTunnel: canStartTunnel(socket.handshake),
   });
   publish(room, []);
 }
@@ -188,7 +183,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       break;
     }
     case 'startTunnel': {
-      if (!isLoopback(socket.handshake.address)) throw new ClientError({ code: 'tunnelUnauthorized' });
+      if (!canStartTunnel(socket.handshake)) throw new ClientError({ code: 'tunnelUnauthorized' });
       startTunnel(PORT)
         .then((url) => socket.emit('tunnelUrl', { url }))
         .catch((error) => {
