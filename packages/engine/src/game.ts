@@ -79,6 +79,10 @@ function nextAliveAfter(state: GameState, id: string | null): Player {
 function checkWin(state: GameState): GameEvent[] {
   const al = alive(state);
   if (al.length === 1) {
+    // 交换选牌中结束（如其他玩家弃权）：摸到的牌放回牌堆，赢家只留原有手牌
+    if (state.phase === 'choosingExchange' && state.pending) {
+      state.deck.push(...getPlayer(state, state.pending.actorId).hand.splice(state.exchangeKeepCount!));
+    }
     state.phase = 'gameOver';
     state.winnerId = al[0].id;
     state.currentPlayerId = null;

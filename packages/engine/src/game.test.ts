@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   block,
   challenge,
@@ -12,6 +12,7 @@ import {
   resolveBlockTimeout,
   resolveChallengeTimeout,
   resolveExchange,
+  resolveExchangeTimeout,
   resolveLoss,
   resolveLossTimeout,
   resolveShowdownTimeout,
@@ -694,5 +695,78 @@ describe('非法行动', () => {
     expect(() => chooseAction(s, 'a', action, 'b')).toThrow(GameRuleError);
     expect(s.phase).toBe('choosingAction');
     expect(coins(s, 'a')).toBe(1);
+  });
+});
+
+describe('Forfeit during an Exchange', () => {
+  it('returns the drawn cards when another player forfeits and the exchanger wins', () => {
+    const s = setup({ a: ['ambassador', 'duke'], b: ['captain', 'contessa'] });
+    chooseAction(s, 'a', 'exchange');
+    resolveChallengeTimeout(s);
+    expect(s.phase).toBe('choosingExchange');
+
+    forfeit(s, 'b');
+
+    expect(s.phase).toBe('gameOver');
+    expect(s.players.find((p) => p.id === 'a')!.hand).toHaveLength(2);
+    expect(publicState(s).players.find((p) => p.id === 'a')!.handCount).toBe(2);
+  });
+});
+
+describe('card invariants over random play', () => {
+  // Forfeit during an Exchange broke card counts twice (#32, then a winner keeping 4 cards), so check every step.
+  it('keeps 15 cards, and 2 per player except the exchanger’s 2 drawn cards', () => {
+    let seed = 42;
+    const random = vi.spyOn(Math, 'random').mockImplementation(() => (seed = (seed * 16807) % 2147483647) / 2147483647);
+    const pick = <T,>(items: readonly T[]) => items[Math.floor(Math.random() * items.length)];
+    const actions = ['income', 'foreignAid', 'coup', 'tax', 'assassinate', 'steal', 'exchange'] as const;
+    const roles = ['duke', 'assassin', 'captain', 'ambassador', 'contessa'] as const;
+    const timeouts: Partial<Record<GameState['phase'], (g: GameState) => unknown>> = {
+      awaitingChallenge: resolveChallengeTimeout,
+      awaitingBlock: resolveBlockTimeout,
+      showdown: resolveShowdownTimeout,
+      choosingLoss: resolveLossTimeout,
+      choosingExchange: resolveExchangeTimeout,
+    };
+    try {
+      for (let game = 0; game < 300; game++) {
+        const ids = Array.from({ length: 2 + (game % 5) }, (_, i) => `p${i}`);
+        const s = createGame(ids.map((id) => P(id)), { startingPlayerId: pick(ids) });
+        for (let step = 0; step < 300 && s.phase !== 'gameOver'; step++) {
+          const who = pick(ids);
+          const me = s.players.find((p) => p.id === who)!;
+          const r = Math.random();
+          try {
+            if (r < 0.03) forfeit(s, who);
+            else if (r < 0.12 && timeouts[s.phase]) timeouts[s.phase]!(s);
+            else {
+              const move = pick(['act', 'challenge', 'passChallenge', 'block', 'passBlock', 'reveal', 'loss', 'exchange'] as const);
+              if (move === 'act') {
+                const action = pick(actions);
+                chooseAction(s, who, action, ['coup', 'assassinate', 'steal'].includes(action) ? pick(ids) : undefined);
+              }
+              if (move === 'challenge') challenge(s, who);
+              if (move === 'passChallenge') passChallenge(s, who);
+              if (move === 'block') block(s, who, pick(roles));
+              if (move === 'passBlock') passBlock(s, who);
+              if (move === 'reveal' && me.hand.length) revealShowdownCard(s, who, pick(me.hand).id);
+              if (move === 'loss' && me.hand.length) resolveLoss(s, who, pick(me.hand).id);
+              if (move === 'exchange') resolveExchange(s, who, me.hand.slice(0, s.exchangeKeepCount ?? 0).map((c) => c.id));
+            }
+          } catch (error) {
+            if (error instanceof GameRuleError) continue;
+            throw error;
+          }
+          const where = `game ${game} step ${step} (${s.phase})`;
+          expect(s.deck.length + s.players.reduce((n, p) => n + p.hand.length + p.revealed.length, 0), where).toBe(15);
+          for (const p of s.players) {
+            const drawn = s.phase === 'choosingExchange' && s.pending?.actorId === p.id ? 2 : 0;
+            expect(p.hand.length + p.revealed.length, `${where} ${p.id}`).toBe(2 + drawn);
+          }
+        }
+      }
+    } finally {
+      random.mockRestore();
+    }
   });
 });
