@@ -34,7 +34,7 @@ const DISCONNECT_GRACE_MS = 90_000;
 const MAX_PLAYERS = 6;
 const MAX_NAME_LENGTH = 32;
 
-// 每个进行中的阶段都要有时限和超时默认选择，否则在线却不操作的玩家能让牌局永远卡住（#24）。
+// 每个进行中的阶段都要有时限和超时后的处理，否则在线却不操作的玩家能让牌局永远卡住（#24）。
 // 用 Record 而不是 switch：新增阶段时漏写这里会编译报错。
 type TimedPhase = Exclude<Phase, 'lobby' | 'gameOver'>;
 const PHASE_TIMEOUTS: Record<TimedPhase, { ms: number; resolve: (g: GameState) => GameEvent[] }> = {

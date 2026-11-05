@@ -264,6 +264,11 @@ describe('describeWaiting', () => {
     expect(describeWaiting(state({ phase: 'choosingExchange', pending: { action: 'exchange', actorId: 'a', claimedRole: 'ambassador' } }), 'b')).toBe('等待 张三 交换手牌…');
   });
 
+  it('英文界面同样说出谁在选失去的影响力、谁在交换', () => {
+    expect(describeWaiting(state({ phase: 'choosingLoss', lossPlayerId: 'b' }), 'a', 'en')).toBe('Waiting for 李四 to choose an influence to lose…');
+    expect(describeWaiting(state({ phase: 'choosingExchange', pending: { action: 'exchange', actorId: 'a', claimedRole: 'ambassador' } }), 'b', 'en')).toBe('Waiting for 张三 to exchange cards…');
+  });
+
   it('声称者本人或已放弃的玩家等其他人决定是否质疑', () => {
     const s = state({ phase: 'awaitingChallenge', challengeSubject: 'action', pending: tax, passed: ['b'] });
     expect(describeWaiting(s, 'a')).toBe('等待其他玩家决定是否质疑…');
