@@ -1,4 +1,4 @@
-import type { GameState, GameEvent, Role, ActionType } from '@coup/engine';
+import type { GameState, GameEvent, Role, ActionType, Phase } from '@coup/engine';
 import { randomBytes } from 'node:crypto';
 import {
   GameRuleError,
@@ -14,6 +14,7 @@ import {
   resolveBlockTimeout,
   resolveChallengeTimeout,
   resolveExchange,
+  resolveExchangeTimeout,
   resolveLoss,
   resolveLossTimeout,
   resolveShowdownTimeout,
@@ -32,6 +33,29 @@ const FOCUS_MIN_INTERVAL_MS = 50;
 const DISCONNECT_GRACE_MS = 90_000;
 const MAX_PLAYERS = 6;
 const MAX_NAME_LENGTH = 32;
+
+// 每个进行中的阶段都要有时限和超时后的处理，否则在线却不操作的玩家能让牌局永远卡住（#24）。
+// 用 Record 而不是 switch：新增阶段时漏写这里会编译报错。
+type TimedPhase = Exclude<Phase, 'lobby' | 'gameOver'>;
+const PHASE_TIMEOUTS: Record<TimedPhase, { ms: number; resolve: (g: GameState) => GameEvent[] }> = {
+  choosingAction: { ms: ACTION_TIMEOUT_MS, resolve: autoAction },
+  awaitingChallenge: { ms: WINDOW_TIMEOUT_MS, resolve: resolveChallengeTimeout },
+  awaitingBlock: { ms: WINDOW_TIMEOUT_MS, resolve: resolveBlockTimeout },
+  showdown: { ms: WINDOW_TIMEOUT_MS, resolve: resolveShowdownTimeout },
+  choosingLoss: { ms: WINDOW_TIMEOUT_MS, resolve: resolveLossTimeout },
+  choosingExchange: { ms: ACTION_TIMEOUT_MS, resolve: resolveExchangeTimeout },
+};
+const isTimed = (phase: Phase): phase is TimedPhase => phase in PHASE_TIMEOUTS;
+
+// 行动超时的默认行动：满 10 金币必须政变（随机目标），否则收入
+function autoAction(g: GameState): GameEvent[] {
+  const cur = g.currentPlayerId!;
+  if (g.players.find((p) => p.id === cur)!.coins >= 10) {
+    const targets = g.players.filter((p) => p.alive && p.id !== cur);
+    return chooseAction(g, cur, 'coup', targets[Math.floor(Math.random() * targets.length)].id);
+  }
+  return chooseAction(g, cur, 'income');
+}
 
 function genId(): string {
   return randomBytes(8).toString('hex');
@@ -244,19 +268,9 @@ export class Room {
     if (!this.game) return;
     this.handOffOfflineHost();
     const reveal = events.some((e) => e.type === 'challengeResolved') ? REVEAL_MS : 0;
-    switch (this.game.phase) {
-      case 'choosingAction':
-        this.startTimer(ACTION_TIMEOUT_MS + reveal);
-        break;
-      case 'awaitingChallenge':
-      case 'awaitingBlock':
-      case 'showdown':
-      case 'choosingLoss':
-        this.startTimer(WINDOW_TIMEOUT_MS + reveal);
-        break;
-      default:
-        this.clearTimer();
-    }
+    const phase = this.game.phase;
+    if (isTimed(phase)) this.startTimer(PHASE_TIMEOUTS[phase].ms + reveal);
+    else this.clearTimer();
   }
 
   private startTimer(ms: number): void {
@@ -284,38 +298,12 @@ export class Room {
   }
 
   private onTimeout(): void {
-    if (!this.game) return;
+    const phase = this.game?.phase;
+    if (!phase || !isTimed(phase)) return;
     try {
-      let events: GameEvent[];
-      if (this.game.phase === 'choosingAction') {
-        events = this.autoAction();
-      } else if (this.game.phase === 'awaitingChallenge') {
-        events = this.apply((g) => resolveChallengeTimeout(g));
-      } else if (this.game.phase === 'awaitingBlock') {
-        events = this.apply((g) => resolveBlockTimeout(g));
-      } else if (this.game.phase === 'showdown') {
-        events = this.apply((g) => resolveShowdownTimeout(g));
-      } else if (this.game.phase === 'choosingLoss') {
-        events = this.apply((g) => resolveLossTimeout(g));
-      } else {
-        return;
-      }
-      this.events.onBroadcast(this, events);
+      this.events.onBroadcast(this, this.apply(PHASE_TIMEOUTS[phase].resolve));
     } catch (e) {
       console.error('timeout error', e);
-    }
-  }
-
-  private autoAction(): GameEvent[] {
-    const g = this.game!;
-    const cur = g.currentPlayerId!;
-    const curPlayer = g.players.find((p) => p.id === cur)!;
-    if (curPlayer.coins >= 10) {
-      const targets = g.players.filter((p) => p.alive && p.id !== cur);
-      const target = targets[Math.floor(Math.random() * targets.length)];
-      return this.apply((s) => chooseAction(s, cur, 'coup', target.id));
-    } else {
-      return this.apply((s) => chooseAction(s, cur, 'income'));
     }
   }
 

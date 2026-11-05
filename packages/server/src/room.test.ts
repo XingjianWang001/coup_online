@@ -299,6 +299,27 @@ describe('Room 计时结束', () => {
     expect(room.game?.currentPlayerId).toBe(bob.id);
   });
 
+  it('交换选牌超时后保留原手牌，摸到的牌放回牌堆，回合推进', () => {
+    vi.useFakeTimers();
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    const hand = room.game!.players.find((p) => p.id === alice.id)!.hand.map((c) => c.id);
+    const deckSize = room.game!.deck.length;
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'exchange' });
+    vi.advanceTimersByTime(20_000); // 无人质疑
+    expect(room.game?.phase).toBe('choosingExchange');
+    expect(room.getDeadlineMs()).toBe(60_000);
+
+    vi.advanceTimersByTime(60_000);
+
+    expect(room.game?.players.find((p) => p.id === alice.id)?.hand.map((c) => c.id)).toEqual(hand);
+    expect(room.game?.deck).toHaveLength(deckSize);
+    expect(room.game?.currentPlayerId).toBe(bob.id);
+  });
+
   it('对质限时 20 秒，超时替持有被声称角色的玩家翻开它；揭晓后下一段计时多出揭晓时间', () => {
     vi.useFakeTimers();
     const {

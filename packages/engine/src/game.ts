@@ -489,6 +489,14 @@ export function resolveExchange(state: GameState, playerId: string, keepIds: str
   return advanceTurn(state);
 }
 
+// 交换选牌超时的默认选择：保留原手牌（在前面），摸到的牌全部放回牌堆
+export function resolveExchangeTimeout(state: GameState): GameEvent[] {
+  if (state.phase !== 'choosingExchange') throw new GameRuleError('not in choosingExchange phase');
+  const { actorId } = state.pending!;
+  const original = getPlayer(state, actorId).hand.slice(0, state.exchangeKeepCount!);
+  return resolveExchange(state, actorId, original.map((c) => c.id));
+}
+
 // 弃权（断线超时或牌局中离开）：翻开全部暗牌、淘汰；只作废该玩家自己的声称与行动，他人欠下的失去影响力照常结算。
 export function forfeit(state: GameState, playerId: string): GameEvent[] {
   const p = getPlayer(state, playerId);

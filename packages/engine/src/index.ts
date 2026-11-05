@@ -27,6 +27,7 @@ export {
   resolveBlockTimeout,
   resolveChallengeTimeout,
   resolveExchange,
+  resolveExchangeTimeout,
   resolveLoss,
   resolveLossTimeout,
   resolveShowdownTimeout,
