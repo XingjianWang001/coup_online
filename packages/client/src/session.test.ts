@@ -18,6 +18,21 @@ const inGame = run([
 ]);
 
 describe('房间会话', () => {
+  it('超时代为收入、轮到下一位后，收起没提交的目标选择', () => {
+    const myTurn = run([{ type: 'publicState', state: { ...table, currentPlayerId: 'a' }, remainingMs: 1000, deadlineAt: 5000, hostId: 'a' }], inGame);
+    const s = run([
+      { type: 'events', events: [{ type: 'actionChosen', actorId: 'a', action: 'income' }, { type: 'coinsChanged', playerId: 'a', coins: 3 }, { type: 'turnChanged', playerId: 'b' }] },
+      { type: 'publicState', state: { ...table, currentPlayerId: 'b' }, remainingMs: 1000, deadlineAt: 6000, hostId: 'a' },
+    ], { ...myTurn, selectedAction: 'assassinate' });
+    expect(s.selectedAction).toBeNull();
+  });
+
+  it('自己的回合内收到新的牌局状态时保留目标选择', () => {
+    const myTurn = run([{ type: 'publicState', state: { ...table, currentPlayerId: 'a' }, remainingMs: 1000, deadlineAt: 5000, hostId: 'a' }], inGame);
+    const s = run([{ type: 'publicState', state: { ...table, currentPlayerId: 'a' }, remainingMs: 900, deadlineAt: 5000, hostId: 'a' }], { ...myTurn, selectedAction: 'assassinate' });
+    expect(s.selectedAction).toBe('assassinate');
+  });
+
   it('再来一局回到大厅阶段：清空牌桌与选择，保留房间信息', () => {
     const s = run([{ type: 'lobby', players, hostId: 'a' }], { ...inGame, selectedAction: 'coup' });
     expect(s).toMatchObject({ roomCode: 'ABC123', tunnelUrl: 'https://t', publicState: null, countdown: null, hand: [], log: [], selectedAction: null, showcase: null });

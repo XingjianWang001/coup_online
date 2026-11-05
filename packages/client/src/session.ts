@@ -104,6 +104,8 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
         publicState: msg.state,
         showcase: out ? null : s.showcase,
         showdown: showdownFor(s, msg.state),
+        // 超时代为行动等情况换了回合：收起没提交的目标选择，免得下回合还停在旧的选择上
+        selectedAction: msg.state.phase === 'choosingAction' && msg.state.currentPlayerId === s.publicState?.currentPlayerId ? s.selectedAction : null,
         countdown: { remainingMs: msg.remainingMs, deadlineAt: msg.deadlineAt, receivedAt: now },
       };
     }

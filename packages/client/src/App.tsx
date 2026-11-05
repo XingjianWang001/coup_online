@@ -102,6 +102,9 @@ function useDialogFocus(
   dialogRef: RefObject<HTMLDivElement>,
   initialFocusRef: RefObject<HTMLElement>,
 ) {
+  // onClose 放进 ref：调用方每次渲染传入新函数时，若作为依赖会让焦点每次都跳回初始按钮。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
@@ -111,7 +114,7 @@ function useDialogFocus(
       if (modals[modals.length - 1] !== dialogRef.current) return;
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -137,7 +140,7 @@ function useDialogFocus(
       document.removeEventListener('keydown', onKeyDown);
       previouslyFocused?.focus();
     };
-  }, [dialogRef, initialFocusRef, onClose]);
+  }, [dialogRef, initialFocusRef]);
 }
 
 function useAutoDismiss<T extends { id: number }>(
