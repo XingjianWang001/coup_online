@@ -228,6 +228,8 @@ export class Room {
   startGame(playerId: string, socketId: string): GameEvent[] {
     this.requireCurrentConnection(playerId, socketId);
     if (playerId !== this.hostId) throw new ClientError({ code: 'hostOnly' });
+    // 只有大厅阶段能开局：牌局中或结束后要走 rematch()，它会清掉已弃权的座位。
+    if (this.game) throw new ClientError({ code: 'gameAlreadyStarted' });
     if (this.players.size < 2) {
       throw new ClientError({ code: 'minimumPlayers', params: { minimum: 2 } });
     }
