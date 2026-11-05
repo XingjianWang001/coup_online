@@ -263,6 +263,7 @@ export function chooseAction(
 
   const needsTarget = action === 'coup' || action === 'assassinate' || action === 'steal';
   if (needsTarget && !targetId) throw new GameRuleError(`${action} 需要目标`);
+  if (!needsTarget && targetId) throw new GameRuleError(`${action} 不能指定目标`);
   if (targetId) {
     const target = getPlayer(state, targetId);
     if (!target.alive) throw new GameRuleError('target eliminated');
@@ -542,6 +543,14 @@ export function forfeit(state: GameState, playerId: string): GameEvent[] {
     const { subject } = state.showdown;
     state.showdown = null;
     return events.concat(subject === 'action' ? proceedAction(state) : advanceTurn(state));
+  }
+  // 弃权者是问询窗口里最后一个未表态的人：窗口照 passChallenge / passBlock 关闭
+  if (state.phase === 'awaitingChallenge' && eligibleChallengers(state).every((id) => state.passed.includes(id))) {
+    return events.concat(closeChallenge(state));
+  }
+  if (state.phase === 'awaitingBlock' && eligibleBlockers(state).every((id) => state.passed.includes(id))) {
+    state.passed = [];
+    return events.concat(resolveEffect(state));
   }
   return events;
 }
