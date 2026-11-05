@@ -414,6 +414,18 @@ describe('Room 计时结束', () => {
 });
 
 describe('Room 开局', () => {
+  it.each(['choosingAction', 'gameOver'])('牌局已存在（%s）时房主不能再开局，只能再来一局', (phase) => {
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addPlayer('Bob', 'sock2');
+    room.startGame(alice.id, 'sock1');
+    const game = room.game!;
+    game.phase = phase as GameState['phase'];
+
+    expect(() => room.startGame(alice.id, 'sock1')).toThrow('gameAlreadyStarted');
+    expect(room.game).toBe(game);
+  });
+
   it('使用服务器注入的随机源选择当前玩家并应用两人局金币规则', () => {
     const { room } = makeRoom({ startingPlayerRandom: () => 0.75 });
     const alice = room.addPlayer('Alice', 'sock1');
@@ -637,24 +649,5 @@ describe('Room 对质悬停同步', () => {
     expect(room.focusShowdownCard(alice.id, 'sock1', null)).toEqual({ slot: null });
     expect(() => room.focusShowdownCard(alice.id, 'sock1', 2)).toThrow('illegalIntent');
     expect(() => room.focusShowdownCard(alice.id, 'sock1', '0')).toThrow('illegalIntent');
-  });
-});
-
-describe('Room 开局', () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it.each(['choosingAction', 'gameOver'])('牌局已存在（%s）时房主不能再开局，只能走再来一局', (phase) => {
-    vi.useFakeTimers();
-    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
-    const alice = room.addPlayer('Alice', 'sock1');
-    room.addPlayer('Bob', 'sock2');
-    room.startGame(alice.id, 'sock1');
-    const game = room.game!;
-    game.phase = phase as GameState['phase'];
-
-    expect(() => room.startGame(alice.id, 'sock1')).toThrow('gameAlreadyStarted');
-    expect(room.game).toBe(game);
   });
 });

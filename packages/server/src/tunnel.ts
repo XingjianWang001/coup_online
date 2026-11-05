@@ -24,6 +24,7 @@ export function getTunnelUrl(): string | null {
 }
 
 // 只允许本机直连启动隧道。经 cloudflared 或反向代理进来的访客在服务器看来也来自本机，靠转发头区分。
+// shortcut: 纯 TCP 转发（ssh -R、socat、frp tcp）不加转发头，仍会被当作本机；要支持这类暴露方式时改用登录口令等凭据。
 export function canStartTunnel(handshake: { address: string; headers: IncomingHttpHeaders }): boolean {
   const { address, headers } = handshake;
   const loopback = address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
@@ -48,7 +49,7 @@ function launchTunnel(port: number): Promise<string> {
     let settled = false;
 
     const settleUrl = (chunk: string) => {
-      if (settled) return;
+      if (settled || child !== proc) return; // 已被 stopTunnel 终止的进程不再提供域名
       buf += chunk;
       const url = parseTunnelUrl(buf);
       if (url) {

@@ -75,14 +75,19 @@ function nextAliveAfter(state: GameState, id: string | null): Player {
   throw new Error('no alive player');
 }
 
+// 交换选牌中途结束（弃权、牌局结束）：摸到的牌放回牌堆，交换者只留原有手牌
+function returnExchangeDraw(state: GameState): void {
+  if (state.phase !== 'choosingExchange' || !state.pending || state.exchangeKeepCount === null) return;
+  state.deck.push(...getPlayer(state, state.pending.actorId).hand.splice(state.exchangeKeepCount));
+  shuffle(state.deck);
+  state.exchangeKeepCount = null;
+}
+
 // 检查是否只剩一个存活者 → 结束游戏
 function checkWin(state: GameState): GameEvent[] {
   const al = alive(state);
   if (al.length === 1) {
-    // 交换选牌中结束（如其他玩家弃权）：摸到的牌放回牌堆，赢家只留原有手牌
-    if (state.phase === 'choosingExchange' && state.pending) {
-      state.deck.push(...getPlayer(state, state.pending.actorId).hand.splice(state.exchangeKeepCount!));
-    }
+    returnExchangeDraw(state);
     state.phase = 'gameOver';
     state.winnerId = al[0].id;
     state.currentPlayerId = null;
@@ -507,11 +512,7 @@ export function forfeit(state: GameState, playerId: string): GameEvent[] {
   const p = getPlayer(state, playerId);
   if (!p.alive) return [];
   // 交换选牌中弃权：摸到的牌先放回牌堆，只翻开原有手牌
-  if (state.phase === 'choosingExchange' && state.pending?.actorId === playerId) {
-    state.deck.push(...p.hand.splice(state.exchangeKeepCount!));
-    shuffle(state.deck);
-    state.exchangeKeepCount = null;
-  }
+  if (state.pending?.actorId === playerId) returnExchangeDraw(state);
   const events: GameEvent[] = [];
   while (p.hand.length > 0) {
     const c = p.hand.pop()!;

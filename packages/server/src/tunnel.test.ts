@@ -2,9 +2,10 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { spawn } from 'node:child_process';
+import { canStartTunnel, getTunnelUrl, parseTunnelUrl, startTunnel, stopTunnel } from './tunnel.ts';
+
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
-const { spawn } = await import('node:child_process');
-const { canStartTunnel, getTunnelUrl, parseTunnelUrl, startTunnel, stopTunnel } = await import('./tunnel.ts');
 
 describe('parseTunnelUrl', () => {
   it('从 cloudflared 输出中解析 trycloudflare 域名', () => {
@@ -56,6 +57,17 @@ describe('startTunnel', () => {
     const restarted = startTunnel(8787);
     next.stderr.emit('data', 'https://alive-2.trycloudflare.com');
     expect(await restarted).toBe('https://alive-2.trycloudflare.com');
+  });
+
+  it('stopTunnel 之后进程再输出的域名不会被缓存', async () => {
+    const proc = fakeCloudflared();
+    const started = startTunnel(8787).catch(() => null);
+    stopTunnel();
+    proc.stderr.emit('data', 'https://dead-3.trycloudflare.com');
+    proc.emit('exit', null);
+
+    expect(await started).toBeNull();
+    expect(getTunnelUrl()).toBeNull();
   });
 });
 
