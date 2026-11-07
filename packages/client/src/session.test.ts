@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PublicState, ServerMessage } from '@coup/shared';
-import { closeShowdown, initialSession, reduceSession, type Session } from './session.ts';
+import { closeShowdown, initialSession, reduceSession, rejoinIntent, type Session } from './session.ts';
 
 const players = [{ id: 'a', name: '张三', isHost: true, connected: true }];
 const table = { phase: 'choosingAction' } as PublicState;
@@ -199,5 +199,22 @@ describe('对质', () => {
       { type: 'privateState', hand: [] },
     ], open);
     expect(forfeited.showdown).toBeNull();
+  });
+});
+
+describe('断线重连', () => {
+  const id = { playerId: 'a', name: '张三', secret: 's' };
+  it.each([
+    ['刷新后本机有身份和房间码：回到原座位', id, 'ABC123', null, false, 'ABC123'],
+    ['本机没有身份：不自动加入', null, 'ABC123', null, false, null],
+    ['链接指定了别的房间：仅预填，不回旧房间', id, 'ABC123', 'DEF456', false, null],
+    ['链接就是本机保存的房间：回到原座位', id, 'ABC123', 'ABC123', false, 'ABC123'],
+    ['座位已被其他标签页接管：不抢回来', id, 'ABC123', null, true, null],
+  ])('%s', (_name, identity, savedRoom, linkRoom, replaced, expected) => {
+    expect(rejoinIntent(identity, savedRoom, linkRoom, replaced)?.roomCode ?? null).toBe(expected);
+  });
+
+  it('重连带上本机保存的身份', () => {
+    expect(rejoinIntent(id, 'ABC123', null, false)).toEqual({ type: 'joinRoom', roomCode: 'ABC123', name: '张三', playerId: 'a', secret: 's' });
   });
 });

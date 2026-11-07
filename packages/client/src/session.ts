@@ -1,5 +1,6 @@
-import type { ActionType, Card, LobbyPlayer, PublicState, Role, ServerMessage } from '@coup/shared';
+import type { ActionType, Card, ClientIntent, LobbyPlayer, PublicState, Role, ServerMessage } from '@coup/shared';
 import type { LogEntry } from './narration.ts';
+import type { Identity } from './socket.ts';
 
 export interface CountdownSnapshot {
   remainingMs: number | null;
@@ -143,6 +144,14 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
     case 'left':
       return initialSession;
   }
+}
+
+// socket 每次（重新）连上时：凭本机保存的身份自动回到保存的房间；不该自动加入时返回 null
+export function rejoinIntent(identity: Identity | null, savedRoom: string | null, linkRoom: string | null, replaced: boolean): Extract<ClientIntent, { type: 'joinRoom' }> | null {
+  if (!identity || !savedRoom) return null;
+  if (replaced) return null; // 座位已被其他标签页接管：共用的本机身份属于那个标签页，自动加入会把它踢下线
+  if (linkRoom && linkRoom !== savedRoom) return null; // 链接指定了别的房间：仅预填，不自动重连旧房间
+  return { type: 'joinRoom', roomCode: savedRoom, name: identity.name, playerId: identity.playerId, secret: identity.secret };
 }
 
 // 自己是被质疑者时：翻牌前跟上最新手牌（对质中刷新重连时，手牌在公开状态之后才到）；揭晓后记下原牌位换来的新牌
