@@ -31,7 +31,7 @@ import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { wrappedDialogFocus } from './dialog.ts';
 import { scheduleAutoDismiss } from './transient.ts';
-import { closeShowdown, initialSession, reduceSession, type CountdownSnapshot, type Session, type Showcase, type ShowdownView } from './session.ts';
+import { closeShowdown, initialSession, reduceSession, rejoinIntent, type CountdownSnapshot, type Session, type Showcase, type ShowdownView } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
 import {
   LANGUAGE_OPTIONS,
@@ -88,6 +88,8 @@ const LINK_ROOM = (() => {
 })();
 // 加入任意房间后链接已用完，之后断线重连按本地保存的房间码自动回到原座位。
 let pendingLinkRoom = LINK_ROOM;
+// 座位被其他标签页接管后，本标签页断线重连不再自动加入，直到用户在这里重新进房。
+let replaced = false;
 
 function browserStorage(): Storage | null {
   try {
@@ -159,6 +161,8 @@ export function App() {
     loadLocale(browserStorage(), navigator.languages.length ? navigator.languages : [navigator.language]),
   );
   const [identity, setIdentity] = useState(() => loadIdentity());
+  // 每次（重新）进房加一：离线时点下的选择被 send 丢弃了，选择对话框要重新挂载，不能还锁在「已发送」
+  const [joinCount, setJoinCount] = useState(0);
   const [name, setName] = useState(() => identity?.name ?? '');
   const nameRef = useRef(name);
   nameRef.current = name;
@@ -216,10 +220,12 @@ export function App() {
       switch (msg.type) {
         case 'joined':
           setError(null);
+          setJoinCount((n) => n + 1);
           setIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveRoomCode(msg.roomCode);
           pendingLinkRoom = null;
+          replaced = false;
           break;
         case 'gameStarted':
           setError(null);
@@ -245,6 +251,7 @@ export function App() {
           break;
         case 'left':
           showError({ notice: msg.reason === 'replaced' ? 'replacedRoomNotice' : 'leftRoomNotice' });
+          replaced = msg.reason === 'replaced';
           // 被其他标签页接管时，localStorage 里的身份属于新标签页，不能清掉。
           if (msg.reason === 'left') {
             clearRoomCode();
@@ -261,12 +268,8 @@ export function App() {
   // 重连：socket 重新连接后，若本地有身份与房间码，自动重新加入
   useEffect(() => {
     const onConnect = () => {
-      const id = loadIdentity();
-      const code = loadRoomCode();
-      if (pendingLinkRoom && pendingLinkRoom !== code) return; // 链接指定了别的房间：仅预填，不自动重连旧房间
-      if (id && code) {
-        send(socket, { type: 'joinRoom', roomCode: code, name: id.name, playerId: id.playerId, secret: id.secret });
-      }
+      const intent = rejoinIntent(loadIdentity(), loadRoomCode(), pendingLinkRoom, replaced);
+      if (intent) send(socket, intent);
     };
     socket.on('connect', onConnect);
     return () => {
@@ -403,7 +406,7 @@ export function App() {
 
       {showdown && publicState && (
         <ShowdownStage
-          key={showdown.id}
+          key={`${showdown.id}:${joinCount}`}
           view={showdown}
           state={publicState}
           me={me}
@@ -417,7 +420,7 @@ export function App() {
 
       {!showdown && publicState?.phase === 'choosingLoss' && publicState.lossPlayerId === me && (
         <LossStage
-          key={publicState.lossPlayerId}
+          key={`${publicState.lossPlayerId}:${joinCount}`}
           hand={hand}
           locale={locale}
           clock={clock}
@@ -428,6 +431,7 @@ export function App() {
       {/* 公开状态先于手牌到达：等抽到的牌进了手牌再开，免得先闪一下旧手牌 */}
       {!showdown && publicState?.phase === 'choosingExchange' && publicState.pending?.actorId === me && hand.length > (publicState.exchangeKeepCount ?? 0) && (
         <ExchangeStage
+          key={joinCount}
           hand={hand}
           keepCount={publicState.exchangeKeepCount ?? 0}
           locale={locale}

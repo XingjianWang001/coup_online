@@ -71,13 +71,19 @@ describe('startTunnel', () => {
   });
 });
 
+// 信任靠网络位置推断，每种入口都要列在这里：只给某一种补一个特例的修法已经漏过两次（#41、#43）
 describe('canStartTunnel', () => {
   it.each([
-    ['本机直连', '127.0.0.1', {}, true],
-    ['本机 IPv6', '::1', {}, true],
-    ['经 cloudflared 进来的访客', '127.0.0.1', { 'cf-connecting-ip': '203.0.113.9', 'x-forwarded-for': '203.0.113.9' }, false],
-    ['经反向代理进来的访客', '::ffff:127.0.0.1', { 'x-forwarded-for': '203.0.113.9' }, false],
-    ['局域网访客', '192.168.1.20', {}, false],
+    ['本机直连（非浏览器，无 Origin）', '127.0.0.1', {}, true],
+    ['Vite 开发代理', '::1', { origin: 'http://localhost:5173' }, true],
+    ['生产同源 localhost', '127.0.0.1', { origin: 'http://localhost:8787' }, true],
+    ['生产同源 127.0.0.1', '127.0.0.1', { origin: 'http://127.0.0.1:8787' }, true],
+    ['本机 IPv6', '::1', { origin: 'http://[::1]:8787' }, true],
+    ['ssh -L 转发到本机', '127.0.0.1', { origin: 'http://localhost:9000' }, true],
+    ['经 cloudflared 进来的访客', '127.0.0.1', { origin: 'https://a-b.trycloudflare.com', 'cf-connecting-ip': '203.0.113.9', 'x-forwarded-for': '203.0.113.9' }, false],
+    ['经反向代理（Caddy）进来的访客', '::ffff:127.0.0.1', { origin: 'https://coup.example', 'x-forwarded-for': '203.0.113.9' }, false],
+    ['本机浏览器里打开的其他网站', '127.0.0.1', { origin: 'https://evil.example' }, false],
+    ['局域网访客', '192.168.1.20', { origin: 'http://192.168.1.10:8787' }, false],
   ])('%s', (_name, address, headers, expected) => {
     expect(canStartTunnel({ address, headers })).toBe(expected);
   });

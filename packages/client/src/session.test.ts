@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PublicState, ServerMessage } from '@coup/shared';
-import { closeShowdown, initialSession, reduceSession, type Session } from './session.ts';
+import { closeShowdown, initialSession, reduceSession, rejoinIntent, type Session } from './session.ts';
 
 const players = [{ id: 'a', name: '张三', isHost: true, connected: true }];
 const table = { phase: 'choosingAction' } as PublicState;
@@ -143,6 +143,31 @@ describe('对质', () => {
     expect(rejoined.showdown?.hand).toEqual([duke, captain]);
   });
 
+  it('旁观对质时断线、离线期间换成自己被质疑：重连后打开新的对质，能选牌', () => {
+    // 三人局：a 质疑 b 的公爵后断线；离线期间 b 虚张、失去最后一张牌出局，轮到 a 偷钱，被 c 质疑
+    const three = (state: Partial<PublicState>, bCards: number): ServerMessage => ({
+      type: 'publicState',
+      state: { players: [{ id: 'a', alive: true, handCount: 2 }, { id: 'b', alive: bCards > 0, handCount: bCards }, { id: 'c', alive: true, handCount: 2 }], showdown: null, ...state } as PublicState,
+      remainingMs: null,
+      deadlineAt: null,
+      hostId: 'a',
+    });
+    const first = { challengerId: 'a', claimantId: 'b', role: 'duke' as const };
+    const second = { challengerId: 'c', claimantId: 'a', role: 'captain' as const };
+    const seated = ['a', 'b', 'c'].map((id) => ({ id, name: id, isHost: id === 'a', connected: true }));
+    const watching = run([
+      { type: 'events', events: [{ type: 'challenged', challengerId: 'a', targetId: 'b' }] },
+      three({ phase: 'showdown', showdown: first }, 1),
+      { type: 'privateState', hand: [duke, captain] },
+    ], holding);
+    const rejoined = run([
+      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: seated, hostId: 'a', canStartTunnel: false },
+      three({ phase: 'showdown', showdown: second }, 0),
+      { type: 'privateState', hand: [duke, captain] },
+    ], watching);
+    expect(rejoined.showdown).toMatchObject({ ...second, slots: 2, hand: [duke, captain], reveal: null });
+  });
+
   it('揭晓后舞台留到动画播完；换来的新牌记在原牌位，不再另弹换牌展示', () => {
     const s = run([resolved, push({ phase: 'choosingLoss', lossPlayerId: 'b' }), { type: 'privateState', hand: [ambassador, captain] }], open);
     expect(s.showdown).toMatchObject({ reveal: { slot: 0, role: 'duke', truth: true }, newCard: ambassador });
@@ -189,5 +214,22 @@ describe('对质', () => {
       { type: 'privateState', hand: [] },
     ], open);
     expect(forfeited.showdown).toBeNull();
+  });
+});
+
+describe('断线重连', () => {
+  const id = { playerId: 'a', name: '张三', secret: 's' };
+  it.each([
+    ['刷新后本机有身份和房间码：回到原座位', id, 'ABC123', null, false, 'ABC123'],
+    ['本机没有身份：不自动加入', null, 'ABC123', null, false, null],
+    ['链接指定了别的房间：仅预填，不回旧房间', id, 'ABC123', 'DEF456', false, null],
+    ['链接就是本机保存的房间：回到原座位', id, 'ABC123', 'ABC123', false, 'ABC123'],
+    ['座位已被其他标签页接管：不抢回来', id, 'ABC123', null, true, null],
+  ])('%s', (_name, identity, savedRoom, linkRoom, replaced, expected) => {
+    expect(rejoinIntent(identity, savedRoom, linkRoom, replaced)?.roomCode ?? null).toBe(expected);
+  });
+
+  it('重连带上本机保存的身份', () => {
+    expect(rejoinIntent(id, 'ABC123', null, false)).toEqual({ type: 'joinRoom', roomCode: 'ABC123', name: '张三', playerId: 'a', secret: 's' });
   });
 });

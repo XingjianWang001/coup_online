@@ -1,5 +1,6 @@
-import type { ActionType, Card, LobbyPlayer, PublicState, Role, ServerMessage } from '@coup/shared';
+import type { ActionType, Card, ClientIntent, LobbyPlayer, PublicState, Role, ServerMessage } from '@coup/shared';
 import type { LogEntry } from './narration.ts';
+import type { Identity } from './socket.ts';
 
 export interface CountdownSnapshot {
   remainingMs: number | null;
@@ -68,16 +69,20 @@ export const initialSession: Session = {
 export function reduceSession(s: Session, msg: ServerMessage, now: number): Session {
   switch (msg.type) {
     case 'joined':
+      // 重连时离线期间牌局可能已推进：只沿用紧接着会被 publicState / privateState 刷新的牌桌与日志，其余（对质舞台、目标选择等）一律重置
       return {
-        ...s,
+        ...initialSession,
+        publicState: s.publicState,
+        hand: s.hand,
+        log: s.log,
+        nextLogId: s.nextLogId,
+        countdown: s.countdown,
         roomCode: msg.roomCode,
         playerId: msg.playerId,
-        awaitingShowcase: null,
         hostId: msg.hostId,
         players: msg.players,
         tunnelUrl: msg.tunnelUrl ?? null,
         canStartTunnel: msg.canStartTunnel,
-        selectedAction: null, // 重连时离线期间可能已换过回合，旧的目标选择不再有效
       };
     case 'lobby':
       // 服务器只在大厅阶段发送 lobby：再来一局后清掉上一局的牌桌。
@@ -139,6 +144,14 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
     case 'left':
       return initialSession;
   }
+}
+
+// socket 每次（重新）连上时：凭本机保存的身份自动回到保存的房间；不该自动加入时返回 null
+export function rejoinIntent(identity: Identity | null, savedRoom: string | null, linkRoom: string | null, replaced: boolean): Extract<ClientIntent, { type: 'joinRoom' }> | null {
+  if (!identity || !savedRoom) return null;
+  if (replaced) return null; // 座位已被其他标签页接管：共用的本机身份属于那个标签页，自动加入会把它踢下线
+  if (linkRoom && linkRoom !== savedRoom) return null; // 链接指定了别的房间：仅预填，不自动重连旧房间
+  return { type: 'joinRoom', roomCode: savedRoom, name: identity.name, playerId: identity.playerId, secret: identity.secret };
 }
 
 // 自己是被质疑者时：翻牌前跟上最新手牌（对质中刷新重连时，手牌在公开状态之后才到）；揭晓后记下原牌位换来的新牌
