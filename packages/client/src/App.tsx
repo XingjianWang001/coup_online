@@ -161,6 +161,8 @@ export function App() {
     loadLocale(browserStorage(), navigator.languages.length ? navigator.languages : [navigator.language]),
   );
   const [identity, setIdentity] = useState(() => loadIdentity());
+  // 每次（重新）进房加一：离线时点下的选择被 send 丢弃了，选择对话框要重新挂载，不能还锁在「已发送」
+  const [joinCount, setJoinCount] = useState(0);
   const [name, setName] = useState(() => identity?.name ?? '');
   const nameRef = useRef(name);
   nameRef.current = name;
@@ -218,6 +220,7 @@ export function App() {
       switch (msg.type) {
         case 'joined':
           setError(null);
+          setJoinCount((n) => n + 1);
           setIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveIdentity({ playerId: msg.playerId, name: nameRef.current, secret: msg.secret });
           saveRoomCode(msg.roomCode);
@@ -403,7 +406,7 @@ export function App() {
 
       {showdown && publicState && (
         <ShowdownStage
-          key={showdown.id}
+          key={`${showdown.id}:${joinCount}`}
           view={showdown}
           state={publicState}
           me={me}
@@ -417,7 +420,7 @@ export function App() {
 
       {!showdown && publicState?.phase === 'choosingLoss' && publicState.lossPlayerId === me && (
         <LossStage
-          key={publicState.lossPlayerId}
+          key={`${publicState.lossPlayerId}:${joinCount}`}
           hand={hand}
           locale={locale}
           clock={clock}
@@ -428,6 +431,7 @@ export function App() {
       {/* 公开状态先于手牌到达：等抽到的牌进了手牌再开，免得先闪一下旧手牌 */}
       {!showdown && publicState?.phase === 'choosingExchange' && publicState.pending?.actorId === me && hand.length > (publicState.exchangeKeepCount ?? 0) && (
         <ExchangeStage
+          key={joinCount}
           hand={hand}
           keepCount={publicState.exchangeKeepCount ?? 0}
           locale={locale}
