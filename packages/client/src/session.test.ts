@@ -143,6 +143,16 @@ describe('对质', () => {
     expect(rejoined.showdown?.hand).toEqual([duke, captain]);
   });
 
+  it('旁观对质时断线、离线期间换成自己被质疑：重连后打开新的对质，能选牌', () => {
+    const watching = run(challenge({ ...showdown, claimantId: 'b', challengerId: 'a' }), holding);
+    const rejoined = run([
+      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players, hostId: 'a', canStartTunnel: false },
+      push({ phase: 'showdown', showdown }),
+      { type: 'privateState', hand: [duke, captain] },
+    ], watching);
+    expect(rejoined.showdown).toMatchObject({ ...showdown, hand: [duke, captain], reveal: null });
+  });
+
   it('揭晓后舞台留到动画播完；换来的新牌记在原牌位，不再另弹换牌展示', () => {
     const s = run([resolved, push({ phase: 'choosingLoss', lossPlayerId: 'b' }), { type: 'privateState', hand: [ambassador, captain] }], open);
     expect(s.showdown).toMatchObject({ reveal: { slot: 0, role: 'duke', truth: true }, newCard: ambassador });

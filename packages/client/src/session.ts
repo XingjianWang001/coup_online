@@ -68,16 +68,20 @@ export const initialSession: Session = {
 export function reduceSession(s: Session, msg: ServerMessage, now: number): Session {
   switch (msg.type) {
     case 'joined':
+      // 重连时离线期间牌局可能已推进：只沿用紧接着会被 publicState / privateState 刷新的牌桌与日志，其余（对质舞台、目标选择等）一律重置
       return {
-        ...s,
+        ...initialSession,
+        publicState: s.publicState,
+        hand: s.hand,
+        log: s.log,
+        nextLogId: s.nextLogId,
+        countdown: s.countdown,
         roomCode: msg.roomCode,
         playerId: msg.playerId,
-        awaitingShowcase: null,
         hostId: msg.hostId,
         players: msg.players,
         tunnelUrl: msg.tunnelUrl ?? null,
         canStartTunnel: msg.canStartTunnel,
-        selectedAction: null, // 重连时离线期间可能已换过回合，旧的目标选择不再有效
       };
     case 'lobby':
       // 服务器只在大厅阶段发送 lobby：再来一局后清掉上一局的牌桌。
