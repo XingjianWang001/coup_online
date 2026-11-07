@@ -455,6 +455,19 @@ describe('Room 意图错误', () => {
       .toThrow('invalidGameAction');
   });
 
+  it.each([null, 'ab', { length: 2 }])('交换时 keepIds 不是数组（%j）按非法行动拒绝', (keepIds) => {
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'exchange' });
+    room.dispatch(bob.id, 'sock2', { type: 'passChallenge' });
+    expect(room.game?.phase).toBe('choosingExchange');
+
+    expect(() => room.dispatch(alice.id, 'sock1', { type: 'resolveExchange', keepIds })).toThrow('invalidGameAction');
+  });
+
   it('即使牌局尚未开始也把未知意图映射为稳定的客户端错误', () => {
     const { room } = makeRoom();
     const alice = room.addPlayer('Alice', 'sock1');
