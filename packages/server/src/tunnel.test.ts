@@ -83,6 +83,8 @@ describe('canStartTunnel', () => {
     ['经 cloudflared 进来的访客', '127.0.0.1', { origin: 'https://a-b.trycloudflare.com', 'cf-connecting-ip': '203.0.113.9', 'x-forwarded-for': '203.0.113.9' }, false],
     ['经反向代理（Caddy）进来的访客', '::ffff:127.0.0.1', { origin: 'https://coup.example', 'x-forwarded-for': '203.0.113.9' }, false],
     ['本机浏览器里打开的其他网站', '127.0.0.1', { origin: 'https://evil.example' }, false],
+    ['本机页面同源 polling 握手（无 Origin）', '127.0.0.1', { host: 'localhost:8787' }, true],
+    ['DNS 重绑定：别的域名同源 polling 握手（无 Origin）', '127.0.0.1', { host: 'evil.test:8787' }, false],
     ['局域网访客', '192.168.1.20', { origin: 'http://192.168.1.10:8787' }, false],
   ])('%s', (_name, address, headers, expected) => {
     expect(canStartTunnel({ address, headers })).toBe(expected);

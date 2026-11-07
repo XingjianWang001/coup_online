@@ -352,6 +352,7 @@ export function App() {
 
   function leaveRoom() {
     setConfirmLeave(false);
+    clearRoomCode(); // 断线时也算数：重连后不再自动回到这个房间
     send(socket, { type: 'leaveRoom' });
   }
 

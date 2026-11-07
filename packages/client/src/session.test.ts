@@ -168,6 +168,15 @@ describe('对质', () => {
     expect(rejoined.showdown).toMatchObject({ ...second, slots: 2, hand: [duke, captain], reveal: null });
   });
 
+  it('揭晓动画期间下一场对质也已揭晓：舞台保留第一场的结果，动画播完即收起', () => {
+    // 旁观者切到后台标签页时动画停住，期间又有一场对质开始并结束
+    const first = run([resolved, push({ phase: 'choosingAction' })], open);
+    const next: ServerMessage = { type: 'events', events: [{ type: 'challengeResolved', truth: false, loserId: 'b', claimantId: 'b', role: 'contessa', slot: 1 }] };
+    const s = run([...challenge({ challengerId: 'a', claimantId: 'b', role: 'duke' }), next, push({ phase: 'choosingAction' })], first);
+    expect(s.showdown?.reveal).toBe(first.showdown?.reveal);
+    expect(closeShowdown(s).showdown).toBeNull();
+  });
+
   it('揭晓后舞台留到动画播完；换来的新牌记在原牌位，不再另弹换牌展示', () => {
     const s = run([resolved, push({ phase: 'choosingLoss', lossPlayerId: 'b' }), { type: 'privateState', hand: [ambassador, captain] }], open);
     expect(s.showdown).toMatchObject({ reveal: { slot: 0, role: 'duke', truth: true }, newCard: ambassador });

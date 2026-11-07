@@ -131,7 +131,8 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
         ...s,
         log: [...s.log, ...entries].slice(-500),
         nextLogId: s.nextLogId + entries.length,
-        showdown: s.showdown && resolved ? { ...s.showdown, reveal: { slot: resolved.slot, role: resolved.role, truth: resolved.truth } } : s.showdown,
+        // 已揭晓的舞台不再换揭晓结果：动画中途换掉会让它的结束回调永远不触发，舞台挡住整局（下一场对质在动画期间已结束）
+        showdown: s.showdown && !s.showdown.reveal && resolved ? { ...s.showdown, reveal: { slot: resolved.slot, role: resolved.role, truth: resolved.truth } } : s.showdown,
       };
     }
     case 'showdownFocus':
