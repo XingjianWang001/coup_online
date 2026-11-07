@@ -348,8 +348,9 @@ export class Room {
         case 'resolveLoss':
           return this.apply((g) => resolveLoss(g, playerId, intent.cardId as string));
         case 'resolveExchange':
-          // keepIds 来自客户端：不是数组时按保留了 0 张处理，交给引擎当非法保留拒绝，而不是在引擎里抛 TypeError
-          return this.apply((g) => resolveExchange(g, playerId, Array.isArray(intent.keepIds) ? intent.keepIds : []));
+          // keepIds 来自客户端：不是数组时在这里拒绝，而不是让引擎抛 TypeError、在日志里打一份堆栈
+          if (!Array.isArray(intent.keepIds)) throw new ClientError({ code: 'invalidGameAction' });
+          return this.apply((g) => resolveExchange(g, playerId, intent.keepIds as string[]));
         default:
           throw new ClientError({ code: 'illegalIntent' });
       }

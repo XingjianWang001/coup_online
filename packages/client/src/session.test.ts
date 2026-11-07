@@ -144,13 +144,28 @@ describe('对质', () => {
   });
 
   it('旁观对质时断线、离线期间换成自己被质疑：重连后打开新的对质，能选牌', () => {
-    const watching = run(challenge({ ...showdown, claimantId: 'b', challengerId: 'a' }), holding);
+    // 三人局：a 质疑 b 的公爵后断线；离线期间 b 虚张、失去最后一张牌出局，轮到 a 偷钱，被 c 质疑
+    const three = (state: Partial<PublicState>, bCards: number): ServerMessage => ({
+      type: 'publicState',
+      state: { players: [{ id: 'a', alive: true, handCount: 2 }, { id: 'b', alive: bCards > 0, handCount: bCards }, { id: 'c', alive: true, handCount: 2 }], showdown: null, ...state } as PublicState,
+      remainingMs: null,
+      deadlineAt: null,
+      hostId: 'a',
+    });
+    const first = { challengerId: 'a', claimantId: 'b', role: 'duke' as const };
+    const second = { challengerId: 'c', claimantId: 'a', role: 'captain' as const };
+    const seated = ['a', 'b', 'c'].map((id) => ({ id, name: id, isHost: id === 'a', connected: true }));
+    const watching = run([
+      { type: 'events', events: [{ type: 'challenged', challengerId: 'a', targetId: 'b' }] },
+      three({ phase: 'showdown', showdown: first }, 1),
+      { type: 'privateState', hand: [duke, captain] },
+    ], holding);
     const rejoined = run([
-      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players, hostId: 'a', canStartTunnel: false },
-      push({ phase: 'showdown', showdown }),
+      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: seated, hostId: 'a', canStartTunnel: false },
+      three({ phase: 'showdown', showdown: second }, 0),
       { type: 'privateState', hand: [duke, captain] },
     ], watching);
-    expect(rejoined.showdown).toMatchObject({ ...showdown, hand: [duke, captain], reveal: null });
+    expect(rejoined.showdown).toMatchObject({ ...second, slots: 2, hand: [duke, captain], reveal: null });
   });
 
   it('揭晓后舞台留到动画播完；换来的新牌记在原牌位，不再另弹换牌展示', () => {
