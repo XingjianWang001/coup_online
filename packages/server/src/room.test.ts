@@ -468,6 +468,22 @@ describe('Room 意图错误', () => {
     expect(() => room.dispatch(alice.id, 'sock1', { type: 'resolveExchange', keepIds })).toThrow('invalidGameAction');
   });
 
+  it('重复的放弃质疑或阻挡（例如双击）不报错，也不向全房间广播', () => {
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.addPlayer('Carol', 'sock3');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'tax' });
+    room.dispatch(bob.id, 'sock2', { type: 'passChallenge' });
+    events.onBroadcast.mockClear();
+
+    expect(room.dispatch(bob.id, 'sock2', { type: 'passChallenge' })).toEqual([]);
+    expect(events.onBroadcast).not.toHaveBeenCalled();
+    expect(room.game?.passed).toEqual([bob.id]);
+  });
+
   it('即使牌局尚未开始也把未知意图映射为稳定的客户端错误', () => {
     const { room } = makeRoom();
     const alice = room.addPlayer('Alice', 'sock1');
