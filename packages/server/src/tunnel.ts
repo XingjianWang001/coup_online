@@ -28,7 +28,9 @@ export function getTunnelUrl(): string | null {
 export function canStartTunnel(handshake: { address: string; headers: IncomingHttpHeaders }): boolean {
   const { address, headers } = handshake;
   const loopback = address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
-  return loopback && !headers['cf-connecting-ip'] && !headers['x-forwarded-for'];
+  // WebSocket 不受 CORS 限制，本机浏览器里任何网页都能连上来：浏览器发起的握手还得来自本机页面
+  const localPage = headers.origin === undefined || /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(headers.origin);
+  return loopback && localPage && !headers['cf-connecting-ip'] && !headers['x-forwarded-for'];
 }
 
 // 启动（或复用）quick tunnel，resolve 临时域名。约 20 秒超时则终止子进程并 reject。
