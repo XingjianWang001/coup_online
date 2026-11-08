@@ -184,7 +184,8 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
     }
     case 'startTunnel': {
       if (!canStartTunnel(socket.handshake)) throw new ClientError({ code: 'tunnelUnauthorized' });
-      startTunnel(PORT)
+      // 隧道断了：所有页面收起失效的加入链接，房主可以重新生成
+      startTunnel(PORT, () => io.emit('tunnelUrl', { url: null }))
         .then((url) => socket.emit('tunnelUrl', { url }))
         .catch((error) => {
           console.error('tunnel startup error', error);

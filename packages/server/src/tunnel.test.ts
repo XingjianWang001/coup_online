@@ -59,6 +59,22 @@ describe('startTunnel', () => {
     expect(await restarted).toBe('https://alive-2.trycloudflare.com');
   });
 
+  it('已给出域名的隧道退出时通知持有链接的页面；启动失败不通知', async () => {
+    const onClosed = vi.fn();
+    const failed = fakeCloudflared();
+    const failing = startTunnel(8787, onClosed).catch(() => null);
+    failed.emit('exit', 1);
+    await failing;
+    expect(onClosed).not.toHaveBeenCalled();
+
+    const proc = fakeCloudflared();
+    const started = startTunnel(8787, onClosed);
+    proc.stderr.emit('data', 'https://dead-4.trycloudflare.com');
+    await started;
+    proc.emit('exit', 1);
+    expect(onClosed).toHaveBeenCalledTimes(1);
+  });
+
   it('stopTunnel 之后进程再输出的域名不会被缓存', async () => {
     const proc = fakeCloudflared();
     const started = startTunnel(8787).catch(() => null);
