@@ -98,7 +98,7 @@ function broadcastLobby(room: Room): void {
 // 房间状态变化后的唯一推送：先推事件（开局单独推 gameStarted），再按阶段推大厅或牌局状态。
 function publish(room: Room, events: GameEvent[]): void {
   const started = events.find((e) => e.type === 'started');
-  if (started) io.to(room.code).emit('gameStarted', { turnOrder: started.turnOrder });
+  if (started) io.to(room.code).emit('gameStarted', { turnOrder: started.turnOrder, gameNumber: room.gameNumber });
   else if (events.length) io.to(room.code).emit('events', { events });
   if (room.game) broadcast(room);
   else broadcastLobby(room);
@@ -116,6 +116,7 @@ function emitJoined(socket: Socket, room: Room, player: RoomPlayer): void {
     hostId: room.hostId,
     tunnelUrl: getTunnelUrl() ?? undefined,
     canStartTunnel: canStartTunnel(socket.handshake),
+    gameNumber: room.gameNumber,
   });
   publish(room, []);
 }

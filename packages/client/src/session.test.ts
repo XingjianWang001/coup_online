@@ -10,8 +10,8 @@ function run(messages: ServerMessage[], from: Session = initialSession): Session
 }
 
 const inGame = run([
-  { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players, hostId: 'a', tunnelUrl: 'https://t', canStartTunnel: true },
-  { type: 'gameStarted', turnOrder: ['a'] },
+  { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players, hostId: 'a', tunnelUrl: 'https://t', canStartTunnel: true, gameNumber: 0 },
+  { type: 'gameStarted', turnOrder: ['a'], gameNumber: 1 },
   { type: 'publicState', state: table, remainingMs: 1000, deadlineAt: 5000, hostId: 'a' },
   { type: 'privateState', hand: [{ id: 'c1', role: 'duke' }] },
   { type: 'events', events: [{ type: 'started', turnOrder: ['a'] }] },
@@ -22,8 +22,8 @@ describe('房间会话', () => {
   const pair = [players[0], { id: 'b', name: '李四', isHost: false, connected: true }];
   const myTurn = (selectedAction: Session['selectedAction']) => ({
     ...run([
-      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: pair, hostId: 'a', canStartTunnel: true },
-      { type: 'gameStarted', turnOrder: ['a', 'b'] },
+      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: pair, hostId: 'a', canStartTunnel: true, gameNumber: 0 },
+      { type: 'gameStarted', turnOrder: ['a', 'b'], gameNumber: 1 },
       { type: 'publicState', state: { ...table, currentPlayerId: 'a' }, remainingMs: 1000, deadlineAt: 5000, hostId: 'a' },
       { type: 'privateState', hand: [{ id: 'c1', role: 'duke' }] },
     ]),
@@ -45,7 +45,7 @@ describe('房间会话', () => {
 
   it('断线重连后即使又轮到自己，也收起离线前的目标选择', () => {
     const s = run([
-      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: pair, hostId: 'a', canStartTunnel: true },
+      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: pair, hostId: 'a', canStartTunnel: true, gameNumber: 1 },
       { type: 'publicState', state: { ...table, currentPlayerId: 'a' }, remainingMs: 1000, deadlineAt: 9000, hostId: 'a' },
       { type: 'privateState', hand: [{ id: 'c1', role: 'duke' }] },
     ], myTurn('assassinate'));
@@ -68,7 +68,7 @@ describe('房间会话', () => {
 
   it('开局重置日志，后续事件的日志 id 从 0 递增', () => {
     const s = run([
-      { type: 'gameStarted', turnOrder: ['a'] },
+      { type: 'gameStarted', turnOrder: ['a'], gameNumber: 1 },
       { type: 'events', events: [{ type: 'started', turnOrder: ['a'] }, { type: 'started', turnOrder: ['a'] }] },
       { type: 'events', events: [{ type: 'started', turnOrder: ['a'] }] },
     ], inGame);
@@ -82,15 +82,30 @@ describe('房间会话', () => {
 
   it('开局后收到手牌即发牌展示；刷新重连只收到手牌时不展示', () => {
     const hand = [{ id: 'c1', role: 'duke' as const }, { id: 'c2', role: 'captain' as const }];
-    const dealt = run([{ type: 'gameStarted', turnOrder: ['a'] }, { type: 'privateState', hand }], inGame);
+    const dealt = run([{ type: 'gameStarted', turnOrder: ['a'], gameNumber: 1 }, { type: 'privateState', hand }], inGame);
     expect(dealt.showcase).toEqual({ kind: 'deal', cards: hand });
     expect(run([{ type: 'privateState', hand }], dealt).showcase).toEqual({ kind: 'deal', cards: hand });
     const rejoined = run([
-      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players, hostId: 'a', canStartTunnel: false },
+      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players, hostId: 'a', canStartTunnel: false, gameNumber: 1 },
       { type: 'publicState', state: table, remainingMs: 1000, deadlineAt: 5000, hostId: 'a' },
       { type: 'privateState', hand },
     ]);
     expect(rejoined.showcase).toBeNull();
+  });
+
+  it('离线期间上一局结束、再来一局已开局：重连后不沿用上一局的日志；同一局内重连仍保留', () => {
+    // a 看到上一局结束后断线；宽限期内房主再来一局并开局，a 错过 lobby 与 gameStarted
+    const ended = run([
+      { type: 'events', events: [{ type: 'influenceLost', playerId: 'b', role: 'duke' }, { type: 'eliminated', playerId: 'b' }, { type: 'gameOver', winnerId: 'a' }] },
+      { type: 'publicState', state: { ...table, phase: 'gameOver' }, remainingMs: null, deadlineAt: null, hostId: 'a' },
+    ], inGame);
+    const rejoin = (gameNumber: number) => run([
+      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players, hostId: 'a', canStartTunnel: false, gameNumber },
+      { type: 'publicState', state: table, remainingMs: 1000, deadlineAt: 5000, hostId: 'a' },
+      { type: 'privateState', hand: [{ id: 'c1', role: 'duke' }] },
+    ], ended);
+    expect(rejoin(2).log).toEqual([]);
+    expect(rejoin(1).log).toEqual(ended.log);
   });
 
   it('牌局结束或自己被淘汰时，收起仍开着的发牌展示', () => {
@@ -136,7 +151,7 @@ describe('对质', () => {
 
   it('被质疑者在对质中刷新重连，手牌到达后仍能选牌', () => {
     const rejoined = run([
-      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players, hostId: 'a', canStartTunnel: false },
+      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players, hostId: 'a', canStartTunnel: false, gameNumber: 1 },
       push({ phase: 'showdown', showdown }),
       { type: 'privateState', hand: [duke, captain] },
     ], { ...initialSession });
@@ -161,7 +176,7 @@ describe('对质', () => {
       { type: 'privateState', hand: [duke, captain] },
     ], holding);
     const rejoined = run([
-      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: seated, hostId: 'a', canStartTunnel: false },
+      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: seated, hostId: 'a', canStartTunnel: false, gameNumber: 1 },
       three({ phase: 'showdown', showdown: second }, 0),
       { type: 'privateState', hand: [duke, captain] },
     ], watching);
