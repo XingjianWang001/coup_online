@@ -59,6 +59,22 @@ describe('startTunnel', () => {
     expect(await restarted).toBe('https://alive-2.trycloudflare.com');
   });
 
+  it('已给出域名的隧道退出时通知持有链接的页面；启动失败不通知', async () => {
+    const onClosed = vi.fn();
+    const failed = fakeCloudflared();
+    const failing = startTunnel(8787, onClosed).catch(() => null);
+    failed.emit('exit', 1);
+    await failing;
+    expect(onClosed).not.toHaveBeenCalled();
+
+    const proc = fakeCloudflared();
+    const started = startTunnel(8787, onClosed);
+    proc.stderr.emit('data', 'https://dead-4.trycloudflare.com');
+    await started;
+    proc.emit('exit', 1);
+    expect(onClosed).toHaveBeenCalledTimes(1);
+  });
+
   it('stopTunnel 之后进程再输出的域名不会被缓存', async () => {
     const proc = fakeCloudflared();
     const started = startTunnel(8787).catch(() => null);
@@ -83,6 +99,8 @@ describe('canStartTunnel', () => {
     ['经 cloudflared 进来的访客', '127.0.0.1', { origin: 'https://a-b.trycloudflare.com', 'cf-connecting-ip': '203.0.113.9', 'x-forwarded-for': '203.0.113.9' }, false],
     ['经反向代理（Caddy）进来的访客', '::ffff:127.0.0.1', { origin: 'https://coup.example', 'x-forwarded-for': '203.0.113.9' }, false],
     ['本机浏览器里打开的其他网站', '127.0.0.1', { origin: 'https://evil.example' }, false],
+    ['本机页面同源 polling 握手（无 Origin）', '127.0.0.1', { host: 'localhost:8787' }, true],
+    ['DNS 重绑定：别的域名同源 polling 握手（无 Origin）', '127.0.0.1', { host: 'evil.test:8787' }, false],
     ['局域网访客', '192.168.1.20', { origin: 'http://192.168.1.10:8787' }, false],
   ])('%s', (_name, address, headers, expected) => {
     expect(canStartTunnel({ address, headers })).toBe(expected);
