@@ -725,8 +725,10 @@ const FILINGS: Record<string, { icp: string; police?: { code: string; label: str
     icp: '粤ICP备2026157913号-1',
     police: { code: '44010602017448', label: '粤公网安备44010602017448号' },
   },
-  // 公安联网备案审核中，批下后补 police
-  'coup.surwhy.com': { icp: '粤ICP备2026157913号-2' },
+  'coup.surwhy.com': {
+    icp: '粤ICP备2026157913号-2',
+    police: { code: '44010602017609', label: '粤公网安备44010602017609号' },
+  },
 };
 
 function FilingFooter() {
