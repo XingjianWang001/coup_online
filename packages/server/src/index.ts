@@ -7,7 +7,7 @@ import { Server, type Socket } from 'socket.io';
 import { InMemoryGameRepository } from './repository.ts';
 import { Room, type RoomPlayer } from './room.ts';
 import { canStartTunnel, getTunnelUrl, startTunnel, stopTunnel } from './tunnel.ts';
-import type { ClientIntent, GameEvent } from '@coup/shared';
+import type { ClientIntent, GameEvent, ServerError } from '@coup/shared';
 import { ClientError, toServerError } from './errors.ts';
 import { reserveRoomCreation } from './room-limits.ts';
 
@@ -104,6 +104,11 @@ function publish(room: Room, events: GameEvent[]): void {
   else broadcastLobby(room);
 }
 
+// 所有错误都从这里发：带上这条连接是否还在房间里，客户端据此决定会话是否结束
+function emitError(socket: Socket, error: ServerError): void {
+  socket.emit('error', { ...error, inRoom: rooms.has(socket.data.roomCode) });
+}
+
 function emitJoined(socket: Socket, room: Room, player: RoomPlayer): void {
   socket.join(room.code);
   socket.data.roomCode = room.code;
@@ -130,7 +135,7 @@ io.on('connection', (socket) => {
     try {
       handleIntent(socket, raw);
     } catch (e) {
-      socket.emit('error', toServerError(e));
+      emitError(socket, toServerError(e));
     }
   });
 
@@ -190,7 +195,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         .then((url) => socket.emit('tunnelUrl', { url }))
         .catch((error) => {
           console.error('tunnel startup error', error);
-          socket.emit('error', { code: 'tunnelStartup' });
+          emitError(socket, { code: 'tunnelStartup' });
         });
       break;
     }
