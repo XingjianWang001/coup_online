@@ -88,6 +88,7 @@ export class Room {
   hostId: string;
   players = new Map<string, RoomPlayer>();
   game: GameState | null = null;
+  gameNumber = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastFocusAt = 0;
   private deadlineAt: number | null = null;
@@ -242,6 +243,7 @@ export class Room {
     this.game = createGame(entries.map((p) => ({ id: p.id, name: p.name })), {
       startingPlayerId,
     });
+    this.gameNumber += 1;
     this.repo.save(this.code, this.game);
     this.startTimer(ACTION_TIMEOUT_MS);
     const events: GameEvent[] = [{ type: 'started', turnOrder: entries.map((p) => p.id) }];

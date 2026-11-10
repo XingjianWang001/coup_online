@@ -38,6 +38,7 @@ export interface Session {
   tunnelUrl: string | null;
   canStartTunnel: boolean;
   tunnelLoading: boolean;
+  gameNumber: number; // 日志属于房间里的第几局
   selectedAction: ActionType | null;
   // 下一份手牌到达时要展示的发牌类型
   awaitingShowcase: Showcase['kind'] | null;
@@ -58,6 +59,7 @@ export const initialSession: Session = {
   tunnelUrl: null,
   canStartTunnel: false,
   tunnelLoading: false,
+  gameNumber: 0,
   selectedAction: null,
   awaitingShowcase: null,
   showcase: null,
@@ -74,8 +76,10 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
         ...initialSession,
         publicState: s.publicState,
         hand: s.hand,
-        log: s.log,
+        // 离线期间再来一局并已开局（错过了 lobby 与 gameStarted）：上一局的日志不能带进这一局
+        log: msg.gameNumber === s.gameNumber ? s.log : [],
         nextLogId: s.nextLogId,
+        gameNumber: msg.gameNumber,
         countdown: s.countdown,
         roomCode: msg.roomCode,
         playerId: msg.playerId,
@@ -100,7 +104,7 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
         showdown: null,
       };
     case 'gameStarted':
-      return { ...s, log: [], nextLogId: 0, awaitingShowcase: 'deal' };
+      return { ...s, log: [], nextLogId: 0, gameNumber: msg.gameNumber, awaitingShowcase: 'deal' };
     case 'publicState': {
       // 牌局结束或自己被淘汰：手里已没有可看的牌，收起发牌展示
       const out = msg.state.phase === 'gameOver' || msg.state.players?.find((p) => p.id === s.playerId)?.alive === false;
@@ -138,8 +142,8 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
     case 'showdownFocus':
       return s.showdown && !s.showdown.reveal ? { ...s, showdown: { ...s.showdown, focus: msg.slot } } : s;
     case 'error':
-      // 房间已被释放（服务器重启、空房回收）：会话随之结束，退回入口。
-      return msg.code === 'roomNotFound' ? initialSession : { ...s, tunnelLoading: false };
+      // 连接已不在房间里（房间已释放；或重连时座位已被移出、牌局已开始或房间已满）：会话随之结束，退回入口。
+      return msg.inRoom ? { ...s, tunnelLoading: false } : initialSession;
     case 'tunnelUrl':
       return { ...s, tunnelUrl: msg.url, tunnelLoading: false };
     case 'left':

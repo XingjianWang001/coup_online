@@ -29,7 +29,7 @@ import { actionName, coinLegend, roleDescription, roleName, roleShortName, ROLES
 import { describeCountdown, describePending, describeWaiting, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, remainingSinceReceipt } from './narration.ts';
 import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
-import { wrappedDialogFocus } from './dialog.ts';
+import { strayFocusTarget, wrappedDialogFocus } from './dialog.ts';
 import { scheduleAutoDismiss } from './transient.ts';
 import { closeShowdown, initialSession, reduceSession, rejoinIntent, type CountdownSnapshot, type Session, type Showcase, type ShowdownView } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
@@ -134,12 +134,19 @@ function useDialogFocus(
         target.focus();
       }
     };
+    // 焦点无论怎么跑到对话框外（Tab 跳过单选组、旁观对质时没有可聚焦的控件……）都拉回来，否则键盘能操作被遮住的牌桌
+    const onFocusIn = (event: FocusEvent) => {
+      if (!dialogRef.current) return;
+      strayFocusTarget(document.querySelectorAll('[aria-modal="true"]'), dialogRef.current, event.target, initialFocusRef.current)?.focus();
+    };
     document.body.style.overflow = 'hidden';
     document.addEventListener('keydown', onKeyDown);
-    initialFocusRef.current?.focus();
+    document.addEventListener('focusin', onFocusIn);
+    (initialFocusRef.current ?? dialogRef.current)?.focus();
     return () => {
       document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('focusin', onFocusIn);
       previouslyFocused?.focus();
     };
   }, [dialogRef, initialFocusRef]);
@@ -241,10 +248,8 @@ export function App() {
           break;
         case 'error':
           showError(parseServerError(msg));
-          if (msg.code === 'roomNotFound') {
-            clearRoomCode();
-            setConfirmLeave(false);
-          }
+          if (msg.code === 'roomNotFound') clearRoomCode();
+          if (!msg.inRoom) setConfirmLeave(false);
           break;
         case 'tunnelUrl':
           setError(null);
