@@ -71,15 +71,17 @@ export function parseServerError(value: unknown): ServerError {
 
 // 服务器 → 客户端 的消息
 export type ServerMessage =
-  | { type: 'joined'; roomCode: string; playerId: string; secret: string; players: LobbyPlayer[]; hostId: string; tunnelUrl?: string; canStartTunnel: boolean }
-  | { type: 'tunnelUrl'; url: string }
+  | { type: 'joined'; roomCode: string; playerId: string; secret: string; players: LobbyPlayer[]; hostId: string; tunnelUrl?: string; canStartTunnel: boolean; gameNumber: number }
+  | { type: 'tunnelUrl'; url: string | null } // null：隧道已断开，之前的链接失效
   | { type: 'lobby'; players: LobbyPlayer[]; hostId: string }
-  | { type: 'gameStarted'; turnOrder: string[] }
+  // gameNumber：房间里第几局（尚未开局为 0），重连时据此判断离线期间是否已换了一局
+  | { type: 'gameStarted'; turnOrder: string[]; gameNumber: number }
   | { type: 'publicState'; state: PublicState; remainingMs: number | null; deadlineAt: number | null; hostId: string }
   | { type: 'privateState'; hand: Card[] }
   | { type: 'events'; events: GameEvent[] }
   | { type: 'showdownFocus'; slot: number | null }
-  | ({ type: 'error' } & ServerError)
+  // inRoom：这条连接此刻是否还在房间里。不在（房间已释放、重连时座位已不在……）则会话结束，客户端不必按错误码猜
+  | ({ type: 'error'; inRoom: boolean } & ServerError)
   | { type: 'left'; reason: 'left' | 'replaced' };
 
 export type { ActionType, GameEvent, PublicState, PrivateState, Role, Card };

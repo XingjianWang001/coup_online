@@ -88,6 +88,7 @@ export class Room {
   hostId: string;
   players = new Map<string, RoomPlayer>();
   game: GameState | null = null;
+  gameNumber = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastFocusAt = 0;
   private deadlineAt: number | null = null;
@@ -242,6 +243,7 @@ export class Room {
     this.game = createGame(entries.map((p) => ({ id: p.id, name: p.name })), {
       startingPlayerId,
     });
+    this.gameNumber += 1;
     this.repo.save(this.code, this.game);
     this.startTimer(ACTION_TIMEOUT_MS);
     const events: GameEvent[] = [{ type: 'started', turnOrder: entries.map((p) => p.id) }];
@@ -321,6 +323,10 @@ export class Room {
   // 客户端意图分发
   dispatch(playerId: string, socketId: string, intent: { type: string } & Record<string, unknown>): GameEvent[] {
     this.requireCurrentConnection(playerId, socketId);
+    // 重复的放弃（例如双击）不改变牌局：既不报错，也不广播，免得恶意客户端借此让全房间不停重渲染
+    const g = this.game;
+    const window = intent.type === 'passChallenge' ? 'awaitingChallenge' : intent.type === 'passBlock' ? 'awaitingBlock' : null;
+    if (window && g?.phase === window && g.passed.includes(playerId)) return [];
     const events = this.applyIntent(playerId, intent);
     this.events.onBroadcast(this, events);
     return events;
@@ -344,6 +350,8 @@ export class Room {
         case 'resolveLoss':
           return this.apply((g) => resolveLoss(g, playerId, intent.cardId as string));
         case 'resolveExchange':
+          // keepIds 来自客户端：不是数组时在这里拒绝，而不是让引擎抛 TypeError、在日志里打一份堆栈
+          if (!Array.isArray(intent.keepIds)) throw new ClientError({ code: 'invalidGameAction' });
           return this.apply((g) => resolveExchange(g, playerId, intent.keepIds as string[]));
         default:
           throw new ClientError({ code: 'illegalIntent' });

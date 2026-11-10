@@ -1,5 +1,6 @@
-import type { ActionType, Card, LobbyPlayer, PublicState, Role, ServerMessage } from '@coup/shared';
+import type { ActionType, Card, ClientIntent, LobbyPlayer, PublicState, Role, ServerMessage } from '@coup/shared';
 import type { LogEntry } from './narration.ts';
+import type { Identity } from './socket.ts';
 
 export interface CountdownSnapshot {
   remainingMs: number | null;
@@ -37,6 +38,7 @@ export interface Session {
   tunnelUrl: string | null;
   canStartTunnel: boolean;
   tunnelLoading: boolean;
+  gameNumber: number; // 日志属于房间里的第几局
   selectedAction: ActionType | null;
   // 下一份手牌到达时要展示的发牌类型
   awaitingShowcase: Showcase['kind'] | null;
@@ -57,6 +59,7 @@ export const initialSession: Session = {
   tunnelUrl: null,
   canStartTunnel: false,
   tunnelLoading: false,
+  gameNumber: 0,
   selectedAction: null,
   awaitingShowcase: null,
   showcase: null,
@@ -68,16 +71,22 @@ export const initialSession: Session = {
 export function reduceSession(s: Session, msg: ServerMessage, now: number): Session {
   switch (msg.type) {
     case 'joined':
+      // 重连时离线期间牌局可能已推进：只沿用紧接着会被 publicState / privateState 刷新的牌桌与日志，其余（对质舞台、目标选择等）一律重置
       return {
-        ...s,
+        ...initialSession,
+        publicState: s.publicState,
+        hand: s.hand,
+        // 离线期间再来一局并已开局（错过了 lobby 与 gameStarted）：上一局的日志不能带进这一局
+        log: msg.gameNumber === s.gameNumber ? s.log : [],
+        nextLogId: s.nextLogId,
+        gameNumber: msg.gameNumber,
+        countdown: s.countdown,
         roomCode: msg.roomCode,
         playerId: msg.playerId,
-        awaitingShowcase: null,
         hostId: msg.hostId,
         players: msg.players,
         tunnelUrl: msg.tunnelUrl ?? null,
         canStartTunnel: msg.canStartTunnel,
-        selectedAction: null, // 重连时离线期间可能已换过回合，旧的目标选择不再有效
       };
     case 'lobby':
       // 服务器只在大厅阶段发送 lobby：再来一局后清掉上一局的牌桌。
@@ -95,7 +104,7 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
         showdown: null,
       };
     case 'gameStarted':
-      return { ...s, log: [], nextLogId: 0, awaitingShowcase: 'deal' };
+      return { ...s, log: [], nextLogId: 0, gameNumber: msg.gameNumber, awaitingShowcase: 'deal' };
     case 'publicState': {
       // 牌局结束或自己被淘汰：手里已没有可看的牌，收起发牌展示
       const out = msg.state.phase === 'gameOver' || msg.state.players?.find((p) => p.id === s.playerId)?.alive === false;
@@ -126,19 +135,28 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
         ...s,
         log: [...s.log, ...entries].slice(-500),
         nextLogId: s.nextLogId + entries.length,
-        showdown: s.showdown && resolved ? { ...s.showdown, reveal: { slot: resolved.slot, role: resolved.role, truth: resolved.truth } } : s.showdown,
+        // 已揭晓的舞台不再换揭晓结果：动画中途换掉会让它的结束回调永远不触发，舞台挡住整局（下一场对质在动画期间已结束）
+        showdown: s.showdown && !s.showdown.reveal && resolved ? { ...s.showdown, reveal: { slot: resolved.slot, role: resolved.role, truth: resolved.truth } } : s.showdown,
       };
     }
     case 'showdownFocus':
       return s.showdown && !s.showdown.reveal ? { ...s, showdown: { ...s.showdown, focus: msg.slot } } : s;
     case 'error':
-      // 房间已被释放（服务器重启、空房回收）：会话随之结束，退回入口。
-      return msg.code === 'roomNotFound' ? initialSession : { ...s, tunnelLoading: false };
+      // 连接已不在房间里（房间已释放；或重连时座位已被移出、牌局已开始或房间已满）：会话随之结束，退回入口。
+      return msg.inRoom ? { ...s, tunnelLoading: false } : initialSession;
     case 'tunnelUrl':
       return { ...s, tunnelUrl: msg.url, tunnelLoading: false };
     case 'left':
       return initialSession;
   }
+}
+
+// socket 每次（重新）连上时：凭本机保存的身份自动回到保存的房间；不该自动加入时返回 null
+export function rejoinIntent(identity: Identity | null, savedRoom: string | null, linkRoom: string | null, replaced: boolean): Extract<ClientIntent, { type: 'joinRoom' }> | null {
+  if (!identity || !savedRoom) return null;
+  if (replaced) return null; // 座位已被其他标签页接管：共用的本机身份属于那个标签页，自动加入会把它踢下线
+  if (linkRoom && linkRoom !== savedRoom) return null; // 链接指定了别的房间：仅预填，不自动重连旧房间
+  return { type: 'joinRoom', roomCode: savedRoom, name: identity.name, playerId: identity.playerId, secret: identity.secret };
 }
 
 // 自己是被质疑者时：翻牌前跟上最新手牌（对质中刷新重连时，手牌在公开状态之后才到）；揭晓后记下原牌位换来的新牌

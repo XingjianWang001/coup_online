@@ -8,7 +8,9 @@ export function connect(): Socket {
 }
 
 export function send(socket: Socket, intent: ClientIntent): void {
-  socket.emit('intent', intent);
+  // 断线时 socket.io 会缓存 emit，重连后先于自动重新加入补发：服务器把它当成不在房间的连接（roomNotFound 清掉会话）。只有进房意图可以等重连；
+  // 离开房间也等重连：服务器对不在房间的连接照样回 left，客户端借此退回入口（房间号已先清掉，不会自动重新加入）
+  if (socket.connected || intent.type === 'createRoom' || intent.type === 'joinRoom' || intent.type === 'leaveRoom') socket.emit('intent', intent);
 }
 
 // 注册消息监听，返回清理函数（移除全部监听）
