@@ -142,8 +142,8 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
     case 'showdownFocus':
       return s.showdown && !s.showdown.reveal ? { ...s, showdown: { ...s.showdown, focus: msg.slot } } : s;
     case 'error':
-      // 房间已被释放（服务器重启、空房回收）：会话随之结束，退回入口。
-      return msg.code === 'roomNotFound' ? initialSession : { ...s, tunnelLoading: false };
+      // 连接已不在房间里（房间已释放；或重连时座位已被移出、牌局已开始或房间已满）：会话随之结束，退回入口。
+      return msg.inRoom ? { ...s, tunnelLoading: false } : initialSession;
     case 'tunnelUrl':
       return { ...s, tunnelUrl: msg.url, tunnelLoading: false };
     case 'left':

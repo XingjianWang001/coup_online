@@ -62,8 +62,21 @@ describe('房间会话', () => {
   });
 
   it('房间已被释放时回到初始会话，其它错误不影响会话', () => {
-    expect(run([{ type: 'error', code: 'roomNotFound' }], inGame)).toEqual(initialSession);
-    expect(run([{ type: 'error', code: 'hostOnly' }], inGame).roomCode).toBe('ABC123');
+    expect(run([{ type: 'error', code: 'roomNotFound', inRoom: false }], inGame)).toEqual(initialSession);
+    expect(run([{ type: 'error', code: 'hostOnly', inRoom: true }], inGame).roomCode).toBe('ABC123');
+  });
+
+  it('大厅里离线超过宽限期被移出、房主随后开局：重连时自动加入失败，退回入口；房主双击开始的报错不影响会话', () => {
+    const lobby = run([{ type: 'lobby', players: [...players, { id: 'b', name: '李四', isHost: false, connected: true }], hostId: 'a' }], {
+      ...initialSession,
+      roomCode: 'ABC123',
+      playerId: 'b',
+      hostId: 'a',
+    });
+    // 服务器顺序：b 的新连接发 joinRoom → 座位已不在、牌局已开始 → 只回一条 error，不发 joined
+    expect(run([{ type: 'error', code: 'gameAlreadyStarted', inRoom: false }], lobby)).toEqual(initialSession);
+    // 房主双击「开始」：第一次开局的 gameStarted → publicState → privateState 之后，第二次回 error
+    expect(run([{ type: 'error', code: 'gameAlreadyStarted', inRoom: true }], inGame)).toMatchObject({ roomCode: 'ABC123', publicState: table });
   });
 
   it('开局重置日志，后续事件的日志 id 从 0 递增', () => {

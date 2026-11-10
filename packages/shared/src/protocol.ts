@@ -80,7 +80,8 @@ export type ServerMessage =
   | { type: 'privateState'; hand: Card[] }
   | { type: 'events'; events: GameEvent[] }
   | { type: 'showdownFocus'; slot: number | null }
-  | ({ type: 'error' } & ServerError)
+  // inRoom：这条连接此刻是否还在房间里。不在（房间已释放、重连时座位已不在……）则会话结束，客户端不必按错误码猜
+  | ({ type: 'error'; inRoom: boolean } & ServerError)
   | { type: 'left'; reason: 'left' | 'replaced' };
 
 export type { ActionType, GameEvent, PublicState, PrivateState, Role, Card };
