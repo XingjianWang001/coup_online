@@ -248,10 +248,8 @@ export function App() {
           break;
         case 'error':
           showError(parseServerError(msg));
-          if (msg.code === 'roomNotFound') {
-            clearRoomCode();
-            setConfirmLeave(false);
-          }
+          if (msg.code === 'roomNotFound') clearRoomCode();
+          if (!msg.inRoom) setConfirmLeave(false);
           break;
         case 'tunnelUrl':
           setError(null);
