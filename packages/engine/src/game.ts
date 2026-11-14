@@ -250,7 +250,7 @@ export function createGame(
     exchangeKeepCount: null,
     passed: [],
     winnerId: null,
-    postGameRevealedIds: [],
+    postGameRevealedSlots: [],
   };
 }
 
@@ -568,8 +568,8 @@ export function revealPostGameCard(state: GameState, playerId: string, cardId: s
   const p = getPlayer(state, playerId);
   const slot = p.hand.findIndex((c) => c.id === cardId);
   if (slot < 0) throw new GameRuleError('card not in hand');
-  if (state.postGameRevealedIds.includes(cardId)) throw new GameRuleError('card already revealed');
-  state.postGameRevealedIds.push(cardId);
+  if (state.postGameRevealedSlots.includes(slot)) throw new GameRuleError('card already revealed');
+  state.postGameRevealedSlots.push(slot);
   return [{ type: 'postGameRevealed', playerId, role: p.hand[slot].role, slot }];
 }
 
@@ -583,10 +583,7 @@ export function publicState(state: GameState): PublicState {
       handCount: p.hand.length,
       revealed: p.revealed.map((c) => c.role),
       alive: p.alive,
-      postGameRevealed: state.postGameRevealedIds.flatMap((id) => {
-        const slot = p.hand.findIndex((c) => c.id === id);
-        return slot < 0 ? [] : [{ slot, role: p.hand[slot].role }];
-      }),
+      postGameRevealed: p.id === state.winnerId ? state.postGameRevealedSlots.map((slot) => ({ slot, role: p.hand[slot].role })) : [],
     })),
     currentPlayerId: state.currentPlayerId,
     pending: state.pending

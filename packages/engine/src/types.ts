@@ -78,7 +78,7 @@ export interface GameState {
   exchangeKeepCount: number | null; // 大使交换需保留的牌数
   passed: string[]; // 当前质疑/阻挡窗口中已放弃的玩家 id
   winnerId: string | null;
-  postGameRevealedIds: string[]; // 赛后揭晓：获胜者已公开的暗牌 id
+  postGameRevealedSlots: number[]; // 赛后揭晓：获胜者已公开的暗牌位置（牌局结束后手牌不再变动）
 }
 
 export type GameEvent =
