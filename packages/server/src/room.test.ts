@@ -570,6 +570,41 @@ describe('Room 牌局结束后', () => {
     expect(room.game?.players).toHaveLength(4);
   });
 
+  const crowned = (room: Room) => room.playerList.filter((p) => p.isPreviousWinner).map((p) => p.name);
+
+  it('再来一局后大厅阶段以皇冠标出上局获胜者', () => {
+    const { room, alice } = finishedRoom();
+    room.rematch(alice.id, 'sock1');
+    expect(crowned(room)).toEqual(['Bob']);
+  });
+
+  it('上局获胜者离开房间即清除皇冠，重新加入也不再带皇冠', () => {
+    const { room, alice, bob } = finishedRoom();
+    room.rematch(alice.id, 'sock1');
+    room.leavePlayer(bob.id, 'sock2');
+    room.addPlayer('Bob', 'sock2b', { id: bob.id, secret: bob.secret });
+    expect(crowned(room)).toEqual([]);
+  });
+
+  it('上局获胜者断线重连后保留皇冠', () => {
+    vi.useFakeTimers();
+    const { room, alice, bob } = finishedRoom();
+    room.markDisconnected(bob.id, 'sock2');
+    room.rematch(alice.id, 'sock1');
+    room.addPlayer('Bob', 'sock2b', { id: bob.id, secret: bob.secret });
+    expect(crowned(room)).toEqual(['Bob']);
+  });
+
+  it('下一局结束时皇冠换给新的获胜者', () => {
+    const { room, alice, bob, carol } = finishedRoom();
+    room.rematch(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    expect(crowned(room)).toEqual(['Bob']);
+    room.apply((g) => forfeit(g, bob.id));
+    room.apply((g) => forfeit(g, carol.id));
+    expect(crowned(room)).toEqual(['Alice']);
+  });
+
   it('牌局进行中不能再来一局', () => {
     const { room } = makeRoom({ startingPlayerRandom: () => 0 });
     const alice = room.addPlayer('Alice', 'sock1');

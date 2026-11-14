@@ -27,6 +27,7 @@ export interface LobbyPlayer {
   name: string;
   isHost: boolean;
   connected: boolean;
+  isPreviousWinner: boolean;
 }
 
 const SIMPLE_SERVER_ERROR_CODES = [

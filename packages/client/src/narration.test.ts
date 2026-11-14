@@ -111,7 +111,10 @@ describe('describeEvent', () => {
 
   it('描述质疑失败（声称者确实有该角色）', () => {
     expect(describeEvent({ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 0 }, s)).toBe(
-      '质疑失败：李四 失去影响力',
+      '张三 出示【公爵】，质疑失败：李四 失去影响力',
+    );
+    expect(describeEvent({ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 0 }, s, 'en')).toBe(
+      '张三 shows Duke; challenge failed: 李四 loses influence',
     );
   });
 
@@ -246,7 +249,7 @@ describe('groupLog', () => {
     expect(english.flatMap((group) => [group.action, ...group.entries.map((entry) => entry.text)])).toEqual(
       expect.arrayContaining([
         '李四 challenges 张三',
-        'Challenge failed: 李四 loses influence',
+        '张三 shows Duke; challenge failed: 李四 loses influence',
         '李四 blocks with Contessa',
         '李四 reveals Duke',
         '李四 is eliminated',
