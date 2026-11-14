@@ -21,8 +21,9 @@ const DECK: Role[] = ROLE_ORDER.flatMap((r) => [r, r, r]); // 5 角色 × 3 = 15
 
 const START_COINS = 2;
 const START_CARDS = 2;
-const COUP_COST = 7;
-const ASSASSINATE_COST = 3;
+export const COUP_COST = 7;
+export const ASSASSINATE_COST = 3;
+export const MAX_PLAYERS = 6;
 const STEAL_AMOUNT = 2;
 const EXCHANGE_DRAW = 2;
 
@@ -41,7 +42,7 @@ export const ACTION_CLAIM: Readonly<Record<ActionType, Role | null>> = {
 };
 
 // 各行动可被哪些角色阻挡（空数组 = 不可阻挡）
-const BLOCK_ROLES: Record<ActionType, Role[]> = {
+export const BLOCK_ROLES: Readonly<Record<ActionType, readonly Role[]>> = {
   income: [],
   foreignAid: ['duke'],
   coup: [],
@@ -208,8 +209,8 @@ export function createGame(
   players: { id: string; name: string }[],
   options: { startingPlayerId: string; hands?: Record<string, Role[]> },
 ): GameState {
-  if (players.length < 2 || players.length > 6) {
-    throw new GameRuleError('players must be 2-6');
+  if (players.length < 2 || players.length > MAX_PLAYERS) {
+    throw new GameRuleError(`players must be 2-${MAX_PLAYERS}`);
   }
   const startingPlayerIndex = players.findIndex((player) => player.id === options.startingPlayerId);
   if (startingPlayerIndex < 0) throw new GameRuleError('starting player not found');

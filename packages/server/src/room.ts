@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import {
   ACTION_CLAIM,
   GameRuleError,
+  MAX_PLAYERS,
   ROLE_ORDER,
   needsTarget,
   block,
@@ -38,7 +39,6 @@ const FOCUS_MIN_INTERVAL_MS = 50;
 // 客户端发完表态冷却 2 秒；服务器按玩家只拦 1.5 秒，留 0.5 秒给网络抖动，正常冷却后的表态不会被误丢
 const REACTION_MIN_INTERVAL_MS = 1_500;
 const DISCONNECT_GRACE_MS = 90_000;
-const MAX_PLAYERS = 6;
 const MAX_NAME_LENGTH = 32;
 // 电脑玩家的名字不分语言（ADR 0008：文字归客户端，名字不翻译）。6 个够用：加第 6 位时房里只有 5 个名字可能撞上
 const COMPUTER_NAMES = ['Ada', 'Alan', 'Grace', 'Hedy', 'Linus', 'Edsger'];
@@ -148,6 +148,7 @@ export class Room {
   private deadlineAt: number | null = null;
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly computerRandom: () => number;
 
   constructor(
     code: string,
@@ -158,6 +159,7 @@ export class Room {
   ) {
     this.code = code;
     this.hostId = hostId;
+    this.computerRandom = options.computerRandom ?? Math.random;
   }
 
   get playerList(): LobbyPlayer[] {
@@ -406,19 +408,18 @@ export class Room {
     const g = this.game!;
     const phase = g.phase;
     if (!isTimed(phase)) return;
-    const random = this.options.computerRandom ?? Math.random;
     const humanAlive = [...this.players.values()].some((p) => !p.isComputer && g.players.find((gp) => gp.id === p.id)?.alive);
     const [min, max] = COMPUTER_DELAY_MS[phase];
     for (const p of this.players.values()) {
       if (!p.isComputer || this.computerTimers.has(p.id) || !this.decideComputer(p.id)) continue;
-      const delay = this.options.computerDelayMs?.(phase) ?? (humanAlive ? min + random() * (max - min) : COMPUTER_SPECTATED_MS);
+      const delay = this.options.computerDelayMs?.(phase) ?? (humanAlive ? min + this.computerRandom() * (max - min) : COMPUTER_SPECTATED_MS);
       this.computerTimers.set(p.id, setTimeout(() => this.computerMove(p.id), delay + extraMs));
     }
   }
 
   private decideComputer(id: string): ComputerIntent | null {
     const g = this.game;
-    return g ? decideComputerIntent(publicState(g), privateState(g, id), [], this.options.computerRandom ?? Math.random) : null;
+    return g ? decideComputerIntent(publicState(g), privateState(g, id), [], this.computerRandom) : null;
   }
 
   // 到点再决定一次：这期间局面可能已变（窗口已关、已轮到别人），此刻无需它决定就什么也不做

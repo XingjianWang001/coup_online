@@ -15,6 +15,10 @@ export type {
 
 export {
   ACTION_CLAIM,
+  ASSASSINATE_COST,
+  BLOCK_ROLES,
+  COUP_COST,
+  MAX_PLAYERS,
   GameRuleError,
   ROLE_ORDER,
   needsTarget,

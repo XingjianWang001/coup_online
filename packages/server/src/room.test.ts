@@ -848,6 +848,22 @@ describe('Room 电脑出手', () => {
     expect(room.game!.currentPlayerId).toBe(alice.id);
   });
 
+  it('房里的真人全被淘汰、只剩旁观时，电脑 1 秒一步，不按选行动的 2 秒起步', () => {
+    vi.useFakeTimers();
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0, computerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    room.apply((g) => forfeit(g, alice.id)); // Alice 被淘汰但留在房里
+    const computerId = room.game!.currentPlayerId;
+
+    vi.advanceTimersByTime(999);
+    expect(room.game!.currentPlayerId).toBe(computerId);
+    vi.advanceTimersByTime(1);
+    expect(events.onBroadcast).toHaveBeenLastCalledWith(room, expect.arrayContaining([expect.objectContaining({ type: 'actionChosen', actorId: computerId })]));
+  });
+
   it('注入零延迟：1 位真人（只靠默认行动）加 3 个电脑的牌局打到 gameOver，不留计时器', () => {
     vi.useFakeTimers();
     let seed = 1;

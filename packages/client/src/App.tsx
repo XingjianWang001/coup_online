@@ -12,7 +12,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { parseServerError, PHRASES } from '@coup/shared';
+import { MAX_PLAYERS, parseServerError, PHRASES } from '@coup/shared';
 import type { ActionType, Card, LobbyPlayer, PublicState, Reaction, Role, ServerError } from '@coup/shared';
 import {
   clearIdentity,
@@ -64,7 +64,6 @@ interface LatestReaction extends ReactionBubble {
 }
 const REACTION_MS = 3000; // 与 style.css 里 .nameplate-text 的淡出时刻对齐
 const REACTION_COOLDOWN_MS = 2000; // 服务器按玩家只拦 1.5 秒，留出网络抖动（见 server/src/room.ts）
-const MAX_SEATS = 6; // 与 server/src/room.ts 的 MAX_PLAYERS 一致
 
 interface TransientErrorState {
   id: number;
@@ -905,7 +904,7 @@ function RoomView(props: RoomViewProps) {
           <button
             className="ghost add-computer"
             onClick={() => send(props.socket, { type: 'addComputer' })}
-            disabled={props.players.length >= MAX_SEATS}
+            disabled={props.players.length >= MAX_PLAYERS}
           >
             {translate(props.locale, 'addComputer')}
           </button>
@@ -1636,7 +1635,7 @@ function CoinIcon() {
   );
 }
 
-// 机器人头像：电脑玩家的徽标，可访问名称随语言
+// 电脑玩家的徽标，可访问名称随语言
 function ComputerBadge({ locale }: { locale: Locale }) {
   const label = translate(locale, 'computerPlayer');
   return (

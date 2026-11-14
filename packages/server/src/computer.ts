@@ -1,10 +1,5 @@
-import { ACTION_CLAIM, needsTarget, type ActionType, type GameEvent, type PrivateState, type PublicState, type Role } from '@coup/engine';
+import { ACTION_CLAIM, ASSASSINATE_COST, BLOCK_ROLES, COUP_COST, needsTarget, type ActionType, type GameEvent, type PrivateState, type PublicState, type Role } from '@coup/engine';
 import type { ClientIntent } from '@coup/shared';
-
-// 与引擎规则一致（引擎未导出这些常量）
-const COUP_COST = 7;
-const ASSASSINATE_COST = 3;
-const BLOCK_ROLES: Partial<Record<ActionType, Role[]>> = { foreignAid: ['duke'], assassinate: ['contessa'], steal: ['captain', 'ambassador'] };
 
 export type ComputerIntent = Extract<
   ClientIntent,
@@ -30,7 +25,7 @@ export function decideComputerIntent(state: PublicState, own: PrivateState, _eve
     case 'awaitingBlock': {
       const eligible = pending!.action === 'foreignAid' ? pending!.actorId !== me : pending!.targetId === me;
       if (!eligible || state.passed.includes(me)) return null;
-      const role = BLOCK_ROLES[pending!.action]?.find((r) => held.has(r));
+      const role = BLOCK_ROLES[pending!.action].find((r) => held.has(r));
       return role ? { type: 'block', role } : { type: 'passBlock' };
     }
     case 'showdown': {
