@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import {
   ACTION_CLAIM,
   GameRuleError,
+  MAX_PLAYERS,
   ROLE_ORDER,
   needsTarget,
   block,
@@ -38,7 +39,6 @@ const FOCUS_MIN_INTERVAL_MS = 50;
 // 客户端发完表态冷却 2 秒；服务器按玩家只拦 1.5 秒，留 0.5 秒给网络抖动，正常冷却后的表态不会被误丢
 const REACTION_MIN_INTERVAL_MS = 1_500;
 const DISCONNECT_GRACE_MS = 90_000;
-const MAX_PLAYERS = 6;
 const MAX_NAME_LENGTH = 32;
 // 电脑玩家的名字不分语言（ADR 0008：文字归客户端，名字不翻译）。6 个够用：加第 6 位时房里只有 5 个名字可能撞上
 const COMPUTER_NAMES = ['Ada', 'Alan', 'Grace', 'Hedy', 'Linus', 'Edsger'];
