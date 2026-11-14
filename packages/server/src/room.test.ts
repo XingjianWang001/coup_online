@@ -779,7 +779,8 @@ describe('Room 电脑玩家', () => {
   });
 
   function soloGame() {
-    const made = makeRoom({ startingPlayerRandom: () => 0 });
+    // 电脑随机源固定：宽限期里电脑照常出手，牌局走向要确定
+    const made = makeRoom({ startingPlayerRandom: () => 0, computerRandom: () => 0 });
     const alice = made.room.addPlayer('Alice', 'sock1');
     made.room.addComputer(alice.id, 'sock1');
     made.room.addComputer(alice.id, 'sock1');
@@ -789,8 +790,9 @@ describe('Room 电脑玩家', () => {
 
   it('牌局中最后一位真人离开：牌局作废回到大厅阶段，电脑留座，只剩空房回收计时', () => {
     vi.useFakeTimers();
-    const { room, events } = soloGame();
-    room.leavePlayer(room.hostId, 'sock1');
+    const { room, events, alice } = soloGame();
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' }); // 轮到电脑，它的出手已排上
+    room.leavePlayer(alice.id, 'sock1');
     expect(room.game).toBeNull();
     expect(computers(room)).toHaveLength(2);
     expect(room.getDeadlineMs()).toBeNull();
@@ -824,6 +826,42 @@ describe('Room 电脑玩家', () => {
     room.leavePlayer(alice.id, 'sock1');
     expect(room.game?.phase).not.toBe('gameOver');
     expect(room.getDeadlineMs()).not.toBeNull();
+  });
+});
+
+describe('Room 电脑出手', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('开局第一手：电脑等发牌展示的顺延加选行动延迟后才出手', () => {
+    vi.useFakeTimers();
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0.5, computerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    const computerId = room.game!.currentPlayerId;
+    expect(computerId).not.toBe(alice.id);
+
+    vi.advanceTimersByTime(4_999); // 发牌展示顺延 3 秒 + 选行动最短 2 秒
+    expect(room.game!.currentPlayerId).toBe(computerId);
+    vi.advanceTimersByTime(1);
+    expect(events.onBroadcast).toHaveBeenLastCalledWith(room, expect.arrayContaining([expect.objectContaining({ type: 'actionChosen', actorId: computerId })]));
+    expect(room.game!.currentPlayerId).toBe(alice.id);
+  });
+
+  it('注入零延迟：1 位真人（只靠默认行动）加 3 个电脑的牌局打到 gameOver，不留计时器', () => {
+    vi.useFakeTimers();
+    let seed = 1;
+    const computerRandom = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0, computerRandom, computerDelayMs: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    for (let i = 0; i < 3; i += 1) room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    for (let step = 0; step < 2_000 && room.game!.phase !== 'gameOver'; step += 1) vi.advanceTimersToNextTimer();
+    expect(room.game!.phase).toBe('gameOver');
+    expect(vi.getTimerCount()).toBe(0);
+    // 默认行动只会收入或政变：出现别的行动，说明是电脑自己在出手，而不是超时替它出
+    const chosen = events.onBroadcast.mock.calls.flatMap(([, evs]) => evs).filter((e) => e.type === 'actionChosen' && e.actorId !== alice.id);
+    expect(chosen.some((e) => e.action !== 'income' && e.action !== 'coup')).toBe(true);
   });
 });
 

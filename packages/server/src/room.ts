@@ -27,6 +27,7 @@ import {
 import type { GameRepository } from './repository.ts';
 import { PHRASES, type LobbyPlayer, type Phrase, type Reaction } from '@coup/shared';
 import { ClientError } from './errors.ts';
+import { decideComputerIntent, type ComputerIntent } from './computer.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
@@ -54,6 +55,20 @@ const PHASE_TIMEOUTS: Record<TimedPhase, { ms: number; resolve: (g: GameState) =
   choosingExchange: { ms: ACTION_TIMEOUT_MS, resolve: resolveExchangeTimeout },
 };
 const isTimed = (phase: Phase): phase is TimedPhase => phase in PHASE_TIMEOUTS;
+
+// 电脑出手前等待的区间（毫秒）。同一个问询窗口里质疑、阻挡、放弃用同一个分布，出手快慢不泄露手牌
+const COMPUTER_DELAY_MS: Record<TimedPhase, [number, number]> = {
+  choosingAction: [2_000, 6_000],
+  awaitingChallenge: [1_500, 5_000],
+  awaitingBlock: [1_500, 5_000],
+  showdown: [2_000, 4_000],
+  choosingLoss: [2_000, 4_000],
+  choosingExchange: [2_000, 4_000],
+};
+// 开局第一手另加的等待：发牌展示要真人自己点掉
+const COMPUTER_FIRST_MOVE_MS = 3_000;
+// 房里的真人全被淘汰、只剩旁观时，电脑约 1 秒一步
+const COMPUTER_SPECTATED_MS = 1_000;
 
 // 行动超时的默认行动：满 10 金币必须政变（随机目标），否则收入
 function autoAction(g: GameState): GameEvent[] {
@@ -111,6 +126,10 @@ export interface RoomEvents {
 
 export interface RoomOptions {
   startingPlayerRandom?: () => number;
+  // 电脑玩家的随机源，决策和出手延迟共用
+  computerRandom?: () => number;
+  // 电脑在该阶段出手前等多久（毫秒），替换默认区间和旁观加速；揭晓动画、开局发牌展示的顺延照加
+  computerDelayMs?: (phase: Phase) => number;
 }
 
 export class Room {
@@ -122,6 +141,7 @@ export class Room {
   // 上局获胜者：记在房间而非牌局里，因为再来一局会清掉牌局
   previousWinnerId: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private computerTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private lastFocusAt = 0;
   // ponytail: 离开房间的玩家不删条目；一个房间至多几位玩家、空房 5 分钟后整个回收，不值得在每条移除路径上清理
   private lastReactionAt = new Map<string, number>();
@@ -320,6 +340,7 @@ export class Room {
     this.gameNumber += 1;
     this.repo.save(this.code, this.game);
     this.startTimer(ACTION_TIMEOUT_MS);
+    this.scheduleComputers(COMPUTER_FIRST_MOVE_MS);
     const events: GameEvent[] = [{ type: 'started', turnOrder: entries.map((p) => p.id) }];
     this.events.onBroadcast(this, events);
     return events;
@@ -353,12 +374,14 @@ export class Room {
     if (!this.game) return;
     if (this.game.winnerId) this.previousWinnerId = this.game.winnerId;
     this.handOffOfflineHost();
-    // 时限从进入阶段起算：有人放弃回应、已淘汰者弃权等不换阶段也不换行动者的变化不重新计时
-    if (this.timerKey() === timerKeyBefore) return;
     const reveal = events.some((e) => e.type === 'challengeResolved') ? REVEAL_MS : 0;
-    const phase = this.game.phase;
-    if (isTimed(phase)) this.startTimer(PHASE_TIMEOUTS[phase].ms + reveal);
-    else this.clearTimer();
+    // 时限从进入阶段起算：有人放弃回应、已淘汰者弃权等不换阶段也不换行动者的变化不重新计时
+    if (this.timerKey() !== timerKeyBefore) {
+      const phase = this.game.phase;
+      if (isTimed(phase)) this.startTimer(PHASE_TIMEOUTS[phase].ms + reveal);
+      else this.clearTimer();
+    }
+    this.scheduleComputers(reveal);
   }
 
   private startTimer(ms: number): void {
@@ -367,12 +390,47 @@ export class Room {
     this.timer = setTimeout(() => this.onTimeout(), ms);
   }
 
+  // 阶段时限和电脑出手一起清：换阶段或换行动者、牌局结束、回到大厅时都不留旧的电脑计时器
   private clearTimer(): void {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
     this.deadlineAt = null;
+    for (const t of this.computerTimers.values()) clearTimeout(t);
+    this.computerTimers.clear();
+  }
+
+  // 给此刻要作决定、还没排上的电脑各排一次出手。已排上的不重排：同一窗口里别人放弃不推迟它
+  private scheduleComputers(extraMs: number): void {
+    const g = this.game!;
+    const phase = g.phase;
+    if (!isTimed(phase)) return;
+    const random = this.options.computerRandom ?? Math.random;
+    const humanAlive = [...this.players.values()].some((p) => !p.isComputer && g.players.find((gp) => gp.id === p.id)?.alive);
+    const [min, max] = COMPUTER_DELAY_MS[phase];
+    for (const p of this.players.values()) {
+      if (!p.isComputer || this.computerTimers.has(p.id) || !this.decideComputer(p.id)) continue;
+      const delay = this.options.computerDelayMs?.(phase) ?? (humanAlive ? min + random() * (max - min) : COMPUTER_SPECTATED_MS);
+      this.computerTimers.set(p.id, setTimeout(() => this.computerMove(p.id), delay + extraMs));
+    }
+  }
+
+  private decideComputer(id: string): ComputerIntent | null {
+    const g = this.game;
+    return g ? decideComputerIntent(publicState(g), privateState(g, id), [], this.options.computerRandom ?? Math.random) : null;
+  }
+
+  // 到点再决定一次：这期间局面可能已变（窗口已关、已轮到别人），此刻无需它决定就什么也不做
+  private computerMove(id: string): void {
+    this.computerTimers.delete(id);
+    const intent = this.decideComputer(id);
+    if (!intent) return;
+    try {
+      this.events.onBroadcast(this, this.applyIntent(id, intent));
+    } catch (e) {
+      console.error('computer move error', e);
+    }
   }
 
   // 权威剩余时间（毫秒）供客户端渲染倒计时；无计时窗口时为 null。
