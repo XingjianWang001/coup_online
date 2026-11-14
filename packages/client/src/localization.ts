@@ -121,7 +121,7 @@ const english = {
   narrationTarget: ', targeting {target}',
   narrationBlock: '; {blocker} blocks with {role}',
   logChallenge: '{challenger} challenges {target}',
-  logChallengeFailed: 'Challenge failed: {loser} loses influence',
+  logChallengeFailed: '{claimant} shows {role}; challenge failed: {loser} loses influence',
   logChallengeSucceeded: 'Challenge succeeded: {loser} loses influence',
   logBlock: '{blocker} blocks with {role}',
   logInfluenceLost: '{player} reveals {role}',
@@ -238,7 +238,7 @@ const simplifiedChinese = {
   narrationTarget: '，目标 {target}',
   narrationBlock: '；{blocker} 用【{role}】阻挡',
   logChallenge: '{challenger} 质疑 {target}',
-  logChallengeFailed: '质疑失败：{loser} 失去影响力',
+  logChallengeFailed: '{claimant} 出示【{role}】，质疑失败：{loser} 失去影响力',
   logChallengeSucceeded: '质疑成功：{loser} 失去影响力',
   logBlock: '{blocker} 用【{role}】阻挡',
   logInfluenceLost: '{player} 翻开【{role}】',
@@ -283,7 +283,7 @@ interface MessageValues {
   narrationTarget: { target: string };
   narrationBlock: { blocker: string; role: string };
   logChallenge: { challenger: string; target: string };
-  logChallengeFailed: { loser: string };
+  logChallengeFailed: { claimant: string; role: string; loser: string };
   logChallengeSucceeded: { loser: string };
   logBlock: { blocker: string; role: string };
   logInfluenceLost: { player: string; role: string };
