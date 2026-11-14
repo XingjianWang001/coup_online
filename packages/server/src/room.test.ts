@@ -768,7 +768,7 @@ describe('Room 表态', () => {
     }
   });
 
-  it('行动预告：针对性行动只能指向存活的对手，非针对性行动不带目标', () => {
+  it('行动预告：针对性行动只能指向对手，非针对性行动不带目标；目标已被淘汰时静默丢弃', () => {
     const { room, alice, bob, carol } = playingRoom();
     room.apply((g) => forfeit(g, carol.id));
     expect(room.react(bob.id, 'sock2', { kind: 'announcement', action: 'assassinate', targetId: alice.id })).toEqual({
@@ -779,10 +779,11 @@ describe('Room 表态', () => {
       kind: 'announcement',
       action: 'tax',
     });
+    // 客户端选目标时 Carol 还在，到服务器时已被淘汰：不报错，只是不转发
+    expect(room.react(alice.id, 'sock1', { kind: 'announcement', action: 'coup', targetId: carol.id })).toBeNull();
     for (const bad of [
       { kind: 'announcement', action: 'steal' },
       { kind: 'announcement', action: 'steal', targetId: bob.id },
-      { kind: 'announcement', action: 'coup', targetId: carol.id },
       { kind: 'announcement', action: 'coup', targetId: 'nobody' },
       { kind: 'announcement', action: 'income', targetId: alice.id },
     ]) {
@@ -790,18 +791,18 @@ describe('Room 表态', () => {
     }
   });
 
-  it('被淘汰的玩家和牌局结束后只能用短语', () => {
+  it('被淘汰的玩家和牌局结束后只能用短语：其余表态静默丢弃', () => {
     const { room, alice, bob, carol } = playingRoom();
     const claim = { kind: 'verbalClaim', has: true, role: 'duke' };
     const income = { kind: 'announcement', action: 'income' };
     room.apply((g) => forfeit(g, carol.id));
-    expect(() => room.react(carol.id, 'sock3', claim)).toThrow('illegalIntent');
-    expect(() => room.react(carol.id, 'sock3', income)).toThrow('illegalIntent');
+    expect(room.react(carol.id, 'sock3', claim)).toBeNull();
+    expect(room.react(carol.id, 'sock3', income)).toBeNull();
     expect(room.react(carol.id, 'sock3', { kind: 'phrase', phrase: 'framed' })).not.toBeNull();
 
     room.apply((g) => forfeit(g, alice.id));
     expect(room.game?.phase).toBe('gameOver');
-    expect(() => room.react(bob.id, 'sock2', claim)).toThrow('illegalIntent');
+    expect(room.react(bob.id, 'sock2', claim)).toBeNull();
     expect(room.react(bob.id, 'sock2', { kind: 'phrase', phrase: 'respect' })).not.toBeNull();
   });
 

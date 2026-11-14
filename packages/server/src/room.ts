@@ -1,7 +1,10 @@
 import type { GameState, GameEvent, Role, ActionType, Phase } from '@coup/engine';
 import { randomBytes } from 'node:crypto';
 import {
+  ACTION_CLAIM,
   GameRuleError,
+  ROLE_ORDER,
+  needsTarget,
   block,
   challenge,
   chooseAction,
@@ -60,12 +63,8 @@ function autoAction(g: GameState): GameEvent[] {
   return chooseAction(g, cur, 'income');
 }
 
-// 行动预告可用的行动；值表示是否要选目标（与引擎 chooseAction 的规则一致）。用 Record：新增行动时漏写会编译报错
-const ANNOUNCED_ACTIONS: Record<ActionType, boolean> = {
-  income: false, foreignAid: false, coup: true, tax: false, assassinate: true, steal: true, exchange: false,
-};
-const ROLES: Record<Role, true> = { duke: true, assassin: true, captain: true, ambassador: true, contessa: true };
-const has = (table: object, key: unknown): boolean => typeof key === 'string' && Object.hasOwn(table, key);
+const isAction = (value: unknown): value is ActionType => typeof value === 'string' && Object.hasOwn(ACTION_CLAIM, value);
+const isRole = (value: unknown): value is Role => (ROLE_ORDER as readonly unknown[]).includes(value);
 
 // 表态来自客户端：只认预设内容，按已知字段重新组装，多余字段（比如自写文字）不会被转发出去
 function parseReaction(raw: unknown): Reaction {
@@ -73,13 +72,13 @@ function parseReaction(raw: unknown): Reaction {
   if (r.kind === 'phrase' && (PHRASES as readonly unknown[]).includes(r.phrase)) {
     return { kind: 'phrase', phrase: r.phrase as Phrase };
   }
-  if (r.kind === 'announcement' && has(ANNOUNCED_ACTIONS, r.action) && (r.targetId === undefined || typeof r.targetId === 'string')) {
+  if (r.kind === 'announcement' && isAction(r.action) && (r.targetId === undefined || typeof r.targetId === 'string')) {
     return r.targetId === undefined
-      ? { kind: 'announcement', action: r.action as ActionType }
-      : { kind: 'announcement', action: r.action as ActionType, targetId: r.targetId };
+      ? { kind: 'announcement', action: r.action }
+      : { kind: 'announcement', action: r.action, targetId: r.targetId };
   }
-  if (r.kind === 'verbalClaim' && typeof r.has === 'boolean' && has(ROLES, r.role)) {
-    return { kind: 'verbalClaim', has: r.has, role: r.role as Role };
+  if (r.kind === 'verbalClaim' && typeof r.has === 'boolean' && isRole(r.role)) {
+    return { kind: 'verbalClaim', has: r.has, role: r.role };
   }
   throw new ClientError({ code: 'illegalIntent' });
 }
@@ -120,6 +119,7 @@ export class Room {
   previousWinnerId: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastFocusAt = 0;
+  // ponytail: 离开房间的玩家不删条目；一个房间至多几位玩家、空房 5 分钟后整个回收，不值得在每条移除路径上清理
   private lastReactionAt = new Map<string, number>();
   private deadlineAt: number | null = null;
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -416,22 +416,23 @@ export class Room {
     return { slot: slot as number | null };
   }
 
-  // 表态：校验后返回 { playerId, reaction } 交给传输层转发给整个房间（含发送者）；不进牌局状态
+  // 表态：校验后返回 { playerId, reaction } 交给传输层转发给整个房间（含发送者）；不进牌局状态。
+  // 格式不对、不在预设里的内容报错；客户端点下去时还合法、到服务器时已过时的（目标刚被淘汰、自己刚被淘汰、牌局刚结束）静默丢弃，
+  // 不给一条不改变牌局的表态弹错误
   react(playerId: string, socketId: string, reaction: unknown): { playerId: string; reaction: Reaction } | null {
     this.requireCurrentConnection(playerId, socketId);
     const g = this.game;
     if (!g) throw new ClientError({ code: 'gameNotStarted' });
     const parsed = parseReaction(reaction);
-    // 出局的人和结束的牌局没有下一步行动可预告、也没有角色可声称
-    const phrasesOnly = g.phase === 'gameOver' || !g.players.find((p) => p.id === playerId)?.alive;
-    if (phrasesOnly && parsed.kind !== 'phrase') throw new ClientError({ code: 'illegalIntent' });
     if (parsed.kind === 'announcement') {
       const target = g.players.find((p) => p.id === parsed.targetId);
-      const targetOk = ANNOUNCED_ACTIONS[parsed.action]
-        ? !!target?.alive && target.id !== playerId
-        : parsed.targetId === undefined;
-      if (!targetOk) throw new ClientError({ code: 'illegalIntent' });
+      const shapeOk = needsTarget(parsed.action) ? !!target && target.id !== playerId : parsed.targetId === undefined;
+      if (!shapeOk) throw new ClientError({ code: 'illegalIntent' });
+      if (target && !target.alive) return null;
     }
+    // 被淘汰的人和结束的牌局没有下一步行动可预告、也没有角色可声称
+    const phrasesOnly = g.phase === 'gameOver' || !g.players.find((p) => p.id === playerId)?.alive;
+    if (phrasesOnly && parsed.kind !== 'phrase') return null;
     // 比冷却还密的直接丢弃，挡住刷屏；不回错误，与对质悬停一致
     const now = Date.now();
     if (now - (this.lastReactionAt.get(playerId) ?? -Infinity) < REACTION_MIN_INTERVAL_MS) return null;
