@@ -148,6 +148,7 @@ export class Room {
   private deadlineAt: number | null = null;
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly computerRandom: () => number;
 
   constructor(
     code: string,
@@ -158,6 +159,7 @@ export class Room {
   ) {
     this.code = code;
     this.hostId = hostId;
+    this.computerRandom = options.computerRandom ?? Math.random;
   }
 
   get playerList(): LobbyPlayer[] {
@@ -406,19 +408,18 @@ export class Room {
     const g = this.game!;
     const phase = g.phase;
     if (!isTimed(phase)) return;
-    const random = this.options.computerRandom ?? Math.random;
     const humanAlive = [...this.players.values()].some((p) => !p.isComputer && g.players.find((gp) => gp.id === p.id)?.alive);
     const [min, max] = COMPUTER_DELAY_MS[phase];
     for (const p of this.players.values()) {
       if (!p.isComputer || this.computerTimers.has(p.id) || !this.decideComputer(p.id)) continue;
-      const delay = this.options.computerDelayMs?.(phase) ?? (humanAlive ? min + random() * (max - min) : COMPUTER_SPECTATED_MS);
+      const delay = this.options.computerDelayMs?.(phase) ?? (humanAlive ? min + this.computerRandom() * (max - min) : COMPUTER_SPECTATED_MS);
       this.computerTimers.set(p.id, setTimeout(() => this.computerMove(p.id), delay + extraMs));
     }
   }
 
   private decideComputer(id: string): ComputerIntent | null {
     const g = this.game;
-    return g ? decideComputerIntent(publicState(g), privateState(g, id), [], this.options.computerRandom ?? Math.random) : null;
+    return g ? decideComputerIntent(publicState(g), privateState(g, id), [], this.computerRandom) : null;
   }
 
   // 到点再决定一次：这期间局面可能已变（窗口已关、已轮到别人），此刻无需它决定就什么也不做
