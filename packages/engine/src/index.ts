@@ -14,7 +14,10 @@ export type {
 } from './types.ts';
 
 export {
+  ACTION_CLAIM,
   GameRuleError,
+  ROLE_ORDER,
+  needsTarget,
   block,
   challenge,
   chooseAction,

@@ -15,7 +15,7 @@ export class GameRuleError extends Error {
   override name = 'GameRuleError';
 }
 
-const ROLE_ORDER: Role[] = ['duke', 'assassin', 'captain', 'ambassador', 'contessa'];
+export const ROLE_ORDER: readonly Role[] = ['duke', 'assassin', 'captain', 'ambassador', 'contessa'];
 
 const DECK: Role[] = ROLE_ORDER.flatMap((r) => [r, r, r]); // 5 角色 × 3 = 15 张
 
@@ -27,7 +27,10 @@ const STEAL_AMOUNT = 2;
 const EXCHANGE_DRAW = 2;
 
 // 行动声称的角色（null = 不声称角色）
-const ACTION_CLAIM: Record<ActionType, Role | null> = {
+/** 政变、暗杀、偷窃要指定目标；其余行动不能指定 */
+export const needsTarget = (action: ActionType): boolean => action === 'coup' || action === 'assassinate' || action === 'steal';
+
+export const ACTION_CLAIM: Readonly<Record<ActionType, Role | null>> = {
   income: null,
   foreignAid: null,
   coup: null,
@@ -271,9 +274,8 @@ export function chooseAction(
     throw new GameRuleError('持有 10 枚以上金币必须发动政变');
   }
 
-  const needsTarget = action === 'coup' || action === 'assassinate' || action === 'steal';
-  if (needsTarget && !targetId) throw new GameRuleError(`${action} 需要目标`);
-  if (!needsTarget && targetId) throw new GameRuleError(`${action} 不能指定目标`);
+  if (needsTarget(action) && !targetId) throw new GameRuleError(`${action} 需要目标`);
+  if (!needsTarget(action) && targetId) throw new GameRuleError(`${action} 不能指定目标`);
   if (targetId) {
     const target = getPlayer(state, targetId);
     if (!target.alive) throw new GameRuleError('target eliminated');
