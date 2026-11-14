@@ -1,6 +1,6 @@
 import type { ActionType, GameEvent, Phrase, PublicState, Reaction, Role } from '@coup/shared';
 import { translate, translateParts, type Locale, type MessageKey } from './localization.ts';
-import { actionName, roleName } from './rules.ts';
+import { ACTIONS, actionName, roleName } from './rules.ts';
 
 export function nameOf(state: PublicState, id: string | null | undefined): string {
   if (!id) return '？';
@@ -192,8 +192,6 @@ const PHRASE_MESSAGES: Record<Phrase, MessageKey> = {
   doubt: 'phraseDoubt', sure: 'phraseSure', dare: 'phraseDare', honest: 'phraseHonest',
   framed: 'phraseFramed', mercy: 'phraseMercy', close: 'phraseClose', respect: 'phraseRespect',
 };
-// 行动预告里行动名的颜色：该行动要声称的角色；收入、外援、政变没有角色
-export const ACTION_CLAIMS: Partial<Record<ActionType, Role>> = { tax: 'duke', assassinate: 'assassin', steal: 'captain', exchange: 'ambassador' };
 const ANNOUNCEMENT_MESSAGES: Record<ActionType, MessageKey> = {
   income: 'announcementTake', foreignAid: 'announcementTake', tax: 'announcementPlain', exchange: 'announcementPlain',
   coup: 'announcementTargeted', assassinate: 'announcementTargeted', steal: 'announcementSteal',
@@ -209,7 +207,8 @@ export function describeReaction(locale: Locale, reaction: Reaction, nameOf: (id
       });
     case 'announcement':
       return translateParts<ReactionSegment>(locale, ANNOUNCEMENT_MESSAGES[reaction.action], {
-        action: { text: actionName(locale, reaction.action), role: ACTION_CLAIMS[reaction.action] },
+        // 行动名按该行动要声称的角色上色；收入、外援、政变没有角色
+        action: { text: actionName(locale, reaction.action), role: ACTIONS.find((a) => a.type === reaction.action)?.claim },
         target: { text: reaction.targetId ? nameOf(reaction.targetId) : '', target: true },
       });
   }

@@ -26,7 +26,7 @@ import {
   send,
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
-import { actionName, coinLegend, roleDescription, roleName, roleShortName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
+import { ACTIONS, actionName, coinLegend, roleDescription, roleName, roleShortName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
 import { describeCountdown, describePending, describeReaction, describeWaiting, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, reactionText, remainingSinceReceipt } from './narration.ts';
 import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
@@ -44,19 +44,9 @@ import {
   persistLocale,
   translate,
   type Locale,
+  type MessageKey,
   type NoticeDescriptor,
 } from './localization.ts';
-
-// coins / claim 只用于悬浮气泡里的图标说明
-const ACTIONS: { type: ActionType; needsTarget: boolean; coins?: string; claim?: Role }[] = [
-  { type: 'income', needsTarget: false, coins: '+1' },
-  { type: 'foreignAid', needsTarget: false, coins: '+2' },
-  { type: 'coup', needsTarget: true, coins: '−7' },
-  { type: 'tax', needsTarget: false, coins: '+3', claim: 'duke' },
-  { type: 'assassinate', needsTarget: true, coins: '−3', claim: 'assassin' },
-  { type: 'steal', needsTarget: true, coins: '+2', claim: 'captain' },
-  { type: 'exchange', needsTarget: false, claim: 'ambassador' },
-];
 
 interface TransientNoticeState {
   id: number;
@@ -272,7 +262,11 @@ export function App() {
           setReactions((current) => ({ ...current, [msg.playerId]: { id, reaction: msg.reaction } }));
           setLatestReaction({ id, playerId: msg.playerId, reaction: msg.reaction });
           clearTimeout(reactionTimers.current.get(msg.playerId));
-          reactionTimers.current.set(msg.playerId, setTimeout(() => dropReaction(msg.playerId, id), REACTION_MS));
+          reactionTimers.current.set(msg.playerId, setTimeout(() => {
+            dropReaction(msg.playerId, id);
+            // 读屏文字随铭牌一起清掉：否则之后切换语言会把这条旧表态再读一遍
+            setLatestReaction((latest) => (latest?.id === id ? null : latest));
+          }, REACTION_MS));
           break;
         }
         case 'events':
@@ -1968,7 +1962,7 @@ function GameBoard(props: {
                   {/* 条目常驻，高度在 0fr ↔ 1fr 之间过渡（同 .notice-region）；收起时 inert，读屏和 Tab 跳过 */}
                   {g.entries.length > 0 && (
                     <div
-                      className={`log-collapse${expanded.has(g.id) ? ' open' : ''}`}
+                      className={`collapse${expanded.has(g.id) ? ' open' : ''}`}
                       {...{ inert: expanded.has(g.id) ? undefined : '' }}
                     >
                       <div className="log-entries">
@@ -1999,18 +1993,23 @@ function ReactionTray(props: {
   onReact: (reaction: Reaction) => void;
 }) {
   type Tab = Reaction['kind'];
+  const TAB_LABELS: Record<Tab, MessageKey> = {
+    phrase: 'reactionTabPhrase', announcement: 'reactionTabAnnouncement', verbalClaim: 'reactionTabVerbalClaim',
+  };
   const { state, locale } = props;
   const ended = state.phase === 'gameOver';
   // 牌局结束或自己已出局：没有下一步可预告、也没有角色可声称，只剩短语
   const phrasesOnly = ended || !state.players.find((p) => p.id === props.me)?.alive;
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('phrase');
-  const [targeting, setTargeting] = useState<ActionType | null>(null);
+  const [pickingTargetFor, setPickingTargetFor] = useState<ActionType | null>(null);
   const [coolingDown, setCoolingDown] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const trayRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const activeTab: Tab = phrasesOnly ? 'phrase' : tab;
+  // 选目标途中牌局结束或自己被淘汰：标签退回短语，选目标随之作废
+  const targeting = activeTab === 'announcement' ? pickingTargetFor : null;
   const targets = state.players.filter((p) => p.alive && p.id !== props.me);
   useSmoothHeight(gridRef, [activeTab, targeting, phrasesOnly, open, locale], { enabled: open, fade: true });
 
@@ -2034,7 +2033,7 @@ function ReactionTray(props: {
     if (e.target !== e.currentTarget || e.propertyName !== 'grid-template-rows') return;
     // 展开完成后滚进视口；手机上 scroll-margin 让出底部吸附的操作栏
     if (open) trayRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    else setTargeting(null);
+    else setPickingTargetFor(null);
   };
 
   const buttons = () => {
@@ -2055,7 +2054,7 @@ function ReactionTray(props: {
                 <span className="reaction-name">{t.name}</span>
               </button>
             ))}
-            <button className="ghost" onClick={() => setTargeting(null)}>{translate(locale, 'cancel')}</button>
+            <button className="ghost" onClick={() => setPickingTargetFor(null)}>{translate(locale, 'cancel')}</button>
           </>
         );
       }
@@ -2063,7 +2062,7 @@ function ReactionTray(props: {
         <button
           key={a.type}
           disabled={coolingDown}
-          onClick={() => (a.needsTarget ? setTargeting(a.type) : send({ kind: 'announcement', action: a.type }))}
+          onClick={() => (a.needsTarget ? setPickingTargetFor(a.type) : send({ kind: 'announcement', action: a.type }))}
         >
           {actionName(locale, a.type)}
         </button>
@@ -2097,7 +2096,7 @@ function ReactionTray(props: {
         {translate(locale, 'reactionToggle')}
       </button>
       {/* 常驻挂载，高度在 0fr ↔ 1fr 之间过渡（同 .notice-region）；收起时 inert，读屏和 Tab 跳过 */}
-      <div className="reaction-collapse" onTransitionEnd={onCollapseEnd} {...{ inert: open ? undefined : '' }}>
+      <div className={`collapse reaction-collapse${open ? ' open' : ''}`} onTransitionEnd={onCollapseEnd} {...{ inert: open ? undefined : '' }}>
         <div className="reaction-collapse-inner">
           <div id="reaction-tray" ref={trayRef} className="reaction-tray">
             <div className="reaction-tabs" role="tablist" aria-label={translate(locale, 'reactionToggle')}>
@@ -2107,19 +2106,19 @@ function ReactionTray(props: {
                   role="tab"
                   aria-selected={activeTab === t}
                   disabled={phrasesOnly && t !== 'phrase'}
-                  onClick={() => { setTab(t); setTargeting(null); }}
+                  onClick={() => { setTab(t); setPickingTargetFor(null); }}
                 >
-                  {translate(locale, t === 'phrase' ? 'reactionTabPhrase' : t === 'announcement' ? 'reactionTabAnnouncement' : 'reactionTabVerbalClaim')}
+                  {translate(locale, TAB_LABELS[t])}
                 </button>
               ))}
             </div>
-            {phrasesOnly && <p className="reaction-hint">{translate(locale, ended ? 'reactionGameOverHint' : 'reactionEliminatedHint')}</p>}
             <div
               ref={gridRef}
               className={`reaction-grid reaction-grid--${activeTab}`}
               role={targeting ? 'group' : undefined}
               aria-labelledby={targeting ? 'reaction-target-heading' : undefined}
             >
+              {phrasesOnly && <p className="reaction-hint">{translate(locale, ended ? 'reactionGameOverHint' : 'reactionEliminatedHint')}</p>}
               {buttons()}
             </div>
           </div>

@@ -972,24 +972,16 @@ button.reaction-toggle:hover:not(:disabled) {
   color: var(--text);
 }
 
-/* 展开与收起走同一条曲线：高度 0fr ↔ 1fr，记录随之平滑上下 */
+/* 高度过渡来自 .collapse，这里再叠一层淡入淡出 */
 .reaction-collapse {
-  display: grid;
-  grid-template-rows: 0fr;
   opacity: 0;
   transition:
     grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1),
     opacity 200ms ease;
 }
 
-.reaction.open .reaction-collapse {
-  grid-template-rows: 1fr;
+.reaction-collapse.open {
   opacity: 1;
-}
-
-.reaction-collapse-inner {
-  min-height: 0;
-  overflow: hidden;
 }
 
 /* 与切换按钮的间距放在会被裁掉的内层里，收起时不留缝 */
@@ -1038,8 +1030,7 @@ button.reaction-toggle:hover:not(:disabled) {
   font-weight: 600;
 }
 
-.reaction-hint {
-  margin: 0;
+.reaction-grid > .reaction-hint {
   color: var(--text-3);
   font-size: 13px;
 }
@@ -1139,18 +1130,18 @@ button.reaction-toggle:hover:not(:disabled) {
   transform: rotate(90deg);
 }
 
-/* 展开收起：高度 0fr ↔ 1fr 过渡，与箭头旋转同步 */
-.log-collapse {
+/* 展开收起（记录分组、表态面板）：高度 0fr ↔ 1fr 过渡，同 .notice-region 的做法 */
+.collapse {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.log-collapse.open {
+.collapse.open {
   grid-template-rows: 1fr;
 }
 
-.log-collapse > .log-entries {
+.collapse > * {
   min-height: 0;
   overflow: hidden;
 }
@@ -1546,14 +1537,13 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   /* 不呼吸，但保留「快到时」的状态：静态琥珀 */
   .narration-timer.urgent { animation: none; color: var(--warn); }
   .role-btn { transition: none; }
-  .log-collapse { transition: none; }
+  /* 几乎瞬时，但仍触发 transitionend（表态面板复位选目标、滚进视口靠它） */
+  .collapse { transition-duration: 1ms; }
   .nameplate-text {
     animation:
       fade-in 160ms ease,
       speak-out 200ms ease 2800ms forwards;
   }
-  /* 几乎瞬时，但仍触发 transitionend（复位选目标、滚进视口靠它） */
-  .reaction-collapse { transition-duration: 1ms; }
   .notice-region {
     transition: grid-template-rows 1ms linear 119ms;
   }

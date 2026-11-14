@@ -16,7 +16,7 @@ export default async function reactionScenario(ui) {
   await ui.evaluate(`document.querySelector('.showcase-overlay').click()`);
   await ui.waitFor('.seat.self .nameplate');
 
-  // 机器人 Van 预告刺杀真人
+  // 机器人 Van 预告暗杀真人
   const pub = other.state.pub ?? (await other.next('publicState')).state;
   const me = pub.players.find((p) => p.name === 'Me');
   other.intent({ type: 'react', reaction: { kind: 'announcement', action: 'assassinate', targetId: me.id } });
@@ -32,7 +32,7 @@ export default async function reactionScenario(ui) {
   })()`);
   assert(opponent.seat === 'Van', `表态应出现在 Van 的座位，实际在 ${opponent.seat}`);
   assert(opponent.target === 'Me', `预告目标应是 Me，实际 ${opponent.target}`);
-  assert(opponent.roles.length === 1 && opponent.roles[0].includes('role--assassin'), `只有「刺杀」上刺客色：${JSON.stringify(opponent.roles)}`);
+  assert(opponent.roles.length === 1 && opponent.roles[0].includes('role--assassin'), `只有「暗杀」上刺客色：${JSON.stringify(opponent.roles)}`);
 
   // 真人从面板发短语：自己的铭牌经服务器转发后亮起，座位尺寸不变
   const seatBox = `JSON.stringify((({ width, height }) => ({ width, height }))(document.querySelector('.seat.self').getBoundingClientRect()))`;
