@@ -39,6 +39,8 @@ const REACTION_MIN_INTERVAL_MS = 1_500;
 const DISCONNECT_GRACE_MS = 90_000;
 const MAX_PLAYERS = 6;
 const MAX_NAME_LENGTH = 32;
+// 电脑玩家的名字不分语言（ADR 0008：文字归客户端，名字不翻译）。6 个够用：加第 6 位时房里只有 5 个名字可能撞上
+const COMPUTER_NAMES = ['Ada', 'Alan', 'Grace', 'Hedy', 'Linus', 'Edsger'];
 
 // 每个进行中的阶段都要有时限和超时后的处理，否则在线却不操作的玩家能让牌局永远卡住（#24）。
 // 用 Record 而不是 switch：新增阶段时漏写这里会编译报错。
@@ -97,6 +99,8 @@ export interface RoomPlayer {
   socketId: string;
   connected: boolean;
   secret: string; // 重连凭证，只发给本人，不对外广播
+  // 电脑玩家没有连接：connected 恒为 false，所以它不算在场、不能当房主、任何连接都冒充不了它
+  isComputer: boolean;
 }
 
 export interface RoomEvents {
@@ -141,9 +145,37 @@ export class Room {
       id: p.id,
       name: p.name,
       isHost: p.id === this.hostId,
-      connected: p.connected,
+      connected: p.connected || p.isComputer, // 名单上的 connected 只用来标离线，电脑玩家从不离线
       isPreviousWinner: p.id === this.previousWinnerId,
+      isComputer: p.isComputer,
     }));
+  }
+
+  addComputer(playerId: string, socketId: string): void {
+    this.requireLobbyHost(playerId, socketId);
+    if (this.players.size >= MAX_PLAYERS) {
+      throw new ClientError({ code: 'roomFull', params: { maximum: MAX_PLAYERS } });
+    }
+    const taken = new Set([...this.players.values()].map((p) => p.name));
+    const name = COMPUTER_NAMES.find((n) => !taken.has(n))!;
+    const p: RoomPlayer = { id: genId(), secret: genSecret(), name, socketId: '', connected: false, isComputer: true };
+    this.players.set(p.id, p);
+    this.events.onBroadcast(this, []);
+  }
+
+  removeComputer(playerId: string, socketId: string, computerId: unknown): void {
+    this.requireLobbyHost(playerId, socketId);
+    if (typeof computerId !== 'string' || !this.players.get(computerId)?.isComputer) {
+      throw new ClientError({ code: 'illegalIntent' });
+    }
+    this.removePlayer(computerId);
+    this.events.onBroadcast(this, []);
+  }
+
+  private requireLobbyHost(playerId: string, socketId: string): void {
+    this.requireCurrentConnection(playerId, socketId);
+    if (playerId !== this.hostId) throw new ClientError({ code: 'hostOnly' });
+    if (this.game) throw new ClientError({ code: 'illegalIntent' });
   }
 
   // 加入或重连。reconnect 提供 id + secret，匹配才复用座位，否则视为新玩家（防劫持）。
@@ -166,10 +198,13 @@ export class Room {
     }
     // 新玩家：服务器生成全新 id 与 secret。开局后禁止新玩家加入，保证 room.players 是 game.players 的子集。
     if (this.game) throw new ClientError({ code: 'gameAlreadyStarted' });
+    // 满座时最后加入的电脑玩家给真人让座（重连已在上面返回，不会走到这里）
+    const yielding = [...this.players.values()].filter((p) => p.isComputer).pop();
+    if (this.players.size >= MAX_PLAYERS && yielding) this.removePlayer(yielding.id);
     if (this.players.size >= MAX_PLAYERS) {
       throw new ClientError({ code: 'roomFull', params: { maximum: MAX_PLAYERS } });
     }
-    const p: RoomPlayer = { id: genId(), secret: genSecret(), name, socketId, connected: true };
+    const p: RoomPlayer = { id: genId(), secret: genSecret(), name, socketId, connected: true, isComputer: false };
     this.players.set(p.id, p);
     // 房主已离开或离线（含最后一人离开后空房被重新加入）：由在线的玩家接任。
     this.handOffOfflineHost();
@@ -222,8 +257,10 @@ export class Room {
     if (id === this.previousWinnerId) this.previousWinnerId = null;
     this.clearDisconnectTimer(id);
     if (!this.hasPresentPlayer()) this.scheduleEmptyCleanup();
-    if (this.players.size > 0 && id === this.hostId) {
-      this.hostId = this.players.keys().next().value!;
+    // 房主只能是真人：只剩电脑玩家时没有房主，下一位加入的真人经 handOffOfflineHost 接任
+    const heir = [...this.players.values()].find((p) => !p.isComputer);
+    if (heir && id === this.hostId) {
+      this.hostId = heir.id;
       this.handOffOfflineHost();
     }
   }
@@ -248,14 +285,19 @@ export class Room {
     this.requireCurrentConnection(playerId, socketId);
     if (this.game?.phase !== 'gameOver') throw new ClientError({ code: 'illegalIntent' });
     if (playerId !== this.hostId) throw new ClientError({ code: 'hostOnly' });
-    // 牌局中宽限期已到而弃权的玩家仍占着座位且没有计时器，不带进新的大厅阶段。
-    for (const p of [...this.players.values()]) {
-      if (!this.isPresent(p)) this.removePlayer(p.id);
-    }
+    this.returnToLobby();
+    this.events.onBroadcast(this, []);
+  }
+
+  private returnToLobby(): void {
+    // 先清牌局：下面的 removePlayer 可能走到 scheduleEmptyCleanup，那里不能再看到进行中的牌局
     this.game = null;
     this.repo.delete(this.code);
     this.clearTimer();
-    this.events.onBroadcast(this, []);
+    // 牌局中宽限期已到而弃权的真人玩家仍占着座位且没有计时器，不带进新的大厅阶段；电脑玩家留下。
+    for (const p of [...this.players.values()]) {
+      if (!p.isComputer && !this.isPresent(p)) this.removePlayer(p.id);
+    }
   }
 
   startGame(playerId: string, socketId: string): GameEvent[] {
@@ -457,7 +499,11 @@ export class Room {
     this.emptyTimer = null;
   }
 
+  // 调用时房间里已没有在场的真人。进行中的牌局作废，回到大厅阶段（同再来一局：电脑留座，弃权的真人座位移除），
+  // 电脑不会靠计时器把空房一直打下去。不留着牌局等人重连：离开的人已被移除，宽限期到的人座位也随之移除，
+  // 凭旧凭证回来只能作为新玩家进大厅，不会接上一局作废的牌局（不新增 #49、#51 那类沿用失效状态的路径）。
   private scheduleEmptyCleanup(): void {
+    if (this.game && this.game.phase !== 'gameOver') this.returnToLobby();
     if (this.emptyTimer) return;
     this.emptyTimer = setTimeout(() => {
       if (!this.hasPresentPlayer()) {

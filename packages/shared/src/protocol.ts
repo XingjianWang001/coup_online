@@ -16,6 +16,9 @@ export type ClientIntent =
   | { type: 'startTunnel' }
   | { type: 'startGame' }
   | { type: 'rematch' }
+  // 大厅阶段房主添加 / 按玩家 ID 移除电脑玩家
+  | { type: 'addComputer' }
+  | { type: 'removeComputer'; playerId: string }
   | { type: 'chooseAction'; action: ActionType; targetId?: string }
   | { type: 'challenge' }
   | { type: 'passChallenge' }
@@ -32,13 +35,14 @@ export type ClientIntent =
   | { type: 'revealPostGameCard'; cardId: string }
   | { type: 'leaveRoom' };
 
-// 大厅玩家（开局前）
+// 大厅玩家（开局前）。joined 也带这份名单，牌局中按 id 查 isComputer 给座位铭牌用：电脑玩家只在大厅阶段增减
 export interface LobbyPlayer {
   id: string;
   name: string;
   isHost: boolean;
   connected: boolean;
   isPreviousWinner: boolean;
+  isComputer: boolean;
 }
 
 const SIMPLE_SERVER_ERROR_CODES = [
