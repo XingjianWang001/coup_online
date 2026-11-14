@@ -211,6 +211,18 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       room.rematch(socket.data.playerId, socket.id);
       break;
     }
+    case 'addComputer': {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room) throw new ClientError({ code: 'roomNotFound' });
+      room.addComputer(socket.data.playerId, socket.id);
+      break;
+    }
+    case 'removeComputer': {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room) throw new ClientError({ code: 'roomNotFound' });
+      room.removeComputer(socket.data.playerId, socket.id, raw.playerId);
+      break;
+    }
     case 'leaveRoom': {
       // 房间已被超时回收（或服务器重启）时，离开视为已完成，让客户端能清掉残留的房间状态。
       const room = rooms.get(socket.data.roomCode);
