@@ -89,6 +89,8 @@ export class Room {
   players = new Map<string, RoomPlayer>();
   game: GameState | null = null;
   gameNumber = 0;
+  // 上局获胜者：记在房间而非牌局里，因为再来一局会清掉牌局
+  previousWinnerId: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastFocusAt = 0;
   private deadlineAt: number | null = null;
@@ -112,6 +114,7 @@ export class Room {
       name: p.name,
       isHost: p.id === this.hostId,
       connected: p.connected,
+      isPreviousWinner: p.id === this.previousWinnerId,
     }));
   }
 
@@ -277,6 +280,7 @@ export class Room {
 
   private afterMutation(events: GameEvent[], timerKeyBefore: string): void {
     if (!this.game) return;
+    if (this.game.winnerId) this.previousWinnerId = this.game.winnerId;
     this.handOffOfflineHost();
     // 时限从进入阶段起算：有人放弃回应、已淘汰者弃权等不换阶段也不换行动者的变化不重新计时
     if (this.timerKey() === timerKeyBefore) return;

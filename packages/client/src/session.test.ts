@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { PublicState, ServerMessage } from '@coup/shared';
 import { closeShowdown, initialSession, reduceSession, rejoinIntent, type Session } from './session.ts';
 
-const players = [{ id: 'a', name: '张三', isHost: true, connected: true }];
+const players = [{ id: 'a', name: '张三', isHost: true, connected: true, isPreviousWinner: false }];
 const table = { phase: 'choosingAction' } as PublicState;
 
 function run(messages: ServerMessage[], from: Session = initialSession): Session {
@@ -19,7 +19,7 @@ const inGame = run([
 
 describe('房间会话', () => {
   // 两人局：只有这样回合才能真的交给另一位玩家
-  const pair = [players[0], { id: 'b', name: '李四', isHost: false, connected: true }];
+  const pair = [players[0], { id: 'b', name: '李四', isHost: false, connected: true, isPreviousWinner: false }];
   const myTurn = (selectedAction: Session['selectedAction']) => ({
     ...run([
       { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: pair, hostId: 'a', canStartTunnel: true, gameNumber: 0 },
@@ -67,7 +67,7 @@ describe('房间会话', () => {
   });
 
   it('大厅里离线超过宽限期被移出、房主随后开局：重连时自动加入失败，退回入口；房主双击开始的报错不影响会话', () => {
-    const lobby = run([{ type: 'lobby', players: [...players, { id: 'b', name: '李四', isHost: false, connected: true }], hostId: 'a' }], {
+    const lobby = run([{ type: 'lobby', players: [...players, { id: 'b', name: '李四', isHost: false, connected: true, isPreviousWinner: false }], hostId: 'a' }], {
       ...initialSession,
       roomCode: 'ABC123',
       playerId: 'b',
@@ -182,7 +182,7 @@ describe('对质', () => {
     });
     const first = { challengerId: 'a', claimantId: 'b', role: 'duke' as const };
     const second = { challengerId: 'c', claimantId: 'a', role: 'captain' as const };
-    const seated = ['a', 'b', 'c'].map((id) => ({ id, name: id, isHost: id === 'a', connected: true }));
+    const seated = ['a', 'b', 'c'].map((id) => ({ id, name: id, isHost: id === 'a', connected: true, isPreviousWinner: false }));
     const watching = run([
       { type: 'events', events: [{ type: 'challenged', challengerId: 'a', targetId: 'b' }] },
       three({ phase: 'showdown', showdown: first }, 1),
