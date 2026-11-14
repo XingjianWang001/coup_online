@@ -9,6 +9,8 @@ export type {
   Role,
   Card,
   ServerError,
+  Phrase,
+  Reaction,
 } from './protocol.ts';
 
-export { parseServerError } from './protocol.ts';
+export { parseServerError, PHRASES } from './protocol.ts';
