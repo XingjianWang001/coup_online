@@ -875,13 +875,14 @@ function RoomView(props: RoomViewProps) {
 
 // 明牌只靠视觉暗淡区分；读屏另给「已翻开」文案，界面不加字。
 // 悬浮看名字：自己的大牌把图标换成名字，对手的小牌弹出同色气泡（仅限有悬浮的设备）。
-function CardView({ role, locale, unavailable, small }: { role: Role; locale: Locale; unavailable?: boolean; small?: boolean }) {
+// unveiled：赛后揭晓的牌，全彩牌面（不置灰），以此与明牌区分（ADR 0005）
+function CardView({ role, locale, unavailable, small, unveiled }: { role: Role; locale: Locale; unavailable?: boolean; small?: boolean; unveiled?: boolean }) {
   const label = roleName(locale, role);
   const card = (
     <div
-      className={`card card--${role}${unavailable ? ' unavailable' : ''}`}
+      className={`card card--${role}${unavailable ? ' unavailable' : ''}${unveiled ? ' unveiled' : ''}`}
       role="img"
-      aria-label={translate(locale, unavailable ? 'cardRevealed' : 'cardFace', { role: label })}
+      aria-label={translate(locale, unavailable ? 'cardRevealed' : unveiled ? 'cardPostGameRevealed' : 'cardFace', { role: label })}
     >
       <RoleIcon role={role} />
       {!small && <CardName name={label} short={roleShortName(locale, role)} />}
@@ -1677,6 +1678,9 @@ function GameBoard(props: {
   }
 
   const amLosing = state.phase === 'choosingLoss' && state.lossPlayerId === me;
+  // 赛后揭晓：获胜者点暗牌向所有人翻开
+  const canUnveil = state.phase === 'gameOver' && !!me && state.winnerId === me;
+  const unveilLeft = canUnveil && (myView?.postGameRevealed.length ?? 0) < props.hand.length;
   const amExchanging = state.phase === 'choosingExchange' && pending?.actorId === me;
   // 对质时等待提示由对质舞台给出，控制区不再重复
   const waiting = me && state.phase !== 'showdown' ? describeWaiting(state, me, props.locale) : null;
@@ -1713,8 +1717,28 @@ function GameBoard(props: {
         </div>
         <div className="cards-row" role="group" aria-label={translate(props.locale, 'influenceCount', { count: influence })}>
           {p.id === me
-            ? props.hand.map((c) => <CardView key={c.id} role={c.role} locale={props.locale} />)
-            : Array.from({ length: p.handCount }, (_, i) => <CardBack key={`back-${i}`} locale={props.locale} />)}
+            ? props.hand.map((c, i) => {
+                if (!canUnveil) return <CardView key={c.id} role={c.role} locale={props.locale} />;
+                const unveiled = p.postGameRevealed.some((r) => r.slot === i);
+                // 揭晓后仍是同一个按钮（aria-disabled），牌才能平滑落回座位一行
+                return (
+                  <button
+                    key={c.id}
+                    className="unveil"
+                    aria-disabled={unveiled || undefined}
+                    aria-label={translate(props.locale, unveiled ? 'cardPostGameRevealed' : 'cardPostGameHidden', { role: roleName(props.locale, c.role) })}
+                    onClick={unveiled ? undefined : () => props.onIntent({ type: 'revealPostGameCard', cardId: c.id })}
+                  >
+                    <CardView role={c.role} locale={props.locale} />
+                  </button>
+                );
+              })
+            : Array.from({ length: p.handCount }, (_, i) => {
+                const shown = p.postGameRevealed.find((r) => r.slot === i);
+                return shown
+                  ? <CardView key={`back-${i}`} role={shown.role} locale={props.locale} small unveiled />
+                  : <CardBack key={`back-${i}`} locale={props.locale} />;
+              })}
           {p.revealed.map((role, i) => (
             <CardView key={`rev-${i}`} role={role} locale={props.locale} unavailable small={p.id !== me} />
           ))}
@@ -1809,6 +1833,8 @@ function GameBoard(props: {
             </button>
           </div>
         )}
+
+        {unveilLeft && <div className="waiting">{translate(props.locale, 'postGameRevealHint')}</div>}
 
         {state.phase === 'gameOver' && (me === props.hostId ? (
           <button className="primary" onClick={() => props.onIntent({ type: 'rematch' })}>

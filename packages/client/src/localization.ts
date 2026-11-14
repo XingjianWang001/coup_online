@@ -110,6 +110,9 @@ const english = {
   cardBack: 'Hidden card',
   cardFace: '{role} card',
   cardRevealed: '{role} card (revealed)',
+  cardPostGameHidden: '{role} card, not unveiled — click to unveil it to everyone',
+  cardPostGameRevealed: '{role} card, unveiled',
+  postGameRevealHint: 'Click a hidden card to unveil it to everyone',
   showcaseDeal: 'Your hand',
   confirm: 'Confirm',
   timeToAct: '{time} left to act',
@@ -126,6 +129,7 @@ const english = {
   logInfluenceLost: '{player} reveals {role}',
   logEliminated: '{player} is eliminated',
   logGameOver: '{winner} wins',
+  logPostGameRevealed: '{player} unveils {role}',
   logCoinsChanged: '{player} coins → {coins}',
   logExchangeDrew: '{player} draws {count} cards',
 } as const;
@@ -226,6 +230,9 @@ const simplifiedChinese = {
   cardBack: '暗牌',
   cardFace: '{role}牌',
   cardRevealed: '{role}牌（已翻开）',
+  cardPostGameHidden: '{role}牌，未揭晓，点击向所有人翻开',
+  cardPostGameRevealed: '{role}牌，已揭晓',
+  postGameRevealHint: '点击暗牌，向所有人翻开',
   showcaseDeal: '你的手牌',
   confirm: '确认',
   timeToAct: '行动剩余 {time}',
@@ -242,6 +249,7 @@ const simplifiedChinese = {
   logInfluenceLost: '{player} 翻开【{role}】',
   logEliminated: '{player} 被淘汰',
   logGameOver: '{winner} 获胜',
+  logPostGameRevealed: '{player} 揭晓【{role}】',
   logCoinsChanged: '{player} 金币 → {coins}',
   logExchangeDrew: '{player} 抽取 {count} 张牌',
 } as const satisfies Record<MessageKey, string>;
@@ -273,6 +281,8 @@ interface MessageValues {
   exchangePrompt: { count: number };
   cardFace: { role: string };
   cardRevealed: { role: string };
+  cardPostGameHidden: { role: string };
+  cardPostGameRevealed: { role: string };
   timeToAct: { time: string };
   expandLog: { action: string };
   collapseLog: { action: string };
@@ -287,6 +297,7 @@ interface MessageValues {
   logInfluenceLost: { player: string; role: string };
   logEliminated: { player: string };
   logGameOver: { winner: string };
+  logPostGameRevealed: { player: string; role: string };
   logCoinsChanged: { player: string; coins: number };
   logExchangeDrew: { player: string; count: number };
 }

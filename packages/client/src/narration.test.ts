@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { GameEvent, PublicState } from '@coup/shared';
-import { describeAction, describeCountdown, describeEvent, describePending, describeWaiting, estimateServerOffset, groupLog, remainingSinceReceipt } from './narration.ts';
+import { describeAction, describeCountdown, describeEvent, describePending, describeWaiting, estimateServerOffset, groupLog, remainingSinceReceipt, type LogEntry } from './narration.ts';
 
 function state(overrides: Partial<PublicState>): PublicState {
   return {
     phase: 'choosingAction',
     players: [
-      { id: 'a', name: '张三', coins: 2, handCount: 2, revealed: [], alive: true },
-      { id: 'b', name: '李四', coins: 2, handCount: 2, revealed: [], alive: true },
+      { id: 'a', name: '张三', coins: 2, handCount: 2, revealed: [], alive: true, postGameRevealed: [] },
+      { id: 'b', name: '李四', coins: 2, handCount: 2, revealed: [], alive: true, postGameRevealed: [] },
     ],
     currentPlayerId: 'a',
     pending: null,
@@ -213,6 +213,16 @@ describe('groupLog', () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].action).toBe('张三 获胜');
     expect(groups[0].entries).toEqual([]);
+  });
+
+  it('puts each Post-game Reveal on its own line after the win, in either locale', () => {
+    const events: LogEntry[] = [
+      { id: 0, event: { type: 'gameOver', winnerId: 'a' } },
+      { id: 1, event: { type: 'postGameRevealed', playerId: 'a', role: 'duke', slot: 1 } },
+      { id: 2, event: { type: 'postGameRevealed', playerId: 'a', role: 'contessa', slot: 0 } },
+    ];
+    expect(groupLog(events, s, 'zh-CN').map((g) => g.action)).toEqual(['张三 获胜', '张三 揭晓【公爵】', '张三 揭晓【女伯爵】']);
+    expect(groupLog(events, s, 'en').map((g) => g.action)).toEqual(['张三 wins', '张三 unveils Duke', '张三 unveils Contessa']);
   });
 
   it('renders the same raw events in either locale without mutating them', () => {
