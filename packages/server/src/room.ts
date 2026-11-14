@@ -22,7 +22,7 @@ import {
   revealShowdownCard,
 } from '@coup/engine';
 import type { GameRepository } from './repository.ts';
-import type { LobbyPlayer } from '@coup/shared';
+import { PHRASES, type LobbyPlayer, type Phrase, type Reaction } from '@coup/shared';
 import { ClientError } from './errors.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
@@ -31,6 +31,8 @@ const WINDOW_TIMEOUT_MS = 20_000;
 // 与 client/src/App.tsx 对质舞台的动画时长（SUSPENSE_MS 等）一起改
 const REVEAL_MS = 6_000;
 const FOCUS_MIN_INTERVAL_MS = 50;
+// 客户端发完表态冷却 2 秒；服务器按玩家只拦 1.5 秒，留 0.5 秒给网络抖动，正常冷却后的表态不会被误丢
+const REACTION_MIN_INTERVAL_MS = 1_500;
 const DISCONNECT_GRACE_MS = 90_000;
 const MAX_PLAYERS = 6;
 const MAX_NAME_LENGTH = 32;
@@ -56,6 +58,30 @@ function autoAction(g: GameState): GameEvent[] {
     return chooseAction(g, cur, 'coup', targets[Math.floor(Math.random() * targets.length)].id);
   }
   return chooseAction(g, cur, 'income');
+}
+
+// 行动预告可用的行动；值表示是否要选目标（与引擎 chooseAction 的规则一致）。用 Record：新增行动时漏写会编译报错
+const ANNOUNCED_ACTIONS: Record<ActionType, boolean> = {
+  income: false, foreignAid: false, coup: true, tax: false, assassinate: true, steal: true, exchange: false,
+};
+const ROLES: Record<Role, true> = { duke: true, assassin: true, captain: true, ambassador: true, contessa: true };
+const has = (table: object, key: unknown): boolean => typeof key === 'string' && Object.hasOwn(table, key);
+
+// 表态来自客户端：只认预设内容，按已知字段重新组装，多余字段（比如自写文字）不会被转发出去
+function parseReaction(raw: unknown): Reaction {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  if (r.kind === 'phrase' && (PHRASES as readonly unknown[]).includes(r.phrase)) {
+    return { kind: 'phrase', phrase: r.phrase as Phrase };
+  }
+  if (r.kind === 'announcement' && has(ANNOUNCED_ACTIONS, r.action) && (r.targetId === undefined || typeof r.targetId === 'string')) {
+    return r.targetId === undefined
+      ? { kind: 'announcement', action: r.action as ActionType }
+      : { kind: 'announcement', action: r.action as ActionType, targetId: r.targetId };
+  }
+  if (r.kind === 'verbalClaim' && typeof r.has === 'boolean' && has(ROLES, r.role)) {
+    return { kind: 'verbalClaim', has: r.has, role: r.role as Role };
+  }
+  throw new ClientError({ code: 'illegalIntent' });
 }
 
 function genId(): string {
@@ -94,6 +120,7 @@ export class Room {
   previousWinnerId: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private lastFocusAt = 0;
+  private lastReactionAt = new Map<string, number>();
   private deadlineAt: number | null = null;
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -387,6 +414,29 @@ export class Room {
     if (now - this.lastFocusAt < FOCUS_MIN_INTERVAL_MS) return null;
     this.lastFocusAt = now;
     return { slot: slot as number | null };
+  }
+
+  // 表态：校验后返回 { playerId, reaction } 交给传输层转发给整个房间（含发送者）；不进牌局状态
+  react(playerId: string, socketId: string, reaction: unknown): { playerId: string; reaction: Reaction } | null {
+    this.requireCurrentConnection(playerId, socketId);
+    const g = this.game;
+    if (!g) throw new ClientError({ code: 'gameNotStarted' });
+    const parsed = parseReaction(reaction);
+    // 出局的人和结束的牌局没有下一步行动可预告、也没有角色可声称
+    const phrasesOnly = g.phase === 'gameOver' || !g.players.find((p) => p.id === playerId)?.alive;
+    if (phrasesOnly && parsed.kind !== 'phrase') throw new ClientError({ code: 'illegalIntent' });
+    if (parsed.kind === 'announcement') {
+      const target = g.players.find((p) => p.id === parsed.targetId);
+      const targetOk = ANNOUNCED_ACTIONS[parsed.action]
+        ? !!target?.alive && target.id !== playerId
+        : parsed.targetId === undefined;
+      if (!targetOk) throw new ClientError({ code: 'illegalIntent' });
+    }
+    // 比冷却还密的直接丢弃，挡住刷屏；不回错误，与对质悬停一致
+    const now = Date.now();
+    if (now - (this.lastReactionAt.get(playerId) ?? -Infinity) < REACTION_MIN_INTERVAL_MS) return null;
+    this.lastReactionAt.set(playerId, now);
+    return { playerId, reaction: parsed };
   }
 
   getPublicState() {
