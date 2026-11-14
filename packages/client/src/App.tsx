@@ -8,11 +8,12 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type TransitionEvent as ReactTransitionEvent,
   type ReactNode,
   type RefObject,
 } from 'react';
-import { parseServerError } from '@coup/shared';
-import type { ActionType, Card, LobbyPlayer, PublicState, Role, ServerError } from '@coup/shared';
+import { parseServerError, PHRASES } from '@coup/shared';
+import type { ActionType, Card, LobbyPlayer, PublicState, Reaction, Role, ServerError } from '@coup/shared';
 import {
   clearIdentity,
   clearRoomCode,
@@ -25,12 +26,13 @@ import {
   send,
 } from './socket.ts';
 import type { ServerMessage } from './socket.ts';
-import { actionName, coinLegend, roleDescription, roleName, roleShortName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
-import { describeCountdown, describePending, describeWaiting, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, remainingSinceReceipt } from './narration.ts';
+import { ACTIONS, actionName, coinLegend, roleDescription, roleName, roleShortName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
+import { describeCountdown, describePending, describeReaction, describeWaiting, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, reactionText, remainingSinceReceipt } from './narration.ts';
 import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { strayFocusTarget, wrappedDialogFocus } from './dialog.ts';
 import { scheduleAutoDismiss } from './transient.ts';
+import { useSmoothHeight } from './motion.ts';
 import { closeShowdown, initialSession, reduceSession, rejoinIntent, type CountdownSnapshot, type Session, type Showcase, type ShowdownView } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
 import {
@@ -42,24 +44,26 @@ import {
   persistLocale,
   translate,
   type Locale,
+  type MessageKey,
   type NoticeDescriptor,
 } from './localization.ts';
-
-// coins / claim 只用于悬浮气泡里的图标说明
-const ACTIONS: { type: ActionType; needsTarget: boolean; coins?: string; claim?: Role }[] = [
-  { type: 'income', needsTarget: false, coins: '+1' },
-  { type: 'foreignAid', needsTarget: false, coins: '+2' },
-  { type: 'coup', needsTarget: true, coins: '−7' },
-  { type: 'tax', needsTarget: false, coins: '+3', claim: 'duke' },
-  { type: 'assassinate', needsTarget: true, coins: '−3', claim: 'assassin' },
-  { type: 'steal', needsTarget: true, coins: '+2', claim: 'captain' },
-  { type: 'exchange', needsTarget: false, claim: 'ambassador' },
-];
 
 interface TransientNoticeState {
   id: number;
   descriptor: NoticeDescriptor;
 }
+
+// 表态：每位玩家最多一条，新的顶掉旧的，REACTION_MS 后自己消失
+interface ReactionBubble {
+  id: number;
+  reaction: Reaction;
+}
+// 最近一条表态单独留着给读屏朗读：气泡过期时不能让更早的一条被重新朗读
+interface LatestReaction extends ReactionBubble {
+  playerId: string;
+}
+const REACTION_MS = 3000; // 与 style.css 里 .nameplate-text 的淡出时刻对齐
+const REACTION_COOLDOWN_MS = 2000; // 服务器按玩家只拦 1.5 秒，留出网络抖动（见 server/src/room.ts）
 
 interface TransientErrorState {
   id: number;
@@ -195,6 +199,19 @@ export function App() {
   const errorIdRef = useRef(0);
   const [notice, setNotice] = useState<TransientNoticeState | null>(null);
   const noticeIdRef = useRef(0);
+  const [reactions, setReactions] = useState<Record<string, ReactionBubble>>({});
+  const [latestReaction, setLatestReaction] = useState<LatestReaction | null>(null);
+  const reactionIdRef = useRef(0);
+  const reactionTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  // id 缺省：不管是哪一条都收起（玩家点掉）；给了 id：只在仍是这一条时收起（到时自动消失，不误删新顶上来的）
+  const dropReaction = useCallback((playerId: string, id?: number) => {
+    setReactions((current) => {
+      if (!current[playerId] || (id !== undefined && current[playerId].id !== id)) return current;
+      const next = { ...current };
+      delete next[playerId];
+      return next;
+    });
+  }, []);
   const [showRules, setShowRules] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -237,7 +254,21 @@ export function App() {
         case 'gameStarted':
           setError(null);
           showNotice({ key: 'gameStarted' });
+          setReactions({});
+          setLatestReaction(null);
           break;
+        case 'reaction': {
+          const id = ++reactionIdRef.current;
+          setReactions((current) => ({ ...current, [msg.playerId]: { id, reaction: msg.reaction } }));
+          setLatestReaction({ id, playerId: msg.playerId, reaction: msg.reaction });
+          clearTimeout(reactionTimers.current.get(msg.playerId));
+          reactionTimers.current.set(msg.playerId, setTimeout(() => {
+            dropReaction(msg.playerId, id);
+            // 读屏文字随铭牌一起清掉：否则之后切换语言会把这条旧表态再读一遍
+            setLatestReaction((latest) => (latest?.id === id ? null : latest));
+          }, REACTION_MS));
+          break;
+        }
         case 'events':
           setError(null);
           for (const e of msg.events) {
@@ -477,6 +508,9 @@ export function App() {
           publicState={publicState}
           hand={hand}
           notice={notice}
+          reactions={reactions}
+          latestReaction={latestReaction}
+          onDismissReaction={dropReaction}
           clock={clock}
           log={log}
           selectedAction={selectedAction}
@@ -799,6 +833,9 @@ interface RoomViewProps {
   publicState: PublicState | null;
   hand: Card[];
   notice: TransientNoticeState | null;
+  reactions: Record<string, ReactionBubble>;
+  latestReaction: LatestReaction | null;
+  onDismissReaction: (playerId: string) => void;
   selectedAction: ActionType | null;
   setSelectedAction: (a: ActionType | null) => void;
   onStart: () => void;
@@ -869,6 +906,9 @@ function RoomView(props: RoomViewProps) {
       me={me}
       hostId={props.hostId}
       notice={props.notice}
+      reactions={props.reactions}
+      latestReaction={props.latestReaction}
+      onDismissReaction={props.onDismissReaction}
       clock={props.clock}
       log={props.log}
       selectedAction={props.selectedAction}
@@ -1647,6 +1687,9 @@ function GameBoard(props: {
   me: string | undefined;
   hostId: string;
   notice: TransientNoticeState | null;
+  reactions: Record<string, ReactionBubble>;
+  latestReaction: LatestReaction | null;
+  onDismissReaction: (playerId: string) => void;
   selectedAction: ActionType | null;
   setSelectedAction: (a: ActionType | null) => void;
   onAction: (action: ActionType, targetId?: string) => void;
@@ -1700,6 +1743,34 @@ function GameBoard(props: {
   const rails: Record<SeatSide, PlacedSeat<SeatPlayer>[]> = { left: [], top: [], right: [] };
   for (const s of seats.opponents) rails[s.side].push(s);
 
+  const describe = (reaction: Reaction) => describeReaction(props.locale, reaction, (id) => nameOf(state, id));
+  // 铭牌：贴在座位下沿常驻占位，有人表态时亮起，表态出现不会推动任何东西。
+  // 文字由下方 live region 朗读，这里对读屏隐藏；点掉只是鼠标/触屏的便利，不进 Tab 顺序
+  const renderNameplate = (playerId: string) => {
+    const bubble = props.reactions[playerId];
+    return (
+      <div
+        className={`nameplate${bubble ? ' speaking' : ''}`}
+        aria-hidden="true"
+        title={bubble ? translate(props.locale, 'reactionDismiss') : undefined}
+        onClick={bubble ? () => props.onDismissReaction(playerId) : undefined}
+      >
+        {bubble && (
+          <span key={bubble.id} className="nameplate-text">
+            {describe(bubble.reaction).map((segment, i) =>
+              typeof segment === 'string' ? segment : (
+                <span key={i} className={segment.role ? `nameplate-role role--${segment.role}` : segment.target ? 'nameplate-target' : undefined}>
+                  {segment.text}
+                </span>
+              ),
+            )}
+          </span>
+        )}
+      </div>
+    );
+  };
+  const latest = props.latestReaction;
+
   // angle 缺省即自己的座位（近端）
   const renderSeat = (p: SeatPlayer, angle?: number) => {
     const isCurrent = p.id === state.currentPlayerId;
@@ -1750,6 +1821,7 @@ function GameBoard(props: {
             <CardView key={`rev-${i}`} role={role} locale={props.locale} unavailable small={p.id !== me} />
           ))}
         </div>
+        {renderNameplate(p.id)}
       </div>
     );
   };
@@ -1762,6 +1834,9 @@ function GameBoard(props: {
   else if (amLosing) controlMode = 'loss';
   else if (amExchanging) controlMode = 'exchange';
   const controlKey = `${controlMode}:${state.currentPlayerId ?? ''}:${pending?.actorId ?? ''}:${state.lossPlayerId ?? ''}`;
+  // 操作区外壳常驻，换内容（换模式、进出选目标、等待提示变化）时高度平滑过渡；内层按 controlKey 重挂载播入场动画
+  const controlsRef = useRef<HTMLDivElement>(null);
+  useSmoothHeight(controlsRef, [controlKey, props.selectedAction, waiting, props.locale]);
 
   const groups = groupLog(props.log, state, props.locale).reverse();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -1807,7 +1882,8 @@ function GameBoard(props: {
 
       {seats.self && renderSeat(seats.self)}
 
-      <div className="controls" key={controlKey}>
+      <div className="controls" ref={controlsRef}>
+      <div className="controls-body" key={controlKey}>
         {state.phase === 'choosingAction' && isMyTurn && (
           <Actions
             coins={myView?.coins ?? 0}
@@ -1853,6 +1929,18 @@ function GameBoard(props: {
 
         {waiting && <div className="waiting">{waiting}</div>}
       </div>
+      </div>
+
+        <ReactionTray state={state} me={me} locale={props.locale} onReact={(reaction) => props.onIntent({ type: 'react', reaction })} />
+
+        {/* 别人的表态读给读屏用户；自己的不读 */}
+        <div className="visually-hidden" aria-live="polite">
+          {latest && latest.playerId !== me && (
+            <span key={latest.id}>
+              {translate(props.locale, 'reactionLive', { name: nameOf(state, latest.playerId), text: reactionText(describe(latest.reaction)) })}
+            </span>
+          )}
+        </div>
 
         {groups.length > 0 && (
           <div className="log">
@@ -1871,13 +1959,19 @@ function GameBoard(props: {
                     )}
                     <span>{g.action}</span>
                   </button>
-                  {expanded.has(g.id) && g.entries.length > 0 && (
-                    <div className="log-entries">
-                      {g.entries.map((en) => (
-                        <div key={en.id} className="log-entry">
-                          {en.text}
-                        </div>
-                      ))}
+                  {/* 条目常驻，高度在 0fr ↔ 1fr 之间过渡（同 .notice-region）；收起时 inert，读屏和 Tab 跳过 */}
+                  {g.entries.length > 0 && (
+                    <div
+                      className={`collapse${expanded.has(g.id) ? ' open' : ''}`}
+                      {...{ inert: expanded.has(g.id) ? undefined : '' }}
+                    >
+                      <div className="log-entries">
+                        {g.entries.map((en) => (
+                          <div key={en.id} className="log-entry">
+                            {en.text}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1887,6 +1981,150 @@ function GameBoard(props: {
         )}
       </div>
     </div>
+  );
+}
+
+// 表态面板：记录上方，收起时只有一行。三类表态在同一块按钮区里切换；需要目标的行动预告沿用操作区「选目标」的做法。
+// 发出后收起并冷却 REACTION_COOLDOWN_MS；自己的铭牌等服务器转发回来才亮，与别人看到的一致
+function ReactionTray(props: {
+  state: PublicState;
+  me: string | undefined;
+  locale: Locale;
+  onReact: (reaction: Reaction) => void;
+}) {
+  type Tab = Reaction['kind'];
+  const TAB_LABELS: Record<Tab, MessageKey> = {
+    phrase: 'reactionTabPhrase', announcement: 'reactionTabAnnouncement', verbalClaim: 'reactionTabVerbalClaim',
+  };
+  const { state, locale } = props;
+  const ended = state.phase === 'gameOver';
+  // 牌局结束或自己已出局：没有下一步可预告、也没有角色可声称，只剩短语
+  const phrasesOnly = ended || !state.players.find((p) => p.id === props.me)?.alive;
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<Tab>('phrase');
+  const [pickingTargetFor, setPickingTargetFor] = useState<ActionType | null>(null);
+  const [coolingDown, setCoolingDown] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const trayRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const activeTab: Tab = phrasesOnly ? 'phrase' : tab;
+  // 选目标途中牌局结束或自己被淘汰：标签退回短语，选目标随之作废
+  const targeting = activeTab === 'announcement' ? pickingTargetFor : null;
+  const targets = state.players.filter((p) => p.alive && p.id !== props.me);
+  useSmoothHeight(gridRef, [activeTab, targeting, phrasesOnly, open, locale], { enabled: open, fade: true });
+
+  useEffect(() => {
+    if (!coolingDown) return;
+    const timeout = setTimeout(() => setCoolingDown(false), REACTION_COOLDOWN_MS);
+    return () => clearTimeout(timeout);
+  }, [coolingDown]);
+
+  // 收起只改 open；选目标的状态等收起动画结束再复位，免得面板边收边换内容
+  const close = () => {
+    setOpen(false);
+    toggleRef.current?.focus();
+  };
+  const send = (reaction: Reaction) => {
+    props.onReact(reaction);
+    setCoolingDown(true);
+    close();
+  };
+  const onCollapseEnd = (e: ReactTransitionEvent) => {
+    if (e.target !== e.currentTarget || e.propertyName !== 'grid-template-rows') return;
+    // 展开完成后滚进视口；手机上 scroll-margin 让出底部吸附的操作栏
+    if (open) trayRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    else setPickingTargetFor(null);
+  };
+
+  const buttons = () => {
+    if (activeTab === 'phrase') {
+      return PHRASES.map((phrase) => (
+        <button key={phrase} disabled={coolingDown} onClick={() => send({ kind: 'phrase', phrase })}>
+          {reactionText(describeReaction(locale, { kind: 'phrase', phrase }, () => ''))}
+        </button>
+      ));
+    }
+    if (activeTab === 'announcement') {
+      if (targeting) {
+        return (
+          <>
+            <p id="reaction-target-heading">{translate(locale, 'reactionPickTarget', { action: actionName(locale, targeting) })}</p>
+            {targets.map((t, i) => (
+              <button key={t.id} autoFocus={i === 0} disabled={coolingDown} onClick={() => send({ kind: 'announcement', action: targeting, targetId: t.id })}>
+                <span className="reaction-name">{t.name}</span>
+              </button>
+            ))}
+            <button className="ghost" onClick={() => setPickingTargetFor(null)}>{translate(locale, 'cancel')}</button>
+          </>
+        );
+      }
+      return ACTIONS.map((a) => (
+        <button
+          key={a.type}
+          disabled={coolingDown}
+          onClick={() => (a.needsTarget ? setPickingTargetFor(a.type) : send({ kind: 'announcement', action: a.type }))}
+        >
+          {actionName(locale, a.type)}
+        </button>
+      ));
+    }
+    return [true, false].map((has) => {
+      const label = translate(locale, has ? 'reactionHasLabel' : 'reactionHasNotLabel');
+      return (
+        <div key={String(has)} className="reaction-verbal-row" role="group" aria-label={label}>
+          <span className="reaction-verbal-label" aria-hidden="true">{label}</span>
+          {ROLES.map((role) => (
+            <button key={role} disabled={coolingDown} onClick={() => send({ kind: 'verbalClaim', has, role })}>
+              {roleName(locale, role)}
+            </button>
+          ))}
+        </div>
+      );
+    });
+  };
+
+  return (
+    <section className={`reaction${open ? ' open' : ''}`} onKeyDown={(e) => { if (e.key === 'Escape' && open) close(); }}>
+      <button
+        ref={toggleRef}
+        className="reaction-toggle"
+        aria-expanded={open}
+        aria-controls="reaction-tray"
+        onClick={() => (open ? close() : setOpen(true))}
+      >
+        <span className={`log-chevron${open ? ' open' : ''}`} aria-hidden="true">▸</span>
+        {translate(locale, 'reactionToggle')}
+      </button>
+      {/* 常驻挂载，高度在 0fr ↔ 1fr 之间过渡（同 .notice-region）；收起时 inert，读屏和 Tab 跳过 */}
+      <div className={`collapse reaction-collapse${open ? ' open' : ''}`} onTransitionEnd={onCollapseEnd} {...{ inert: open ? undefined : '' }}>
+        <div className="reaction-collapse-inner">
+          <div id="reaction-tray" ref={trayRef} className="reaction-tray">
+            <div className="reaction-tabs" role="tablist" aria-label={translate(locale, 'reactionToggle')}>
+              {(['phrase', 'announcement', 'verbalClaim'] as const).map((t) => (
+                <button
+                  key={t}
+                  role="tab"
+                  aria-selected={activeTab === t}
+                  disabled={phrasesOnly && t !== 'phrase'}
+                  onClick={() => { setTab(t); setPickingTargetFor(null); }}
+                >
+                  {translate(locale, TAB_LABELS[t])}
+                </button>
+              ))}
+            </div>
+            <div
+              ref={gridRef}
+              className={`reaction-grid reaction-grid--${activeTab}`}
+              role={targeting ? 'group' : undefined}
+              aria-labelledby={targeting ? 'reaction-target-heading' : undefined}
+            >
+              {phrasesOnly && <p className="reaction-hint">{translate(locale, ended ? 'reactionGameOverHint' : 'reactionEliminatedHint')}</p>}
+              {buttons()}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 

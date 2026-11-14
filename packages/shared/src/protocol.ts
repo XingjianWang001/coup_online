@@ -1,5 +1,14 @@
 import type { ActionType, GameEvent, PublicState, PrivateState, Role, Card } from '@coup/engine';
 
+// 表态：协议里只传短语的 key、行动、角色和目标玩家 ID，文字由各端按自己的语言渲染（ADR 0008）
+export const PHRASES = ['doubt', 'sure', 'dare', 'honest', 'framed', 'mercy', 'close', 'respect'] as const;
+export type Phrase = (typeof PHRASES)[number];
+
+export type Reaction =
+  | { kind: 'phrase'; phrase: Phrase }
+  | { kind: 'announcement'; action: ActionType; targetId?: string }
+  | { kind: 'verbalClaim'; has: boolean; role: Role };
+
 // 客户端 → 服务器 的意图
 export type ClientIntent =
   | { type: 'createRoom'; name: string; playerId?: string; secret?: string }
@@ -15,6 +24,8 @@ export type ClientIntent =
   | { type: 'revealShowdownCard'; cardId: string }
   // 对质中被质疑者当前对准哪张牌（悬停 / 键盘焦点 / 点选），只转发给房间，不进牌局状态
   | { type: 'focusShowdownCard'; slot: number | null }
+  // 表态：服务器校验、限流后转发给房间，不进牌局状态
+  | { type: 'react'; reaction: Reaction }
   | { type: 'resolveLoss'; cardId: string }
   | { type: 'resolveExchange'; keepIds: string[] }
   // 赛后揭晓：获胜者在牌局结束后向全房间公开一张暗牌
@@ -83,6 +94,7 @@ export type ServerMessage =
   | { type: 'privateState'; hand: Card[] }
   | { type: 'events'; events: GameEvent[] }
   | { type: 'showdownFocus'; slot: number | null }
+  | { type: 'reaction'; playerId: string; reaction: Reaction }
   // inRoom：这条连接此刻是否还在房间里。不在（房间已释放、重连时座位已不在……）则会话结束，客户端不必按错误码猜
   | ({ type: 'error'; inRoom: boolean } & ServerError)
   | { type: 'left'; reason: 'left' | 'replaced' };

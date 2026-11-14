@@ -106,6 +106,31 @@ const english = {
   passChallenge: 'Do not challenge',
   blockWith: 'Block with {role}',
   passBlock: 'Do not block',
+  reactionToggle: 'React',
+  reactionTabPhrase: 'Phrases',
+  reactionTabAnnouncement: 'Announce',
+  reactionTabVerbalClaim: 'Verbal claim',
+  reactionHasLabel: "I'm the",
+  reactionHasNotLabel: "I'm not the",
+  reactionPickTarget: 'Announce {action}: pick a target',
+  reactionGameOverHint: 'The game is over: phrases only',
+  reactionEliminatedHint: "You've been eliminated: phrases only",
+  reactionDismiss: 'Click to hide',
+  reactionLive: '{name}: {text}',
+  phraseDoubt: 'Yeah, right.',
+  phraseSure: 'You sure?',
+  phraseDare: 'Go on, challenge me.',
+  phraseHonest: "I'm an honest player.",
+  phraseFramed: "I've been framed!",
+  phraseMercy: 'Have mercy.',
+  phraseClose: 'That was close.',
+  phraseRespect: 'Well played.',
+  announcementTake: "I'll take {action}.",
+  announcementPlain: "I'll {action}.",
+  announcementTargeted: "I'll {action} {target}.",
+  announcementSteal: "I'll {action} from {target}.",
+  verbalClaimHas: "I'm the {role}.",
+  verbalClaimHasNot: "I'm not the {role}.",
   exchangePrompt: 'Exchange: choose {count} cards to keep',
   confirmKeep: 'Keep selected cards',
   cardBack: 'Hidden card',
@@ -135,7 +160,7 @@ const english = {
   logExchangeDrew: '{player} draws {count} cards',
 } as const;
 
-type MessageKey = keyof typeof english;
+export type MessageKey = keyof typeof english;
 
 const simplifiedChinese = {
   appTitle: '政变 Coup',
@@ -227,6 +252,31 @@ const simplifiedChinese = {
   passChallenge: '不质疑',
   blockWith: '用{role}阻挡',
   passBlock: '不阻挡',
+  reactionToggle: '表态',
+  reactionTabPhrase: '短语',
+  reactionTabAnnouncement: '行动预告',
+  reactionTabVerbalClaim: '口头声称',
+  reactionHasLabel: '我有',
+  reactionHasNotLabel: '我没有',
+  reactionPickTarget: '预告{action}：选目标',
+  reactionGameOverHint: '牌局已结束，只能用短语',
+  reactionEliminatedHint: '你已被淘汰，只能用短语',
+  reactionDismiss: '点击收起',
+  reactionLive: '{name}：{text}',
+  phraseDoubt: '我信你个鬼',
+  phraseSure: '你确定？',
+  phraseDare: '来质疑我啊',
+  phraseHonest: '我是老实人',
+  phraseFramed: '冤枉啊',
+  phraseMercy: '手下留情',
+  phraseClose: '好险',
+  phraseRespect: '佩服',
+  announcementTake: '我要拿{action}',
+  announcementPlain: '我要{action}',
+  announcementTargeted: '我要{action} {target}',
+  announcementSteal: '我要{action} {target}',
+  verbalClaimHas: '我有{role}',
+  verbalClaimHasNot: '我没有{role}',
   exchangePrompt: '交换：请选择保留的 {count} 张牌',
   confirmKeep: '确认保留',
   cardBack: '暗牌',
@@ -280,6 +330,8 @@ interface MessageValues {
   coinCountOne: { count: number };
   influenceCount: { count: number };
   blockWith: { role: string };
+  reactionPickTarget: { action: string };
+  reactionLive: { name: string; text: string };
   exchangePrompt: { count: number };
   cardFace: { role: string };
   cardRevealed: { role: string };
@@ -351,6 +403,17 @@ export function translate<Key extends MessageKey>(
     const value = values?.[name];
     return value === undefined ? placeholder : String(value);
   });
+}
+
+/** 与 translate 相同，但占位符换成调用方给的片段（不转成字符串），让界面能单独给某个词上色 */
+export function translateParts<Part>(locale: Locale, key: MessageKey, parts: Record<string, Part>): Array<string | Part> {
+  return dictionaries[locale][key]
+    .split(/(\{\w+\})/)
+    .filter(Boolean)
+    .map((chunk) => {
+      const name = /^\{(\w+)\}$/.exec(chunk)?.[1];
+      return name !== undefined && Object.hasOwn(parts, name) ? parts[name] : chunk;
+    });
 }
 
 export function localizeServerError(locale: Locale, value: unknown): string {

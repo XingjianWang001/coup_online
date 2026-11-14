@@ -230,6 +230,14 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       if (focus) socket.to(room.code).emit('showdownFocus', focus);
       break;
     }
+    case 'react': {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room) throw new ClientError({ code: 'roomNotFound' });
+      // 发给整个房间（含发送者）：自己的座位也要亮起，且只在服务器接受后才亮
+      const reaction = room.react(socket.data.playerId, socket.id, raw.reaction);
+      if (reaction) io.to(room.code).emit('reaction', reaction);
+      break;
+    }
     default: {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new ClientError({ code: 'roomNotFound' });

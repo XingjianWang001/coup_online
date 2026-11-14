@@ -125,7 +125,9 @@ async function main() {
   await cdp('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: mobile ? 2 : 1, mobile });
   if (mobile) await cdp('Emulation.setTouchEmulationEnabled', { enabled: true });
   if (process.env.REDUCED) await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
-  // headless Chrome 不认 --lang：语言只能经界面自己的持久化键注入
+  // headless Chrome 不认 --lang：语言只能经界面自己的持久化键注入。
+  // 没开 Page 域时 addScriptToEvaluateOnNewDocument 只是登记、不会在新文档里执行，所以先 Page.enable
+  if (process.env.LOCALE) await cdp('Page.enable');
   if (process.env.LOCALE) await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `localStorage.setItem('coup.locale', ${JSON.stringify(process.env.LOCALE)})` });
 
   // CDP 的 Runtime.evaluate 不支持顶层 await：表达式统一包进 async 函数

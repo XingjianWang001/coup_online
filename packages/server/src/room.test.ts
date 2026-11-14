@@ -719,3 +719,108 @@ describe('Room 对质悬停同步', () => {
     expect(() => room.focusShowdownCard(alice.id, 'sock1', '0')).toThrow('illegalIntent');
   });
 });
+
+describe('Room 表态', () => {
+  afterEach(() => vi.useRealTimers());
+
+  function playingRoom() {
+    const made = makeRoom({ startingPlayerRandom: () => 0 });
+    const { room } = made;
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    const carol = room.addPlayer('Carol', 'sock3');
+    room.hostId = alice.id;
+    room.startGame(alice.id, 'sock1');
+    return { ...made, alice, bob, carol };
+  }
+
+  it('牌局中的短语表态校验后交给传输层转发，不改变牌局', () => {
+    const { room, bob, events } = playingRoom();
+    const before = room.game;
+    events.onBroadcast.mockClear();
+    expect(room.react(bob.id, 'sock2', { kind: 'phrase', phrase: 'sure' })).toEqual({
+      playerId: bob.id,
+      reaction: { kind: 'phrase', phrase: 'sure' },
+    });
+    expect(room.game).toBe(before);
+    expect(events.onBroadcast).not.toHaveBeenCalled();
+  });
+
+  it('大厅阶段没有座位，不能表态', () => {
+    const { room } = makeRoom();
+    const alice = room.addPlayer('Alice', 'sock1');
+    expect(() => room.react(alice.id, 'sock1', { kind: 'phrase', phrase: 'sure' })).toThrow('gameNotStarted');
+  });
+
+  it('拒绝格式不对或不在预设里的表态：自写文字进不来', () => {
+    const { room, bob } = playingRoom();
+    for (const bad of [
+      null,
+      'sure',
+      { kind: 'phrase', phrase: '随便写点什么' },
+      { kind: 'phrase' },
+      { kind: 'chat', text: 'hello' },
+      { kind: 'announcement', action: 'nap' },
+      { kind: 'verbalClaim', has: true, role: 'king' },
+      { kind: 'verbalClaim', has: 'yes', role: 'duke' },
+    ]) {
+      expect(() => room.react(bob.id, 'sock2', bad), JSON.stringify(bad)).toThrow('illegalIntent');
+    }
+  });
+
+  it('行动预告：针对性行动只能指向对手，非针对性行动不带目标；目标已被淘汰时静默丢弃', () => {
+    const { room, alice, bob, carol } = playingRoom();
+    room.apply((g) => forfeit(g, carol.id));
+    expect(room.react(bob.id, 'sock2', { kind: 'announcement', action: 'assassinate', targetId: alice.id })).toEqual({
+      playerId: bob.id,
+      reaction: { kind: 'announcement', action: 'assassinate', targetId: alice.id },
+    });
+    expect(room.react(alice.id, 'sock1', { kind: 'announcement', action: 'tax' })?.reaction).toEqual({
+      kind: 'announcement',
+      action: 'tax',
+    });
+    // 客户端选目标时 Carol 还在，到服务器时已被淘汰：不报错，只是不转发
+    expect(room.react(alice.id, 'sock1', { kind: 'announcement', action: 'coup', targetId: carol.id })).toBeNull();
+    for (const bad of [
+      { kind: 'announcement', action: 'steal' },
+      { kind: 'announcement', action: 'steal', targetId: bob.id },
+      { kind: 'announcement', action: 'coup', targetId: 'nobody' },
+      { kind: 'announcement', action: 'income', targetId: alice.id },
+    ]) {
+      expect(() => room.react(bob.id, 'sock2', bad), JSON.stringify(bad)).toThrow('illegalIntent');
+    }
+  });
+
+  it('被淘汰的玩家和牌局结束后只能用短语：其余表态静默丢弃', () => {
+    const { room, alice, bob, carol } = playingRoom();
+    const claim = { kind: 'verbalClaim', has: true, role: 'duke' };
+    const income = { kind: 'announcement', action: 'income' };
+    room.apply((g) => forfeit(g, carol.id));
+    expect(room.react(carol.id, 'sock3', claim)).toBeNull();
+    expect(room.react(carol.id, 'sock3', income)).toBeNull();
+    expect(room.react(carol.id, 'sock3', { kind: 'phrase', phrase: 'framed' })).not.toBeNull();
+
+    room.apply((g) => forfeit(g, alice.id));
+    expect(room.game?.phase).toBe('gameOver');
+    expect(room.react(bob.id, 'sock2', claim)).toBeNull();
+    expect(room.react(bob.id, 'sock2', { kind: 'phrase', phrase: 'respect' })).not.toBeNull();
+  });
+
+  it('按玩家限流：同一人 1.5 秒内的第二条直接丢弃，不影响其他人', () => {
+    vi.useFakeTimers();
+    const { room, alice, bob } = playingRoom();
+    const sure = { kind: 'phrase', phrase: 'sure' };
+    expect(room.react(bob.id, 'sock2', sure)).not.toBeNull();
+    vi.advanceTimersByTime(1_499);
+    expect(room.react(bob.id, 'sock2', sure)).toBeNull();
+    expect(room.react(alice.id, 'sock1', sure)).not.toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(room.react(bob.id, 'sock2', sure)).not.toBeNull();
+  });
+
+  it('被接管的旧连接不能表态', () => {
+    const { room, bob } = playingRoom();
+    room.addPlayer('Bob', 'sock2b', { id: bob.id, secret: bob.secret });
+    expect(() => room.react(bob.id, 'sock2', { kind: 'phrase', phrase: 'sure' })).toThrow();
+  });
+});

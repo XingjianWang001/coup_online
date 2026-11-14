@@ -1,6 +1,6 @@
-import type { GameEvent, PublicState } from '@coup/shared';
-import { translate, type Locale } from './localization.ts';
-import { actionName, roleName } from './rules.ts';
+import type { ActionType, GameEvent, Phrase, PublicState, Reaction, Role } from '@coup/shared';
+import { translate, translateParts, type Locale, type MessageKey } from './localization.ts';
+import { ACTIONS, actionName, roleName } from './rules.ts';
 
 export function nameOf(state: PublicState, id: string | null | undefined): string {
   if (!id) return '？';
@@ -184,3 +184,35 @@ export function groupLog(entries: LogEntry[], state: PublicState, locale: Locale
   }
   return groups;
 }
+
+/** 表态文字的一段：role 表示这段是角色名或该角色的行动名（界面按角色上色），target 表示这段是目标昵称 */
+export type ReactionSegment = string | { text: string; role?: Role; target?: true };
+
+const PHRASE_MESSAGES: Record<Phrase, MessageKey> = {
+  doubt: 'phraseDoubt', sure: 'phraseSure', dare: 'phraseDare', honest: 'phraseHonest',
+  framed: 'phraseFramed', mercy: 'phraseMercy', close: 'phraseClose', respect: 'phraseRespect',
+};
+const ANNOUNCEMENT_MESSAGES: Record<ActionType, MessageKey> = {
+  income: 'announcementTake', foreignAid: 'announcementTake', tax: 'announcementPlain', exchange: 'announcementPlain',
+  coup: 'announcementTargeted', assassinate: 'announcementTargeted', steal: 'announcementSteal',
+};
+
+export function describeReaction(locale: Locale, reaction: Reaction, nameOf: (id: string) => string): ReactionSegment[] {
+  switch (reaction.kind) {
+    case 'phrase':
+      return [translate(locale, PHRASE_MESSAGES[reaction.phrase])];
+    case 'verbalClaim':
+      return translateParts(locale, reaction.has ? 'verbalClaimHas' : 'verbalClaimHasNot', {
+        role: { text: roleName(locale, reaction.role), role: reaction.role },
+      });
+    case 'announcement':
+      return translateParts<ReactionSegment>(locale, ANNOUNCEMENT_MESSAGES[reaction.action], {
+        // 行动名按该行动要声称的角色上色；收入、外援、政变没有角色
+        action: { text: actionName(locale, reaction.action), role: ACTIONS.find((a) => a.type === reaction.action)?.claim },
+        target: { text: reaction.targetId ? nameOf(reaction.targetId) : '', target: true },
+      });
+  }
+}
+
+export const reactionText = (segments: ReactionSegment[]): string =>
+  segments.map((s) => (typeof s === 'string' ? s : s.text)).join('');
