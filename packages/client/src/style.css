@@ -895,6 +895,22 @@ input:focus-visible {
   transform: rotate(90deg);
 }
 
+/* 展开收起：高度 0fr ↔ 1fr 过渡，与箭头旋转同步 */
+.log-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.log-collapse.open {
+  grid-template-rows: 1fr;
+}
+
+.log-collapse > .log-entries {
+  min-height: 0;
+  overflow: hidden;
+}
+
 .log-entries {
   margin-left: 20px;
   padding-left: var(--sp-3);
@@ -1230,7 +1246,7 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.controls { animation: slide-in 220ms cubic-bezier(0.16, 1, 0.3, 1); }
+.controls-body { animation: slide-in 220ms cubic-bezier(0.16, 1, 0.3, 1); }
 .log { animation: slide-in 200ms cubic-bezier(0.16, 1, 0.3, 1); }
 
 /* 倒计时紧迫：金 → 琥珀呼吸 */
@@ -1266,14 +1282,14 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   .cards-row .card,
   .card-back,
   .notice,
-  .controls,
+  .controls-body,
   .log,
   .overlay,
   .panel {
     animation: none;
   }
   .notice,
-  .controls,
+  .controls-body,
   .log,
   .overlay,
   .panel {
@@ -1286,6 +1302,7 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   /* 不呼吸，但保留「快到时」的状态：静态琥珀 */
   .narration-timer.urgent { animation: none; color: var(--warn); }
   .role-btn { transition: none; }
+  .log-collapse { transition: none; }
   .notice-region {
     transition: grid-template-rows 1ms linear 119ms;
   }

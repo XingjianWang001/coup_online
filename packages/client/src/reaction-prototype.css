@@ -1,0 +1,455 @@
+/* PROTOTYPE（抛弃型）：表态发言行 A/B/C 与表态面板。只由 ReactionPrototype.tsx 引入。 */
+
+/* ---------- 发言行：每个座位常驻一行，空着也占位，表态出现时不推动任何东西 ---------- */
+.speech {
+  --speech-lines: 2;
+  --speech-lh: 1.3;
+  font-size: 13px;
+  line-height: var(--speech-lh);
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text);
+}
+
+.speech:has(.speech-bubble) {
+  cursor: pointer;
+}
+
+.speech-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--speech-lines);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* 目标昵称：粗一档；超长昵称在名字内部截断，动作本身不被吃掉 */
+.speech-target {
+  font-weight: 600;
+  display: inline-block;
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* 自己的座位够宽，一行足够 */
+.seat.self .speech {
+  --speech-lines: 1;
+  flex-basis: 100%;
+}
+
+.seat.self[class*='speech-'] {
+  flex-wrap: wrap;
+  row-gap: var(--sp-2);
+}
+
+/* 出局座位：原来整块 opacity 0.4，会把发言行一起压暗。改为只压暗座位内容 */
+.seat.dead[class*='speech-'] {
+  opacity: 1;
+  filter: none;
+  border-color: var(--line-2);
+}
+
+.seat.dead[class*='speech-'] > :not(.speech) {
+  opacity: 0.4;
+  filter: saturate(0.4);
+}
+
+/* 唯一的动效：说出口——从轻微失焦处浮起、清晰，最后自己淡出；时长与 BUBBLE_MS（3s）对齐 */
+.speech-bubble {
+  animation:
+    speak-in 280ms cubic-bezier(0.16, 1, 0.3, 1),
+    speak-out 320ms ease-in 2680ms forwards;
+}
+
+@keyframes speak-in {
+  from { opacity: 0; translate: 0 5px; filter: blur(3px); }
+}
+
+@keyframes speak-out {
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .speech-bubble {
+    animation:
+      fade-in 160ms ease,
+      speak-out 200ms ease 2800ms forwards;
+  }
+}
+
+/* ---------- A 题注：座位底部，细线隔开的一行字 ---------- */
+.speech-A .speech {
+  height: calc(1em * var(--speech-lh) * var(--speech-lines) + var(--sp-2));
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--line-2);
+  align-items: flex-start;
+}
+
+.seat.self.speech-A .speech {
+  justify-content: flex-start;
+}
+
+/* ---------- B 对白：座位顶部的气泡，尾巴指向名字 ---------- */
+.speech-B .speech {
+  height: calc(1em * var(--speech-lh) * var(--speech-lines) + 14px);
+  align-items: flex-end;
+}
+
+.speech-B .speech-bubble {
+  position: relative;
+  max-width: 100%;
+  padding: 3px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+
+.speech-B .speech-bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 8px;
+  height: 8px;
+  translate: -50% 0;
+  rotate: 45deg;
+  background: var(--panel-2);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.seat.self.speech-B .speech {
+  order: -1;
+  justify-content: flex-start;
+}
+
+.seat.self.speech-B .speech-bubble::after {
+  left: 18px;
+}
+
+/* ---------- C 铭牌：贴在座位下沿的一条底带，有人说话时底带亮起 ---------- */
+.seat.opponent.speech-C {
+  --pad-x: var(--sp-3);
+  --pad-b: var(--sp-3);
+}
+
+.seat.self.speech-C {
+  --pad-x: var(--sp-6);
+  --pad-b: var(--sp-4);
+}
+
+.speech-C .speech {
+  height: calc(1em * var(--speech-lh) * var(--speech-lines) + var(--sp-3));
+  width: calc(100% + 2 * var(--pad-x));
+  margin: var(--sp-1) calc(-1 * var(--pad-x)) calc(-1 * var(--pad-b));
+  padding: 0 var(--sp-2);
+  background: color-mix(in srgb, var(--canvas) 55%, var(--felt));
+  border-top: 1px solid var(--line-2);
+  border-radius: 0 0 calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px);
+  transition: background-color 0.3s ease;
+}
+
+.speech-C .speech:has(.speech-bubble) {
+  background: var(--panel-2);
+}
+
+/* 自己的座位宽度由内容决定：改成网格（留白 | 名字 | 间距 | 牌 | 留白），铭牌跨满整行。
+   两侧 1fr 留白在桌面端（max-content）收为 0，在手机端（width: 100%）把名字和牌居中，铭牌仍贴满座位。
+   contain: inline-size 让铭牌文字不参与座位宽度计算——否则说话时座位会被撑宽、空着时又把名字和牌挤成两行 */
+.seat.self.speech-C {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto var(--sp-5) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0;
+}
+
+.seat.self.speech-C > .seat-head { grid-column: 2; }
+.seat.self.speech-C > .cards-row { grid-column: 4; }
+
+.seat.self.speech-C .speech {
+  --speech-lines: 2; /* 和对手的铭牌同高 */
+  grid-column: 1 / -1;
+  width: auto;
+  justify-content: center;
+  contain: inline-size;
+}
+
+/* 角色名、带角色的行动名：只给文字上角色色（.role--* 提供颜色），底色不变；加粗一档保证可读 */
+.speech-role {
+  font-weight: 600;
+}
+
+/* 亮起的铭牌（panel-2）上，刺客红、女伯爵紫只有约 4:1：五色统一向象牙色提一点，过 4.5:1 */
+.speech-role.role--duke       { color: color-mix(in oklch, var(--duke) 80%, var(--text)); }
+.speech-role.role--assassin   { color: color-mix(in oklch, var(--assassin) 80%, var(--text)); }
+.speech-role.role--captain    { color: color-mix(in oklch, var(--captain) 80%, var(--text)); }
+.speech-role.role--ambassador { color: color-mix(in oklch, var(--ambassador) 80%, var(--text)); }
+.speech-role.role--contessa   { color: color-mix(in oklch, var(--contessa) 80%, var(--text)); }
+
+/* ---------- 牌桌加高：发言行让每个对手座位高了两行字 ---------- */
+@media (min-width: 769px) {
+  /* 定宽：气泡文字长短不再撑宽座位 */
+  .seat.opponent[class*='speech-'] {
+    width: 168px;
+  }
+  .table:has(.speech) {
+    height: 500px;
+    --cy: calc(100% - 100px);
+    --ry: calc(100% - 200px);
+  }
+  .table[data-seats='1']:has(.speech) { height: 360px; }
+  .table[data-seats='2']:has(.speech) { height: 290px; }
+}
+
+/* ---------- 表态面板：记录上方，收起时只有一行 ---------- */
+.reaction {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 展开与收起走同一条曲线：高度 0fr ↔ 1fr，记录随之平滑上下 */
+.reaction-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 200ms ease;
+}
+
+.reaction.open .reaction-collapse {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.reaction-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 与切换按钮的间距放在会被裁掉的内层里，收起时不留缝 */
+.reaction-collapse-inner > .reaction-tray {
+  margin-top: var(--sp-2);
+}
+
+/* 减少动态：几乎瞬时，但仍触发 transitionend（复位、滚动靠它） */
+@media (prefers-reduced-motion: reduce) {
+  .reaction-collapse {
+    transition-duration: 1ms;
+  }
+}
+
+button.reaction-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: none;
+  border: none;
+  padding: var(--sp-1) var(--sp-2);
+  margin-left: calc(-1 * var(--sp-2));
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+button.reaction-toggle:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+
+.reaction-tray {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+
+.reaction-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 3px;
+  background: var(--canvas);
+  border-radius: var(--r-md);
+}
+
+.reaction-tabs button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: calc(var(--r-md) - 3px);
+  color: var(--text-2);
+  font-size: 14px;
+  padding: 8px 10px;
+}
+
+.reaction-tabs button:hover:not(:disabled) {
+  background: var(--felt);
+  border-color: transparent;
+  color: var(--text);
+}
+
+.reaction-tabs button[aria-selected='true'] {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.reaction-hint {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.reaction-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: var(--sp-2);
+}
+
+.reaction-grid button {
+  font-size: 14px;
+  padding: 8px 12px;
+}
+
+.reaction-grid > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.reaction-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reaction-grid--verbal {
+  grid-template-columns: 1fr;
+}
+
+.reaction-verbal-row {
+  display: grid;
+  grid-template-columns: 5.5em repeat(5, minmax(0, 1fr));
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.reaction-verbal-label {
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .reaction-tray {
+    scroll-margin-bottom: 120px;
+  }
+  .reaction-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .reaction-grid--verbal {
+    grid-template-columns: 1fr;
+  }
+  .reaction-verbal-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .reaction-verbal-label {
+    grid-column: 1 / -1;
+  }
+  .reaction-tabs button {
+    padding-inline: 4px;
+    font-size: 13px;
+  }
+  .seat.opponent.speech-C {
+    --pad-x: var(--sp-1);
+    --pad-b: var(--sp-2);
+  }
+  .seat.self.speech-C {
+    --pad-x: var(--sp-4);
+    --pad-b: var(--sp-3);
+  }
+  .speech {
+    font-size: 12px;
+  }
+  .speech-B .speech-bubble {
+    padding: 2px 6px;
+  }
+}
+
+/* ---------- 原型外壳：故意做成和牌桌无关的样子 ---------- */
+.proto-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.proto-bar {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  translate: -50% 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  max-width: calc(100vw - 16px);
+  overflow-x: auto;
+  background: #f4f1ea;
+  color: #111;
+  border-radius: 999px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.5);
+  font: 600 12px/1 system-ui, sans-serif;
+}
+
+.proto-bar button {
+  min-height: 28px;
+  min-width: 28px;
+  padding: 4px 10px;
+  background: transparent;
+  color: #111;
+  border: 1px solid #c9c3b6;
+  border-radius: 999px;
+  font: inherit;
+  white-space: nowrap;
+}
+
+.proto-bar button:hover:not(:disabled) {
+  background: #e4dfd3;
+  border-color: #999;
+}
+
+.proto-bar button[aria-pressed='true'] {
+  background: #111;
+  color: #f4f1ea;
+  border-color: #111;
+}
+
+.proto-label {
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+.proto-sep {
+  width: 1px;
+  height: 18px;
+  background: #c9c3b6;
+}
