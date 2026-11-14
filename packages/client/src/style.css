@@ -476,8 +476,10 @@ input:focus-visible {
   height: 500px;
 }
 
+/* 只有一个对手时座位落在正上方，中心固定在 100px，叙述中心在 0.65 × 高度 − 30px：
+   带铭牌的座位约 186px 高，牌桌至少约 408px 叙述才不压到它（scripts/ui-check-table.mjs 会检查） */
 .table[data-seats='1'] {
-  height: 360px;
+  height: 420px;
 }
 
 .table[data-seats='2'] {
