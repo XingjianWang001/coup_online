@@ -31,6 +31,7 @@ import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { strayFocusTarget, wrappedDialogFocus } from './dialog.ts';
 import { scheduleAutoDismiss } from './transient.ts';
+import { useSmoothHeight } from './motion.ts';
 import { closeShowdown, initialSession, reduceSession, rejoinIntent, type CountdownSnapshot, type Session, type Showcase, type ShowdownView } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
 import {
@@ -1762,6 +1763,9 @@ function GameBoard(props: {
   else if (amLosing) controlMode = 'loss';
   else if (amExchanging) controlMode = 'exchange';
   const controlKey = `${controlMode}:${state.currentPlayerId ?? ''}:${pending?.actorId ?? ''}:${state.lossPlayerId ?? ''}`;
+  // 操作区外壳常驻，换内容（换模式、进出选目标、等待提示变化）时高度平滑过渡；内层按 controlKey 重挂载播入场动画
+  const controlsRef = useRef<HTMLDivElement>(null);
+  useSmoothHeight(controlsRef, [controlKey, props.selectedAction, waiting, props.locale]);
 
   const groups = groupLog(props.log, state, props.locale).reverse();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -1807,7 +1811,8 @@ function GameBoard(props: {
 
       {seats.self && renderSeat(seats.self)}
 
-      <div className="controls" key={controlKey}>
+      <div className="controls" ref={controlsRef}>
+      <div className="controls-body" key={controlKey}>
         {state.phase === 'choosingAction' && isMyTurn && (
           <Actions
             coins={myView?.coins ?? 0}
@@ -1853,6 +1858,7 @@ function GameBoard(props: {
 
         {waiting && <div className="waiting">{waiting}</div>}
       </div>
+      </div>
 
         {groups.length > 0 && (
           <div className="log">
@@ -1871,13 +1877,19 @@ function GameBoard(props: {
                     )}
                     <span>{g.action}</span>
                   </button>
-                  {expanded.has(g.id) && g.entries.length > 0 && (
-                    <div className="log-entries">
-                      {g.entries.map((en) => (
-                        <div key={en.id} className="log-entry">
-                          {en.text}
-                        </div>
-                      ))}
+                  {/* 条目常驻，高度在 0fr ↔ 1fr 之间过渡（同 .notice-region）；收起时 inert，读屏和 Tab 跳过 */}
+                  {g.entries.length > 0 && (
+                    <div
+                      className={`log-collapse${expanded.has(g.id) ? ' open' : ''}`}
+                      {...{ inert: expanded.has(g.id) ? undefined : '' }}
+                    >
+                      <div className="log-entries">
+                        {g.entries.map((en) => (
+                          <div key={en.id} className="log-entry">
+                            {en.text}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
