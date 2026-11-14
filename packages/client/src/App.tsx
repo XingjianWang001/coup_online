@@ -1635,7 +1635,7 @@ function CoinIcon() {
   );
 }
 
-// 机器人头像：电脑玩家的徽标，可访问名称随语言
+// 电脑玩家的徽标，可访问名称随语言
 function ComputerBadge({ locale }: { locale: Locale }) {
   const label = translate(locale, 'computerPlayer');
   return (
