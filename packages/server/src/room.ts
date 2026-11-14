@@ -18,6 +18,7 @@ import {
   resolveLoss,
   resolveLossTimeout,
   resolveShowdownTimeout,
+  revealPostGameCard,
   revealShowdownCard,
 } from '@coup/engine';
 import type { GameRepository } from './repository.ts';
@@ -347,6 +348,8 @@ export class Room {
           return this.apply((g) => passBlock(g, playerId));
         case 'revealShowdownCard':
           return this.apply((g) => revealShowdownCard(g, playerId, intent.cardId as string));
+        case 'revealPostGameCard':
+          return this.apply((g) => revealPostGameCard(g, playerId, intent.cardId as string));
         case 'resolveLoss':
           return this.apply((g) => resolveLoss(g, playerId, intent.cardId as string));
         case 'resolveExchange':
