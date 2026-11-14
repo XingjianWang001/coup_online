@@ -16,6 +16,7 @@ import {
   resolveLoss,
   resolveLossTimeout,
   resolveShowdownTimeout,
+  revealPostGameCard,
   revealShowdownCard,
 } from './index.ts';
 import type { GameState, Role } from './types.ts';
@@ -710,6 +711,47 @@ describe('Forfeit during an Exchange', () => {
     expect(s.phase).toBe('gameOver');
     expect(s.players.find((p) => p.id === 'a')!.hand).toHaveLength(2);
     expect(publicState(s).players.find((p) => p.id === 'a')!.handCount).toBe(2);
+  });
+});
+
+describe('Post-game Reveal', () => {
+  // b coups a's last card: b wins holding [captain, duke]
+  function finished() {
+    const s = setup({ a: ['duke', 'contessa'], b: ['captain', 'duke'] });
+    const a = s.players.find((p) => p.id === 'a')!;
+    a.revealed.push(a.hand.pop()!);
+    s.currentPlayerId = 'b';
+    s.players.find((p) => p.id === 'b')!.coins = 7;
+    chooseAction(s, 'b', 'coup', 'a');
+    resolveLoss(s, 'a', a.hand[0].id);
+    expect(s.phase).toBe('gameOver');
+    return s;
+  }
+  const hand = (s: GameState, id: string) => s.players.find((p) => p.id === id)!.hand;
+  const view = (s: GameState, id: string) => publicState(s).players.find((p) => p.id === id)!;
+
+  it('lets the winner reveal hidden cards one at a time, exposing slot and role publicly', () => {
+    const s = finished();
+    expect(view(s, 'b').postGameRevealed).toEqual([]);
+
+    expect(revealPostGameCard(s, 'b', hand(s, 'b')[1].id)).toEqual([{ type: 'postGameRevealed', playerId: 'b', role: 'duke', slot: 1 }]);
+    expect(view(s, 'b').postGameRevealed).toEqual([{ slot: 1, role: 'duke' }]);
+
+    revealPostGameCard(s, 'b', hand(s, 'b')[0].id);
+    expect(view(s, 'b').postGameRevealed).toEqual([{ slot: 1, role: 'duke' }, { slot: 0, role: 'captain' }]);
+    expect(view(s, 'b')).toMatchObject({ handCount: 2, revealed: [] });
+  });
+
+  it('rejects a non-winner, an unfinished game, a card not in hand, and a repeat reveal', () => {
+    const s = finished();
+    expect(() => revealPostGameCard(s, 'a', hand(s, 'b')[0].id)).toThrow(GameRuleError);
+    expect(() => revealPostGameCard(s, 'b', 'nope')).toThrow(GameRuleError);
+    revealPostGameCard(s, 'b', hand(s, 'b')[0].id);
+    expect(() => revealPostGameCard(s, 'b', hand(s, 'b')[0].id)).toThrow(GameRuleError);
+
+    const live = setup({ a: ['duke', 'contessa'], b: ['captain', 'duke'] });
+    expect(() => revealPostGameCard(live, 'a', hand(live, 'a')[0].id)).toThrow(GameRuleError);
+    expect(view(live, 'a').postGameRevealed).toEqual([]);
   });
 });
 

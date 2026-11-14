@@ -31,5 +31,6 @@ export {
   resolveLoss,
   resolveLossTimeout,
   resolveShowdownTimeout,
+  revealPostGameCard,
   revealShowdownCard,
 } from './game.ts';
