@@ -192,6 +192,7 @@ export class Room {
 
   removePlayer(id: string): void {
     this.players.delete(id);
+    if (id === this.previousWinnerId) this.previousWinnerId = null;
     this.clearDisconnectTimer(id);
     if (!this.hasPresentPlayer()) this.scheduleEmptyCleanup();
     if (this.players.size > 0 && id === this.hostId) {

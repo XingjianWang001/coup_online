@@ -582,6 +582,7 @@ describe('Room 牌局结束后', () => {
     const { room, alice, bob } = finishedRoom();
     room.rematch(alice.id, 'sock1');
     room.leavePlayer(bob.id, 'sock2');
+    expect(room.previousWinnerId).toBeNull();
     room.addPlayer('Bob', 'sock2b', { id: bob.id, secret: bob.secret });
     expect(crowned(room)).toEqual([]);
   });
