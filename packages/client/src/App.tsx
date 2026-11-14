@@ -840,9 +840,16 @@ function RoomView(props: RoomViewProps) {
         <ul className="playerlist">
           {props.players.map((p) => (
             <li key={p.id} className={p.isHost ? 'host' : ''}>
-              {p.name}
-              {p.isHost && translate(props.locale, 'hostSuffix')}
-              {!p.connected && translate(props.locale, 'offlineSuffix')}
+              <span>
+                {p.isPreviousWinner && (
+                  <span role="img" aria-label={translate(props.locale, 'previousWinner')} title={translate(props.locale, 'previousWinner')}>
+                    <CrownIcon />{' '}
+                  </span>
+                )}
+                {p.name}
+                {p.isHost && translate(props.locale, 'hostSuffix')}
+                {!p.connected && translate(props.locale, 'offlineSuffix')}
+              </span>
             </li>
           ))}
         </ul>
