@@ -409,6 +409,16 @@ input:focus-visible {
   font-weight: 600;
 }
 
+/* 带移除按钮的行：按钮保留 44px 触控高度，行内边距收紧，免得名单被撑高 */
+.playerlist li:has(button) {
+  padding-block: var(--sp-1);
+}
+
+.add-computer {
+  display: block;
+  margin-bottom: var(--sp-4);
+}
+
 /* ---------- 牌局 ---------- */
 .board {
   --notice-exit-duration: 180ms;

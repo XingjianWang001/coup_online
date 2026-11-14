@@ -64,6 +64,7 @@ interface LatestReaction extends ReactionBubble {
 }
 const REACTION_MS = 3000; // 与 style.css 里 .nameplate-text 的淡出时刻对齐
 const REACTION_COOLDOWN_MS = 2000; // 服务器按玩家只拦 1.5 秒，留出网络抖动（见 server/src/room.ts）
+const MAX_SEATS = 6; // 与 server/src/room.ts 的 MAX_PLAYERS 一致
 
 interface TransientErrorState {
   id: number;
@@ -883,13 +884,32 @@ function RoomView(props: RoomViewProps) {
                     <CrownIcon />{' '}
                   </span>
                 )}
+                {p.isComputer && <ComputerBadge locale={props.locale} />}
                 {p.name}
                 {p.isHost && translate(props.locale, 'hostSuffix')}
                 {!p.connected && translate(props.locale, 'offlineSuffix')}
               </span>
+              {p.isComputer && me === props.hostId && (
+                <button
+                  className="ghost"
+                  aria-label={translate(props.locale, 'removeComputer', { name: p.name })}
+                  onClick={() => send(props.socket, { type: 'removeComputer', playerId: p.id })}
+                >
+                  {translate(props.locale, 'remove')}
+                </button>
+              )}
             </li>
           ))}
         </ul>
+        {me === props.hostId && (
+          <button
+            className="ghost add-computer"
+            onClick={() => send(props.socket, { type: 'addComputer' })}
+            disabled={props.players.length >= MAX_SEATS}
+          >
+            {translate(props.locale, 'addComputer')}
+          </button>
+        )}
         {me === props.hostId && (
           <button className="primary" onClick={props.onStart} disabled={props.players.length < 2}>
             {translate(props.locale, 'startGame')} ({translate(props.locale, 'startGameRequirement')})
@@ -905,6 +925,7 @@ function RoomView(props: RoomViewProps) {
       hand={props.hand}
       me={me}
       hostId={props.hostId}
+      computerIds={new Set(props.players.filter((p) => p.isComputer).map((p) => p.id))}
       notice={props.notice}
       reactions={props.reactions}
       latestReaction={props.latestReaction}
@@ -1615,6 +1636,22 @@ function CoinIcon() {
   );
 }
 
+// 机器人头像：电脑玩家的徽标，可访问名称随语言
+function ComputerBadge({ locale }: { locale: Locale }) {
+  const label = translate(locale, 'computerPlayer');
+  return (
+    <span className="computer-badge" role="img" aria-label={label} title={label}>
+      <Glyph size={16} className="inline-icon">
+        <line x1="12" y1="2.5" x2="12" y2="6" />
+        <rect x="4" y="6" width="16" height="13" rx="3" />
+        <circle className="f" cx="9" cy="12" r="1.6" />
+        <circle className="f" cx="15" cy="12" r="1.6" />
+        <line x1="9" y1="16" x2="15" y2="16" />
+      </Glyph>{' '}
+    </span>
+  );
+}
+
 // 皇冠：下移 1.5 使视觉居中
 function CrownIcon() {
   return (
@@ -1686,6 +1723,8 @@ function GameBoard(props: {
   hand: Card[];
   me: string | undefined;
   hostId: string;
+  // 牌局中按大厅名单认出电脑玩家：电脑只在大厅阶段增减
+  computerIds: ReadonlySet<string>;
   notice: TransientNoticeState | null;
   reactions: Record<string, ReactionBubble>;
   latestReaction: LatestReaction | null;
@@ -1788,6 +1827,7 @@ function GameBoard(props: {
       >
         <div className="seat-head">
           <span className="name">
+            {props.computerIds.has(p.id) && <ComputerBadge locale={props.locale} />}
             {p.name}
             {p.id === me && translate(props.locale, 'selfMarker')}
           </span>

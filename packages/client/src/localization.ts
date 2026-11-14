@@ -53,6 +53,10 @@ const english = {
   offlineSuffix: ' (offline)',
   startGame: 'Start game',
   startGameRequirement: 'Requires at least 2 players',
+  computerPlayer: 'Computer player',
+  addComputer: 'Add computer player',
+  remove: 'Remove',
+  removeComputer: 'Remove {name}',
   leftRoomNotice: 'You left the room.',
   replacedRoomNotice: 'Your seat was taken over by another tab or device.',
   errorRoomNotFound: 'Room not found.',
@@ -199,6 +203,10 @@ const simplifiedChinese = {
   offlineSuffix: ' (离线)',
   startGame: '开始游戏',
   startGameRequirement: '需 ≥2 人',
+  computerPlayer: '电脑玩家',
+  addComputer: '添加电脑玩家',
+  remove: '移除',
+  removeComputer: '移除 {name}',
   leftRoomNotice: '你已离开房间。',
   replacedRoomNotice: '你的座位已在其他标签页或设备上接管。',
   errorRoomNotFound: '房间不存在。',
@@ -315,6 +323,7 @@ interface MessageValues {
   playersCount: { count: number };
   errorMinimumPlayers: { minimum: number };
   errorRoomFull: { maximum: number };
+  removeComputer: { name: string };
   winner: { name: string };
   waitingForAction: { name: string };
   waitingForBlock: { name: string };
