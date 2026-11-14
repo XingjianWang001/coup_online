@@ -14,3 +14,4 @@ export type {
 } from './protocol.ts';
 
 export { parseServerError, PHRASES } from './protocol.ts';
+export { MAX_PLAYERS } from '@coup/engine';
