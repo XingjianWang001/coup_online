@@ -470,18 +470,18 @@ input:focus-visible {
    桌面端用 cos()/sin() 把角度投影到椭圆弧上；手机端改为左右两侧 + 正对面的网格。 */
 .table {
   --rx: calc(50% - 90px);
-  --cy: calc(100% - 80px);
-  --ry: calc(100% - 170px);
+  --cy: calc(100% - 100px);
+  --ry: calc(100% - 200px);
   position: relative;
-  height: 440px;
+  height: 500px;
 }
 
 .table[data-seats='1'] {
-  height: 320px;
+  height: 360px;
 }
 
 .table[data-seats='2'] {
-  height: 240px;
+  height: 290px;
 }
 
 .rail {
@@ -505,18 +505,29 @@ input:focus-visible {
   transform: translate(-50%, -50%);
   flex-direction: column;
   gap: var(--sp-2);
-  max-width: 168px;
+  /* 定宽：铭牌里的文字长短不会撑宽座位 */
+  width: 168px;
+  --pad-x: var(--sp-3);
+  --pad-b: var(--sp-3);
   padding: var(--sp-3);
 }
 
+/* 自己的座位：网格（留白 | 名字 | 间距 | 牌 | 留白），铭牌跨满整行。
+   两侧 1fr 留白在桌面端（max-content）收为 0，在手机端（width: 100%）把名字和牌居中 */
 .seat.self {
-  justify-content: center;
-  gap: var(--sp-5);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto var(--sp-5) auto minmax(0, 1fr);
+  align-items: center;
   width: max-content;
   max-width: 100%;
   margin: 0 auto;
-  padding: var(--sp-4) var(--sp-6);
+  --pad-x: var(--sp-6);
+  --pad-b: var(--sp-4);
+  padding: var(--sp-4) var(--pad-x) var(--pad-b);
 }
+
+.seat.self > .seat-head { grid-column: 2; }
+.seat.self > .cards-row { grid-column: 4; }
 
 .seat.current {
   border-color: var(--gold);
@@ -529,9 +540,102 @@ input:focus-visible {
   border-style: dashed;
 }
 
+/* 出局座位只压暗座位内容，铭牌保持清晰：出局的人仍可以表态 */
 .seat.dead {
+  border-color: var(--line-2);
+}
+
+.seat > :not(.nameplate) {
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.seat.dead > :not(.nameplate) {
   opacity: 0.4;
   filter: saturate(0.4);
+}
+
+/* ---------- 铭牌（表态） ----------
+   贴在座位下沿的一条底带，常驻占位：有人表态时亮起，表态出现、消失都不推动任何东西。
+   底带不染色；角色名、该角色的行动名用角色色。 */
+.nameplate {
+  --lines: 2;
+  --lh: 1.3;
+  font-size: 13px;
+  line-height: var(--lh);
+  height: calc(1em * var(--lh) * var(--lines) + var(--sp-3));
+  width: calc(100% + 2 * var(--pad-x));
+  margin: var(--sp-1) calc(-1 * var(--pad-x)) calc(-1 * var(--pad-b));
+  padding: 0 var(--sp-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text);
+  background: color-mix(in srgb, var(--canvas) 55%, var(--felt));
+  border-top: 1px solid var(--line-2);
+  border-radius: 0 0 calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px);
+  transition: background-color 0.3s ease;
+}
+
+.nameplate.speaking {
+  background: var(--panel-2);
+  cursor: pointer;
+}
+
+/* 自己的铭牌跨满网格；contain: inline-size 让文字不参与座位宽度计算（否则说话时座位被撑宽） */
+.seat.self > .nameplate {
+  grid-column: 1 / -1;
+  width: auto;
+  margin-top: var(--sp-3);
+  contain: inline-size;
+}
+
+.nameplate-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--lines);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  /* 唯一的动效：说出口——从轻微失焦处浮起，最后自己淡出；淡出结束时刻与 App.tsx 的 REACTION_MS（3s）对齐 */
+  animation:
+    speak-in 280ms cubic-bezier(0.16, 1, 0.3, 1),
+    speak-out 320ms ease-in 2680ms forwards;
+}
+
+@keyframes speak-in {
+  from { opacity: 0; translate: 0 5px; filter: blur(3px); }
+}
+
+@keyframes speak-out {
+  to { opacity: 0; }
+}
+
+/* 超长昵称只截昵称本身，动作不被吃掉 */
+.nameplate-target {
+  font-weight: 600;
+  display: inline-block;
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* 亮起的底带（panel-2）上刺客红、女伯爵紫只有约 4:1：五色统一向象牙色提 20%，都过 4.5:1 */
+.nameplate-role { font-weight: 600; }
+.nameplate-role.role--duke       { color: color-mix(in oklch, var(--duke) 80%, var(--text)); }
+.nameplate-role.role--assassin   { color: color-mix(in oklch, var(--assassin) 80%, var(--text)); }
+.nameplate-role.role--captain    { color: color-mix(in oklch, var(--captain) 80%, var(--text)); }
+.nameplate-role.role--ambassador { color: color-mix(in oklch, var(--ambassador) 80%, var(--text)); }
+.nameplate-role.role--contessa   { color: color-mix(in oklch, var(--contessa) 80%, var(--text)); }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .seat-head {
@@ -840,6 +944,146 @@ input:focus-visible {
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   color: var(--gold);
+}
+
+/* ---------- 表态面板：记录上方，收起时只有一行 ---------- */
+.reaction {
+  display: flex;
+  flex-direction: column;
+}
+
+button.reaction-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: none;
+  border: none;
+  padding: var(--sp-1) var(--sp-2);
+  margin-left: calc(-1 * var(--sp-2));
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+button.reaction-toggle:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+
+/* 展开与收起走同一条曲线：高度 0fr ↔ 1fr，记录随之平滑上下 */
+.reaction-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 200ms ease;
+}
+
+.reaction.open .reaction-collapse {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.reaction-collapse-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 与切换按钮的间距放在会被裁掉的内层里，收起时不留缝 */
+.reaction-collapse-inner > .reaction-tray {
+  margin-top: var(--sp-2);
+}
+
+.reaction-tray {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+
+.reaction-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 3px;
+  background: var(--canvas);
+  border-radius: var(--r-md);
+}
+
+.reaction-tabs button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: calc(var(--r-md) - 3px);
+  color: var(--text-2);
+  font-size: 14px;
+  padding: 8px 10px;
+}
+
+.reaction-tabs button:hover:not(:disabled) {
+  background: var(--felt);
+  border-color: transparent;
+  color: var(--text);
+}
+
+.reaction-tabs button[aria-selected='true'] {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.reaction-hint {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.reaction-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: var(--sp-2);
+}
+
+.reaction-grid button {
+  font-size: 14px;
+  padding: 8px 12px;
+}
+
+.reaction-grid > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.reaction-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reaction-grid--verbalClaim {
+  grid-template-columns: 1fr;
+}
+
+.reaction-verbal-row {
+  display: grid;
+  grid-template-columns: 5.5em repeat(5, minmax(0, 1fr));
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.reaction-verbal-label {
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 /* ---------- 记录 ---------- */
@@ -1303,6 +1547,13 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   .narration-timer.urgent { animation: none; color: var(--warn); }
   .role-btn { transition: none; }
   .log-collapse { transition: none; }
+  .nameplate-text {
+    animation:
+      fade-in 160ms ease,
+      speak-out 200ms ease 2800ms forwards;
+  }
+  /* 几乎瞬时，但仍触发 transitionend（复位选目标、滚进视口靠它） */
+  .reaction-collapse { transition-duration: 1ms; }
   .notice-region {
     transition: grid-template-rows 1ms linear 119ms;
   }
@@ -1883,8 +2134,13 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     transform: none;
     width: 100%;
     max-width: 100px;
-    padding: var(--sp-2) var(--sp-1);
+    --pad-x: var(--sp-1);
+    --pad-b: var(--sp-2);
+    padding: var(--sp-2) var(--pad-x) var(--pad-b);
     gap: var(--sp-1);
+  }
+  .nameplate {
+    font-size: 12px;
   }
 
   .seat.opponent .seat-head {
@@ -1931,7 +2187,28 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
 
   .seat.self {
     width: 100%;
-    padding: var(--sp-3) var(--sp-4);
+    --pad-x: var(--sp-4);
+    --pad-b: var(--sp-3);
+    padding: var(--sp-3) var(--pad-x) var(--pad-b);
+  }
+  .reaction-tray {
+    scroll-margin-bottom: 120px; /* 展开后滚进视口时让出底部吸附的操作栏 */
+  }
+  .reaction-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .reaction-grid--verbalClaim {
+    grid-template-columns: 1fr;
+  }
+  .reaction-verbal-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .reaction-verbal-label {
+    grid-column: 1 / -1;
+  }
+  .reaction-tabs button {
+    padding-inline: 4px;
+    font-size: 13px;
   }
 
   /* 手机：座位紧凑，叙述带底板才读得清 */

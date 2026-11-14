@@ -148,6 +148,8 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
       return { ...s, tunnelUrl: msg.url, tunnelLoading: false };
     case 'left':
       return initialSession;
+    case 'reaction':
+      return s; // 表态一闪而过、不留痕，由 App 管理气泡，不进会话状态
   }
 }
 
