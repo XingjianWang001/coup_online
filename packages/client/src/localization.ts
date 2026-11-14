@@ -49,6 +49,7 @@ const english = {
   generateInviteLink: 'Generate invite link',
   playersCount: 'Players ({count})',
   hostSuffix: ' (host)',
+  previousWinner: 'Previous winner',
   offlineSuffix: ' (offline)',
   startGame: 'Start game',
   startGameRequirement: 'Requires at least 2 players',
@@ -110,6 +111,9 @@ const english = {
   cardBack: 'Hidden card',
   cardFace: '{role} card',
   cardRevealed: '{role} card (revealed)',
+  cardPostGameHidden: '{role} card, not unveiled — click to unveil it to everyone',
+  cardPostGameRevealed: '{role} card, unveiled',
+  postGameRevealHint: 'Click a hidden card to unveil it to everyone',
   showcaseDeal: 'Your hand',
   confirm: 'Confirm',
   timeToAct: '{time} left to act',
@@ -120,12 +124,13 @@ const english = {
   narrationTarget: ', targeting {target}',
   narrationBlock: '; {blocker} blocks with {role}',
   logChallenge: '{challenger} challenges {target}',
-  logChallengeFailed: 'Challenge failed: {loser} loses influence',
+  logChallengeFailed: '{claimant} shows {role}; challenge failed: {loser} loses influence',
   logChallengeSucceeded: 'Challenge succeeded: {loser} loses influence',
   logBlock: '{blocker} blocks with {role}',
   logInfluenceLost: '{player} reveals {role}',
   logEliminated: '{player} is eliminated',
   logGameOver: '{winner} wins',
+  logPostGameRevealed: '{player} unveils {role}',
   logCoinsChanged: '{player} coins → {coins}',
   logExchangeDrew: '{player} draws {count} cards',
 } as const;
@@ -165,6 +170,7 @@ const simplifiedChinese = {
   generateInviteLink: '生成加入链接',
   playersCount: '玩家（{count}）',
   hostSuffix: ' (房主)',
+  previousWinner: '上局获胜者',
   offlineSuffix: ' (离线)',
   startGame: '开始游戏',
   startGameRequirement: '需 ≥2 人',
@@ -226,6 +232,9 @@ const simplifiedChinese = {
   cardBack: '暗牌',
   cardFace: '{role}牌',
   cardRevealed: '{role}牌（已翻开）',
+  cardPostGameHidden: '{role}牌，未揭晓，点击向所有人翻开',
+  cardPostGameRevealed: '{role}牌，已揭晓',
+  postGameRevealHint: '点击暗牌，向所有人翻开',
   showcaseDeal: '你的手牌',
   confirm: '确认',
   timeToAct: '行动剩余 {time}',
@@ -236,12 +245,13 @@ const simplifiedChinese = {
   narrationTarget: '，目标 {target}',
   narrationBlock: '；{blocker} 用【{role}】阻挡',
   logChallenge: '{challenger} 质疑 {target}',
-  logChallengeFailed: '质疑失败：{loser} 失去影响力',
+  logChallengeFailed: '{claimant} 出示【{role}】，质疑失败：{loser} 失去影响力',
   logChallengeSucceeded: '质疑成功：{loser} 失去影响力',
   logBlock: '{blocker} 用【{role}】阻挡',
   logInfluenceLost: '{player} 翻开【{role}】',
   logEliminated: '{player} 被淘汰',
   logGameOver: '{winner} 获胜',
+  logPostGameRevealed: '{player} 揭晓【{role}】',
   logCoinsChanged: '{player} 金币 → {coins}',
   logExchangeDrew: '{player} 抽取 {count} 张牌',
 } as const satisfies Record<MessageKey, string>;
@@ -273,6 +283,8 @@ interface MessageValues {
   exchangePrompt: { count: number };
   cardFace: { role: string };
   cardRevealed: { role: string };
+  cardPostGameHidden: { role: string };
+  cardPostGameRevealed: { role: string };
   timeToAct: { time: string };
   expandLog: { action: string };
   collapseLog: { action: string };
@@ -281,12 +293,13 @@ interface MessageValues {
   narrationTarget: { target: string };
   narrationBlock: { blocker: string; role: string };
   logChallenge: { challenger: string; target: string };
-  logChallengeFailed: { loser: string };
+  logChallengeFailed: { claimant: string; role: string; loser: string };
   logChallengeSucceeded: { loser: string };
   logBlock: { blocker: string; role: string };
   logInfluenceLost: { player: string; role: string };
   logEliminated: { player: string };
   logGameOver: { winner: string };
+  logPostGameRevealed: { player: string; role: string };
   logCoinsChanged: { player: string; coins: number };
   logExchangeDrew: { player: string; count: number };
 }

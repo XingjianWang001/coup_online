@@ -250,6 +250,7 @@ export function createGame(
     exchangeKeepCount: null,
     passed: [],
     winnerId: null,
+    postGameRevealedSlots: [],
   };
 }
 
@@ -560,6 +561,18 @@ export function forfeit(state: GameState, playerId: string): GameEvent[] {
   return events;
 }
 
+// 赛后揭晓：获胜者自愿公开一张暗牌，不算失去影响力，牌仍留在手中
+export function revealPostGameCard(state: GameState, playerId: string, cardId: string): GameEvent[] {
+  if (state.phase !== 'gameOver') throw new GameRuleError('not in gameOver phase');
+  if (playerId !== state.winnerId) throw new GameRuleError('only the winner can reveal');
+  const p = getPlayer(state, playerId);
+  const slot = p.hand.findIndex((c) => c.id === cardId);
+  if (slot < 0) throw new GameRuleError('card not in hand');
+  if (state.postGameRevealedSlots.includes(slot)) throw new GameRuleError('card already revealed');
+  state.postGameRevealedSlots.push(slot);
+  return [{ type: 'postGameRevealed', playerId, role: p.hand[slot].role, slot }];
+}
+
 export function publicState(state: GameState): PublicState {
   return {
     phase: state.phase,
@@ -570,6 +583,7 @@ export function publicState(state: GameState): PublicState {
       handCount: p.hand.length,
       revealed: p.revealed.map((c) => c.role),
       alive: p.alive,
+      postGameRevealed: p.id === state.winnerId ? state.postGameRevealedSlots.map((slot) => ({ slot, role: p.hand[slot].role })) : [],
     })),
     currentPlayerId: state.currentPlayerId,
     pending: state.pending

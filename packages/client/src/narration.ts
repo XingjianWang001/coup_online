@@ -111,9 +111,14 @@ export function describeEvent(e: GameEvent, state: PublicState, locale: Locale =
         target: nameOf(state, e.targetId),
       });
     case 'challengeResolved':
-      return translate(locale, e.truth ? 'logChallengeFailed' : 'logChallengeSucceeded', {
-        loser: nameOf(state, e.loserId),
-      });
+      if (e.truth) {
+        return translate(locale, 'logChallengeFailed', {
+          claimant: nameOf(state, e.claimantId),
+          role: roleName(locale, e.role),
+          loser: nameOf(state, e.loserId),
+        });
+      }
+      return translate(locale, 'logChallengeSucceeded', { loser: nameOf(state, e.loserId) });
     case 'blocked':
       return translate(locale, 'logBlock', { blocker: nameOf(state, e.blockerId), role: roleName(locale, e.role) });
     case 'influenceLost':
@@ -122,6 +127,8 @@ export function describeEvent(e: GameEvent, state: PublicState, locale: Locale =
       return translate(locale, 'logEliminated', { player: nameOf(state, e.playerId) });
     case 'gameOver':
       return translate(locale, 'logGameOver', { winner: nameOf(state, e.winnerId) });
+    case 'postGameRevealed':
+      return translate(locale, 'logPostGameRevealed', { player: nameOf(state, e.playerId), role: roleName(locale, e.role) });
     case 'coinsChanged':
       return translate(locale, 'logCoinsChanged', { player: nameOf(state, e.playerId), coins: e.coins });
     case 'exchangeDrew':

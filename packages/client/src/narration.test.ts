@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { GameEvent, PublicState } from '@coup/shared';
-import { describeAction, describeCountdown, describeEvent, describePending, describeWaiting, estimateServerOffset, groupLog, remainingSinceReceipt } from './narration.ts';
+import { describeAction, describeCountdown, describeEvent, describePending, describeWaiting, estimateServerOffset, groupLog, remainingSinceReceipt, type LogEntry } from './narration.ts';
 
 function state(overrides: Partial<PublicState>): PublicState {
   return {
     phase: 'choosingAction',
     players: [
-      { id: 'a', name: '张三', coins: 2, handCount: 2, revealed: [], alive: true },
-      { id: 'b', name: '李四', coins: 2, handCount: 2, revealed: [], alive: true },
+      { id: 'a', name: '张三', coins: 2, handCount: 2, revealed: [], alive: true, postGameRevealed: [] },
+      { id: 'b', name: '李四', coins: 2, handCount: 2, revealed: [], alive: true, postGameRevealed: [] },
     ],
     currentPlayerId: 'a',
     pending: null,
@@ -111,7 +111,10 @@ describe('describeEvent', () => {
 
   it('描述质疑失败（声称者确实有该角色）', () => {
     expect(describeEvent({ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 0 }, s)).toBe(
-      '质疑失败：李四 失去影响力',
+      '张三 出示【公爵】，质疑失败：李四 失去影响力',
+    );
+    expect(describeEvent({ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 0 }, s, 'en')).toBe(
+      '张三 shows Duke; challenge failed: 李四 loses influence',
     );
   });
 
@@ -215,6 +218,16 @@ describe('groupLog', () => {
     expect(groups[0].entries).toEqual([]);
   });
 
+  it('puts each Post-game Reveal on its own line after the win, in either locale', () => {
+    const events: LogEntry[] = [
+      { id: 0, event: { type: 'gameOver', winnerId: 'a' } },
+      { id: 1, event: { type: 'postGameRevealed', playerId: 'a', role: 'duke', slot: 1 } },
+      { id: 2, event: { type: 'postGameRevealed', playerId: 'a', role: 'contessa', slot: 0 } },
+    ];
+    expect(groupLog(events, s, 'zh-CN').map((g) => g.action)).toEqual(['张三 获胜', '张三 揭晓【公爵】', '张三 揭晓【女伯爵】']);
+    expect(groupLog(events, s, 'en').map((g) => g.action)).toEqual(['张三 wins', '张三 unveils Duke', '张三 unveils Contessa']);
+  });
+
   it('renders the same raw events in either locale without mutating them', () => {
     const events: { id: number; event: GameEvent }[] = [
       { id: 0, event: { type: 'actionChosen', actorId: 'a', action: 'assassinate', targetId: 'b', claimedRole: 'assassin' } },
@@ -236,7 +249,7 @@ describe('groupLog', () => {
     expect(english.flatMap((group) => [group.action, ...group.entries.map((entry) => entry.text)])).toEqual(
       expect.arrayContaining([
         '李四 challenges 张三',
-        'Challenge failed: 李四 loses influence',
+        '张三 shows Duke; challenge failed: 李四 loses influence',
         '李四 blocks with Contessa',
         '李四 reveals Duke',
         '李四 is eliminated',

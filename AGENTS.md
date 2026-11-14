@@ -6,6 +6,8 @@
 
 Use Conventional Commits: `<type>(<optional-scope>): <imperative summary>`. Prefer the narrowest package scope for package-specific changes, such as `feat(client): animate transient notice dismissal`.
 
+Pull requests target `dev`, the default branch; `main` holds only the initial commit.
+
 ## UI verification
 
 Verify UI changes in a real browser with `pnpm ui-check [scenario.mjs] [out-dir]`; the header of `scripts/ui-check.mjs` documents scenarios and options. It runs its own server and headless Chrome on free ports and tears them down on exit, keeping the user's dev servers on 8787/5173 free for manual testing.
@@ -26,4 +28,4 @@ Issues and specs are tracked in GitHub Issues for `XingjianWang001/coup_online`.
 
 ### Domain docs
 
-This repository uses a single-context domain layout. See `docs/agents/domain.md`.
+This repository uses a single-context domain layout. See `docs/agents/domain.md`. Skills that name `GLOSSARY.md` mean `CONTEXT.md`.

@@ -1191,6 +1191,34 @@ input:focus-visible {
   filter: saturate(0.4);
 }
 
+/* 赛后揭晓：牌背翻成全彩牌面，落定不置灰（与明牌区分） */
+.cards-row .card.post-game-revealed { animation: card-post-game-reveal 400ms cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+@keyframes card-post-game-reveal {
+  0%   { opacity: 0; transform: rotateY(90deg); }
+  55%  { opacity: 1; box-shadow: 0 0 18px color-mix(in srgb, currentColor 55%, transparent); }
+  100% { transform: rotateY(0deg); box-shadow: 0 0 0 transparent; }
+}
+
+/* 获胜者自己的座位：未揭晓的牌浮起带微光，可点击；揭晓后落回一行 */
+button.post-game-reveal {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: inherit;
+  translate: 0 0;
+  transition: translate 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+button.post-game-reveal:hover { background: none; }
+button.post-game-reveal:not([aria-disabled]) { translate: 0 -8px; }
+button.post-game-reveal:not([aria-disabled]):hover { translate: 0 -12px; }
+button.post-game-reveal[aria-disabled] { cursor: default; transform: none; }
+button.post-game-reveal .card { transition: box-shadow 180ms ease; }
+button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-mix(in srgb, currentColor 40%, transparent); }
+
 /* 提示条 / 叙述条 / 控制区 / 记录 入场 */
 @keyframes rise-in {
   from { opacity: 0; transform: translateY(-4px); }
@@ -1252,6 +1280,9 @@ input:focus-visible {
     animation: fade-in 120ms linear;
   }
   .cards-row .card.unavailable { animation: reveal-fade 200ms linear; }
+  .cards-row .card.post-game-revealed { animation: fade-in 200ms linear; }
+  button.post-game-reveal,
+  button.post-game-reveal .card { transition: none; }
   /* 不呼吸，但保留「快到时」的状态：静态琥珀 */
   .narration-timer.urgent { animation: none; color: var(--warn); }
   .role-btn { transition: none; }

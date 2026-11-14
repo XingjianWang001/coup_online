@@ -3,7 +3,7 @@
 //
 // 用法：node scripts/ui-check.mjs [场景.mjs] [截图目录]
 //   场景默认导出 async (ui) => {}，ui 见 main() 里的 context；不传场景时跑内置场景（真人玩家加入机器人房间并开局）。
-//   环境变量：W/H 视口，MOBILE=1 手机触屏，REDUCED=1 减少动态效果，LOCALE=zh-CN|en，NO_BUILD=1 跳过构建，CHROME 浏览器路径。
+//   环境变量：W/H 视口，MOBILE=1 手机触屏，REDUCED=1 减少动态效果，LOCALE=zh-CN|en，NO_BUILD=1 跳过构建，CHROME 浏览器路径（默认 macOS / Windows 的 Chrome 安装位置）。
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -14,7 +14,9 @@ import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const { io } = createRequire(join(ROOT, 'packages/client/package.json'))('socket.io-client');
-const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const WIN = process.platform === 'win32';
+const CHROME = process.env.CHROME
+  ?? (WIN ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
 const TOTAL_TIMEOUT_MS = 100_000; // 低于代理工具 120s 的命令上限，超时也能走到清理
 const STEP_TIMEOUT_MS = 10_000;
 
@@ -26,23 +28,31 @@ const children = [];
 const sockets = [];
 let profileDir = null;
 
-// 子进程以独立进程组启动，结束时整组 kill，连同 tsx/Chrome 派生的孙进程
+// 子进程以独立进程组启动，结束时整组 kill，连同 tsx/Chrome 派生的孙进程（Windows 没有进程组，用 taskkill /T 结束整棵进程树）
 function launch(cmd, args, opts) {
-  const child = spawn(cmd, args, { ...opts, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(cmd, args, { ...opts, detached: !WIN, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(child);
   return child;
 }
 
 async function cleanup() {
   for (const s of sockets) s.close();
-  for (const child of children) {
-    try { process.kill(-child.pid, 'SIGTERM'); } catch {}
+  if (WIN) {
+    for (const child of children) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  } else {
+    for (const child of children) {
+      try { process.kill(-child.pid, 'SIGTERM'); } catch {}
+    }
+    await sleep(500);
+    for (const child of children) {
+      try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    }
   }
-  await sleep(500);
-  for (const child of children) {
-    try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+  // Chrome 退出后文件锁还要一会儿才释放（Windows 上会 EPERM），重试几次
+  if (profileDir) {
+    try { rmSync(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+    catch (error) { console.warn('⚠️ 未能删除 Chrome 配置目录', profileDir, error.code); }
   }
-  if (profileDir) rmSync(profileDir, { recursive: true, force: true });
 }
 
 const freePort = () => new Promise((r) => {
@@ -51,7 +61,7 @@ const freePort = () => new Promise((r) => {
 
 async function startServer() {
   if (!process.env.NO_BUILD) {
-    const build = spawnSync('pnpm', ['build:client'], { cwd: ROOT, stdio: 'inherit' });
+    const build = spawnSync('pnpm build:client', { cwd: ROOT, stdio: 'inherit', shell: true }); // Windows 上 pnpm 是 .cmd，只能经 shell 启动
     if (build.status !== 0) throw new Error('前端构建失败');
   }
   const port = await freePort();

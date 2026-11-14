@@ -17,6 +17,8 @@ export type ClientIntent =
   | { type: 'focusShowdownCard'; slot: number | null }
   | { type: 'resolveLoss'; cardId: string }
   | { type: 'resolveExchange'; keepIds: string[] }
+  // 赛后揭晓：获胜者在牌局结束后向全房间公开一张暗牌
+  | { type: 'revealPostGameCard'; cardId: string }
   | { type: 'leaveRoom' };
 
 // 大厅玩家（开局前）
@@ -25,6 +27,7 @@ export interface LobbyPlayer {
   name: string;
   isHost: boolean;
   connected: boolean;
+  isPreviousWinner: boolean;
 }
 
 const SIMPLE_SERVER_ERROR_CODES = [

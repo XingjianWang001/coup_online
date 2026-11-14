@@ -78,6 +78,7 @@ export interface GameState {
   exchangeKeepCount: number | null; // 大使交换需保留的牌数
   passed: string[]; // 当前质疑/阻挡窗口中已放弃的玩家 id
   winnerId: string | null;
+  postGameRevealedSlots: number[]; // 赛后揭晓：获胜者已公开的暗牌位置（牌局结束后手牌不再变动）
 }
 
 export type GameEvent =
@@ -92,7 +93,8 @@ export type GameEvent =
   | { type: 'coinsChanged'; playerId: string; coins: number }
   | { type: 'exchangeDrew'; playerId: string; count: number }
   | { type: 'turnChanged'; playerId: string }
-  | { type: 'gameOver'; winnerId: string };
+  | { type: 'gameOver'; winnerId: string }
+  | { type: 'postGameRevealed'; playerId: string; role: Role; slot: number };
 
 // 公开状态（广播给房间内所有玩家）
 export interface PublicPlayerView {
@@ -102,6 +104,7 @@ export interface PublicPlayerView {
   handCount: number; // 暗牌数量（不暴露具体牌）
   revealed: Role[]; // 已公开翻出的明牌（只暴露角色，不暴露副本编号）
   alive: boolean;
+  postGameRevealed: { slot: number; role: Role }[]; // 赛后揭晓：暗牌位置与角色，按揭晓顺序
 }
 
 export interface PublicState {
