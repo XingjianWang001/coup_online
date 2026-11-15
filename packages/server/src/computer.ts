@@ -171,7 +171,7 @@ export function decideComputerIntent(
 
   const chooseAction = (): ComputerIntent => {
     // 够政变就多半政变，偶尔先做别的；到了 FORCED_COUP_COINS 规则只许政变
-    if (self.coins >= FORCED_COUP_COINS ||(self.coins >= COUP_COST && random() < COUP_EAGERNESS)) {
+    if (self.coins >= FORCED_COUP_COINS || (self.coins >= COUP_COST && random() < COUP_EAGERNESS)) {
       return { type: 'chooseAction', action: 'coup', targetId: pickTarget(rivals) };
     }
     const victims = rivals.filter((p) => p.coins > 0);
