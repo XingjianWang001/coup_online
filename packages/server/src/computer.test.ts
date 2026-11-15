@@ -68,6 +68,7 @@ function table(hands?: Record<string, Role[]>) {
     },
   };
 }
+type Table = ReturnType<typeof table>;
 
 // 三项倾向都为 0：从不诈唬，最不爱质疑
 const CALM: Temperament = { bluff: 0, suspicion: 0, aggression: 0 };
@@ -261,7 +262,6 @@ describe('decideComputerIntent', () => {
 
   it('质疑看声称是否自相矛盾：仍作数的声称角色比暗牌多就更想质疑；同一角色声称几次、换牌后改口都不算', () => {
     // a 先走 before 里的几手（都没有人质疑），再收税：数 b 质疑这次收税的次数。同一个随机源，质疑概率相同则次数相同
-    type Table = ReturnType<typeof table>;
     const challengesOfTax = (before: (t: Table) => void, aHand: Role[] = ['duke', 'duke']) => {
       const t = table({ a: aHand, b: ['contessa', 'contessa'], c: ['ambassador', 'ambassador'] });
       before(t);
@@ -300,22 +300,23 @@ describe('decideComputerIntent', () => {
   });
 
   it('被证明为真的信用有上限，眼前的矛盾盖得过它', () => {
-    // c 出局后只剩 a 和 b：c 两次质疑 a 的收税都失败（a 的声称两次被证明为真），或被 a 政变两次（没有证明）。再数 b 质疑 a 收税的次数
+    // a 的收税 3 次被质疑、都证明为真（c 两次、b 一次），或 a 政变 c 两次、b 一次（没有证明）：两边都剩下 a 和只有 1 张暗牌的 b。
+    // 再数 b 质疑 a 收税的次数
     const challengesOfTax = (proven: boolean, contradiction: boolean) => {
       const { g, events, did, coup, income, unopposed } = table({ a: ['duke', 'duke'], b: ['contessa', 'contessa'], c: ['ambassador', 'ambassador'] });
-      for (let i = 0; i < 2; i++) {
+      for (const rival of ['c', 'c', 'b']) {
         if (proven) {
+          seat(g, 'a').hand[0].role = 'duke'; // 上次证明后换来什么牌由测试指定
           did(chooseAction(g, 'a', 'tax'));
-          did(challenge(g, 'c'));
+          did(challenge(g, rival));
           did(revealShowdownCard(g, 'a', cardOf(g, 'a', 'duke')));
-          did(resolveLoss(g, 'c', seat(g, 'c').hand[0].id));
+          did(resolveLoss(g, rival, seat(g, rival).hand[0].id));
         } else {
-          coup('a', 'c', 'ambassador');
+          coup('a', rival, seat(g, rival).hand[0].role);
         }
-        income('b');
-        if (i === 0) income('c');
+        income(...['b', 'c'].filter((id) => seat(g, id).alive));
       }
-      expect(seat(g, 'c').alive).toBe(false);
+      expect(g.players.map((p) => p.hand.length)).toEqual([2, 1, 0]);
       seat(g, 'a').coins = 2; // 离 10 金币的强制政变远一点
       if (contradiction) {
         // a 偷 b（队长），再用大使阻挡 b 的偷窃，接着收税（公爵）：3 个角色、2 张暗牌
@@ -331,12 +332,12 @@ describe('decideComputerIntent', () => {
     const fresh = challengesOfTax(false, false);
     const trusted = challengesOfTax(true, false);
     expect(trusted).toBeLessThan(fresh);
-    expect(trusted).toBeGreaterThan(fresh * 0.5); // 证明两次：没有上限时只剩三分之一
+    expect(trusted).toBeGreaterThan(fresh * 0.5); // 证明 3 次、每次打七五折：不设上限就只剩四成
     expect(challengesOfTax(true, true)).toBeGreaterThan(fresh * 1.2);
   });
 
   it('质疑看代价：冲着自己来的行动比与己无关的更想质疑，只剩 1 点影响力时更谨慎，偷不走金币的偷窃不算代价', () => {
-    const challengesOfSteal = (target: string, before = (_t: ReturnType<typeof table>) => {}) => {
+    const challengesOfSteal = (target: string, before = (_t: Table) => {}) => {
       const t = table({ b: ['duke', 'contessa'] });
       before(t);
       t.did(chooseAction(t.g, 'a', 'steal', target));
@@ -422,7 +423,7 @@ describe('decideComputerIntent', () => {
     expect(Object.keys(tally(300, byAction, g, 'a', { events, temperament: CALM })).sort()).toEqual(['foreignAid', 'income']);
   });
 
-  it('不在同一局里轮流声称四五个角色：声称过的加手里有的凑到 3 个角色后不再起新的诈唬', () => {
+  it('故事上限是 3 个角色：故事里的加手里有的凑到 3 个后不再起新的诈唬', () => {
     const { g, events, unopposed, income } = table({ a: ['contessa', 'contessa'] });
     unopposed('a', 'tax');
     income('b', 'c');
@@ -447,7 +448,7 @@ describe('decideComputerIntent', () => {
     expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: BOLD })).sort()).toEqual(['assassinate', 'foreignAid', 'income', 'steal', 'tax']);
   });
 
-  it('不在同一局里轮流声称四五个角色：声称被对质检验过、不再作数，也不腾出位置给新的诈唬', () => {
+  it('声称被对质检验过、不再作数，仍算在故事里：不腾出位置给新的诈唬', () => {
     const { g, events, did, unopposed, income } = table({ a: ['duke', 'captain'], b: ['assassin', 'assassin'] });
     unopposed('a', 'tax');
     income('b', 'c');
@@ -600,9 +601,8 @@ describe('decideComputerIntent', () => {
   });
 
   describe('保牌看眼前的威胁', () => {
-    // 决定留牌的是 b，可能威胁它的是 c。c 手里是两张公爵：声称刺客或队长都是诈唬，被质疑就被拆穿。
+    // 决定留牌的是 b，可能威胁它的是 c。c 手里是两张公爵：声称刺客或队长都是诈唬，被质疑就被抓到诈唬。
     // 下面每个函数是 c 的一手（连同 a、b 各收入一次），走完轮到 a
-    type Table = ReturnType<typeof table>;
     const hands = (b: Role[]) => ({ b, c: ['duke', 'duke'] as Role[] });
     const cDoesNothing = (t: Table) => t.income('a', 'b', 'c');
     const cClaims = (action: 'assassinate' | 'steal') => (t: Table) => {
@@ -625,7 +625,7 @@ describe('decideComputerIntent', () => {
     };
 
     // b 拿 roles 里的一张配另外的每种角色、各换 25 种性格，被 a 政变时留下 roles 里那张的次数。同一个随机源：估值相同则次数相同
-    const kept = (roles: Role[], moves: ((t: Table) => void)[], bCoins = 2, cCoins = 3) => {
+    const kept = (roles: Role[], moves: ((t: Table) => void)[], { bCoins = 2, cCoins = 3 } = {}) => {
       const random = seeded(5);
       let count = 0;
       for (const role of roles) {
@@ -646,17 +646,17 @@ describe('decideComputerIntent', () => {
       return count;
     };
 
-    it('暗杀威胁：有对手仍作数地声称刺客且金币够暗杀时更常留下女伯爵；声称被拆穿、对手换过牌或金币不够，修正就消失', () => {
+    it('暗杀威胁：有对手仍作数地声称刺客且金币够暗杀时更常留下女伯爵；对手被抓到诈唬、换过牌或金币不够，修正就消失', () => {
       const calm = kept(['contessa'], [cDoesNothing]);
       const threatened = kept(['contessa'], [cClaims('assassinate')]);
       expect(threatened).toBeGreaterThan(calm * 1.5);
       expect(threatened).toBeLessThan(100); // 是倾向不是规则：另一张更值钱时仍不留女伯爵
       expect(kept(['contessa'], [cIsCaughtClaiming('assassinate')])).toBe(calm);
       expect(kept(['contessa'], [cClaims('assassinate'), cExchanges])).toBe(calm);
-      expect(kept(['contessa'], [cClaims('assassinate')], 2, 2)).toBe(calm);
+      expect(kept(['contessa'], [cClaims('assassinate')], { cCoins: 2 })).toBe(calm);
     });
 
-    it('偷窃威胁：有对手仍作数地声称队长且自己有金币可偷时更常留下大使或队长；声称被拆穿、对手换过牌或自己没有金币，修正就消失', () => {
+    it('偷窃威胁：有对手仍作数地声称队长且自己有金币可偷时更常留下大使或队长；对手被抓到诈唬、换过牌或自己没有金币，修正就消失', () => {
       const blockers: Role[] = ['captain', 'ambassador'];
       const calm = kept(blockers, [cDoesNothing]);
       const threatened = kept(blockers, [cClaims('steal')]);
@@ -664,7 +664,49 @@ describe('decideComputerIntent', () => {
       expect(threatened).toBeLessThan(150);
       expect(kept(blockers, [cIsCaughtClaiming('steal')])).toBe(calm);
       expect(kept(blockers, [cClaims('steal'), cExchanges])).toBe(calm);
-      expect(kept(blockers, [cClaims('steal')], 0)).toBe(calm);
+      expect(kept(blockers, [cClaims('steal')], { bCoins: 0 })).toBe(calm);
+    });
+
+    it('冲着自己来、还没结算的行动也是威胁：质疑它失败后，留下能阻挡它的牌', () => {
+      // a 对 b 行动，challenger 质疑，a 证明为真。走到 b 失去影响力时，它亮出哪张
+      const lost = (action: 'assassinate' | 'steal', bHand: Role[], challenger: 'b' | 'c', bCoins = 2) => {
+        const { g, events, did } = table({ a: ['assassin', 'captain'], b: bHand, c: ['duke', 'duke'] });
+        seat(g, 'a').coins = 3;
+        seat(g, 'b').coins = bCoins;
+        did(chooseAction(g, 'a', action, 'b'));
+        did(challenge(g, challenger));
+        did(revealShowdownCard(g, 'a', cardOf(g, 'a', ACTION_CLAIM[action]!)));
+        if (challenger === 'c') {
+          did(resolveLoss(g, 'c', seat(g, 'c').hand[0].id));
+          did(passBlock(g, 'b'));
+        }
+        const intent = decide(g, 'b', { events });
+        if (intent?.type !== 'resolveLoss') throw new Error(`unexpected ${JSON.stringify(intent)}`);
+        return seat(g, 'b').hand.find((c) => c.id === intent.cardId)!.role;
+      };
+      // 接下来是阻挡窗口：留着女伯爵就能照实阻挡
+      expect(lost('assassinate', ['contessa', 'captain'], 'b')).toBe('captain');
+      // 质疑失败的是 c，b 没有阻挡：这张牌就是暗杀要走的，行动到此结算完，不再是威胁
+      expect(lost('assassinate', ['contessa', 'captain'], 'c')).toBe('contessa');
+      expect(lost('steal', ['ambassador', 'assassin'], 'b')).toBe('assassin');
+      expect(lost('steal', ['ambassador', 'assassin'], 'b', 0)).toBe('ambassador'); // 没有金币可偷
+    });
+
+    it('对质翻牌也看威胁：手里没有被声称的角色，有暗杀威胁时翻开队长、留下女伯爵', () => {
+      // b 诈唬收税被 a 质疑，手里没有公爵：它翻开哪张
+      const turned = (move: (t: Table) => void) => {
+        const t = table(hands(['captain', 'contessa']));
+        move(t);
+        t.income('a');
+        t.did(chooseAction(t.g, 'b', 'tax'));
+        t.did(challenge(t.g, 'a'));
+        seat(t.g, 'c').coins = 3;
+        const intent = decide(t.g, 'b', { events: t.events });
+        if (intent?.type !== 'revealShowdownCard') throw new Error(`unexpected ${JSON.stringify(intent)}`);
+        return seat(t.g, 'b').hand.find((c) => c.id === intent.cardId)!.role;
+      };
+      expect(turned(cDoesNothing)).toBe('contessa');
+      expect(turned(cClaims('assassinate'))).toBe('captain');
     });
 
     it('交换选牌也看威胁：有暗杀威胁时女伯爵比队长值得留', () => {
@@ -776,7 +818,7 @@ describe('电脑玩家自对弈', () => {
     expect(overStory, `seed ${SEED}`).toBe(0);
     if (count !== 4) return;
     // 4 人局里以质疑收场的问询窗口占 10% 到 25%。每个声称开一个质疑窗口，问询窗口还包括阻挡窗口：只数质疑窗口或两种都数，比例都要落在区间里。
-    // 矛盾推理（#61）没有放宽这个区间：冲着矛盾去的质疑多了，质疑的基调相应调低，总量仍在声称的 22% 上下
+    // 区间管的是质疑的总量：没有依据的质疑（基调）和冲着证据去的质疑（矛盾、被抓到过诈唬）合在一起算，一头调高另一头就得让
     within(challenges / claims, 0.1, 0.25);
     within(challenges / (claims + blockWindows), 0.1, 0.25);
   });
