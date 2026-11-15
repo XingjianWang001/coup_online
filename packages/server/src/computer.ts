@@ -38,8 +38,10 @@ const HARM: Partial<Record<ActionType, number>> = { foreignAid: 0.5, steal: 1, a
 const NEW_BLUFF = 0.5;
 const FAKE_BLOCK: Partial<Record<ActionType, number>> = { foreignAid: 0.3, steal: 0.5, assassinate: 0.5 };
 const REPEAT_BLUFF = 2;
-// 一局里声称过的角色加手里有的角色凑到这么多个，就不再起新的诈唬：不会轮流声称四五个角色
+// 故事（最近一次实际交换以来声称过的角色）加手里有的角色凑到这么多个，就不再起新的诈唬：不会轮流声称四五个角色。
+// 诈唬倾向不低于 RECKLESS_BLUFF 的放宽到 4 个。故事比暗牌多是有意留下的破绽：别人能从自相矛盾里抓到它
 const STORY_ROLES = 3;
+const RECKLESS_BLUFF = 0.9;
 
 function pickAction(weights: readonly (readonly [ActionType, number])[], random: () => number): ActionType {
   let roll = random() * weights.reduce((sum, [, weight]) => sum + weight, 0);
@@ -107,6 +109,7 @@ export function decideComputerIntent(
   const rivals = state.players.filter((p) => p.alive && p.id !== me);
   const memory = recall(events, me);
   const stillClaims = (id: string, role: Role) => memory.standing.get(id)?.has(role) ?? false;
+  const storyRoles = temperament.bluff >= RECKLESS_BLUFF ? STORY_ROLES + 1 : STORY_ROLES;
   const lastCard = self.handCount === 1;
   const caution = lastCard ? 0.5 : 1; // 只剩 1 点影响力时，冒险的事少做一半
   const dying = pending?.action === 'assassinate' && pending.targetId === me && lastCard; // 这次暗杀成了自己就出局
@@ -132,16 +135,16 @@ export function decideComputerIntent(
   };
 
   // 手里没有某角色时声称它的意愿（0 到 1），全看诈唬倾向。声称过、还作数的角色接着演，意愿高得多；
-  // 其余的要起一个新的诈唬（意愿再乘 fresh），而且只在声称过的加手里有的还不满 STORY_ROLES 个角色时才起
+  // 其余的要起一个新的诈唬（意愿再乘 fresh），而且只在故事里的加手里有的还不满 storyRoles 个角色时才起
   const bluffWillingness = (role: Role, fresh: number) => {
     if (stillClaims(me, role)) return Math.min(1, REPEAT_BLUFF * temperament.bluff);
-    return new Set([...memory.mine, ...held]).size < STORY_ROLES ? fresh * temperament.bluff * caution : 0;
+    return new Set([...memory.mine, ...held]).size < storyRoles ? fresh * temperament.bluff * caution : 0;
   };
 
-  // 声称某角色来行动的权重：手里有就照实声称，但本局已声称过 STORY_ROLES 个角色后不再添新的，哪怕是真的：
+  // 声称某角色来行动的权重：手里有就照实声称，但故事里已有 storyRoles 个角色后不再添新的，哪怕是真的：
   // 别人看不见暗牌，只看见它什么都声称。手里没有时看诈唬的意愿，3 张都亮在桌上的角色不碰
   const claimWeight = (role: Role) => {
-    if (held.has(role)) return memory.mine.has(role) || memory.mine.size < STORY_ROLES ? 1 : 0;
+    if (held.has(role)) return memory.mine.has(role) || memory.mine.size < storyRoles ? 1 : 0;
     return allSeen(role) ? 0 : bluffWillingness(role, NEW_BLUFF);
   };
 

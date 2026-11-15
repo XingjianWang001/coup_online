@@ -350,7 +350,22 @@ describe('decideComputerIntent', () => {
     unopposed('a', 'steal', 'c');
     income('b', 'c');
     seat(g, 'a').coins = 3;
-    expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: BOLD })).sort()).toEqual(['foreignAid', 'income', 'steal', 'tax']);
+    expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: KEEN })).sort()).toEqual(['foreignAid', 'income', 'steal', 'tax']);
+  });
+
+  it('极爱诈唬的故事上限放宽到 4 个角色：会起第 4 个角色的诈唬，不起第 5 个', () => {
+    const { g, events, did, unopposed, income } = table({ a: ['contessa', 'contessa'] });
+    unopposed('a', 'tax');
+    income('b', 'c');
+    unopposed('a', 'steal', 'c');
+    income('b', 'c');
+    seat(g, 'a').coins = 3;
+    expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: BOLD })).sort()).toEqual(['assassinate', 'exchange', 'foreignAid', 'income', 'steal', 'tax']);
+    unopposed('a', 'assassinate', 'b');
+    did(resolveLoss(g, 'b', seat(g, 'b').hand[0].id));
+    income('b', 'c');
+    seat(g, 'a').coins = 3;
+    expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: BOLD })).sort()).toEqual(['assassinate', 'foreignAid', 'income', 'steal', 'tax']);
   });
 
   it('不在同一局里轮流声称四五个角色：声称被对质检验过、不再作数，也不腾出位置给新的诈唬', () => {
@@ -367,7 +382,7 @@ describe('decideComputerIntent', () => {
     did(resolveLoss(g, 'b', seat(g, 'b').hand[0].id));
     income('b', 'c');
     expect(seat(g, 'a').coins).toBe(5);
-    expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: BOLD })).sort()).toEqual(['foreignAid', 'income', 'steal']);
+    expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: KEEN })).sort()).toEqual(['foreignAid', 'income', 'steal']);
   });
 
   it('自己实际换牌后故事重新计数：换牌前声称过 3 个角色，摸到的真牌照样拿来行动', () => {
@@ -525,12 +540,13 @@ describe('电脑玩家自对弈', () => {
       : { type: 'chooseAction', action: 'coup', targetId: rivals[Math.floor(mind.random() * rivals.length)].id };
   };
 
-  // 打 games 局，返回各座位的胜局数和声称、质疑、阻挡窗口的统计。fourthRoles：一个座位自最近一次实际交换以来自愿声称第 4 个不同角色的次数
+  // 打 games 局，返回各座位的胜局数和声称、质疑、阻挡窗口的统计。
+  // overStory：一个座位自最近一次实际交换以来自愿声称超出故事上限的新角色的次数。上限是 3 个角色，诈唬倾向不低于 0.9 的是 4 个
   function play(games: number, seats: Seat[]) {
     const random = seeded(SEED + seats.length);
     vi.spyOn(Math, 'random').mockImplementation(random); // 引擎洗牌也跟着种子走
     const ids = seats.map((_, i) => `p${i}`);
-    const stats = { wins: seats.map(() => 0), claims: 0, bluffs: 0, challenges: 0, blockWindows: 0, fourthRoles: 0 };
+    const stats = { wins: seats.map(() => 0), claims: 0, bluffs: 0, challenges: 0, blockWindows: 0, overStory: 0 };
     for (let n = 0; n < games; n++) {
       const where = `seed ${SEED}, ${seats.length} players, game ${n}`;
       const g = createGame(ids.map((id) => ({ id, name: id })), { startingPlayerId: ids[Math.floor(random() * ids.length)] });
@@ -549,12 +565,13 @@ describe('电脑玩家自对弈', () => {
         if (role) {
           const { hand } = privateState(g, id);
           const bluff = !hand.some((c) => c.role === role);
-          const roles = claimed[ids.indexOf(id)];
+          const i = ids.indexOf(id);
+          const roles = claimed[i];
           // 不得不声称的不算自愿：手里真有的阻挡，以及不阻挡就出局时的假阻挡
           const forced = intent.type === 'block' && (!bluff || (g.pending!.type === 'assassinate' && hand.length === 1));
           stats.claims++;
           if (bluff) stats.bluffs++;
-          if (!forced && !roles.has(role) && roles.size >= 3) stats.fourthRoles++;
+          if (!forced && !roles.has(role) && roles.size >= (temperaments[i].bluff >= 0.9 ? 4 : 3)) stats.overStory++;
           roles.add(role);
         }
         if (intent.type === 'challenge') stats.challenges++;
@@ -586,11 +603,11 @@ describe('电脑玩家自对弈', () => {
     [4, 1500],
     [5, 250],
     [6, 250],
-  ])('%i 人局：每局都在回合数上限内分出胜负，诈唬占全部角色声称的 20% 到 40%，没有人自愿声称第 4 个角色', (count, games) => {
-    const { wins, claims, bluffs, challenges, blockWindows, fourthRoles } = play(games, Array<Seat>(count).fill(computer));
+  ])('%i 人局：每局都在回合数上限内分出胜负，诈唬占全部角色声称的 20% 到 40%，换牌以来没有人自愿声称第 4 个角色（极爱诈唬的是第 5 个）', (count, games) => {
+    const { wins, claims, bluffs, challenges, blockWindows, overStory } = play(games, Array<Seat>(count).fill(computer));
     expect(wins.reduce((a, b) => a + b)).toBe(games);
     within(bluffs / claims, 0.2, 0.4);
-    expect(fourthRoles, `seed ${SEED}`).toBe(0);
+    expect(overStory, `seed ${SEED}`).toBe(0);
     if (count !== 4) return;
     // 4 人局里以质疑收场的问询窗口占 10% 到 25%。每个声称开一个质疑窗口，问询窗口还包括阻挡窗口：只数质疑窗口或两种都数，比例都要落在区间里
     within(challenges / claims, 0.1, 0.25);
