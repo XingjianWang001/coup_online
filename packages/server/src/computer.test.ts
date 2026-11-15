@@ -149,10 +149,13 @@ describe('decideComputerIntent', () => {
     expect([...seen].sort()).toEqual(actions);
   });
 
-  it('满 7 金币时政变', () => {
-    const g = game({ a: ['duke', 'duke'] });
-    seat(g, 'a').coins = 7;
-    expect(decide(g, 'a')).toMatchObject({ type: 'chooseAction', action: 'coup' });
+  it.each([7, 8, 9])('%i 金币时绝大多数时候政变，偶尔做别的合法行动', (coins) => {
+    const g = game({ a: ['duke', 'captain'] });
+    seat(g, 'a').coins = coins;
+    const { coup, ...others } = tally(1000, byAction, g, 'a');
+    expect(coup).toBeGreaterThan(750);
+    expect(1000 - coup).toBeGreaterThan(50);
+    expect(Object.keys(others).every((action) => ['income', 'foreignAid', 'tax', 'steal', 'assassinate', 'exchange'].includes(action))).toBe(true);
   });
 
   it('质疑窗口：声称者自己无需决定，放弃过的不再决定', () => {
@@ -494,7 +497,7 @@ describe('decideComputerIntent', () => {
 
   it('选目标：优先打领先者（金币多、影响力多），但不是每次', () => {
     const richer = game();
-    seat(richer, 'a').coins = 7;
+    seat(richer, 'a').coins = 10; // 10 金币必政变：只看选谁
     seat(richer, 'b').coins = 6;
     const counts = tally(1000, byTarget, richer, 'a');
     expect(counts.b).toBeGreaterThan(700);
@@ -504,7 +507,7 @@ describe('decideComputerIntent', () => {
     income('a');
     coup('b', 'c', 'duke');
     income('c');
-    for (const p of g.players) p.coins = p.id === 'a' ? 7 : 2;
+    for (const p of g.players) p.coins = p.id === 'a' ? 10 : 2;
     expect(tally(1000, byTarget, g, 'a', { events }).b).toBeGreaterThan(700);
   });
 
@@ -514,7 +517,7 @@ describe('decideComputerIntent', () => {
       const { g, events, unopposed, income } = table();
       income('a', 'b');
       unopposed('c', 'steal', victim);
-      for (const p of g.players) p.coins = p.id === 'a' ? 7 : 2;
+      for (const p of g.players) p.coins = p.id === 'a' ? 10 : 2;
       return tally(1000, byTarget, g, 'a', { events }).c;
     };
     expect(coupsOnC('b')).toBeLessThan(600);
