@@ -72,7 +72,8 @@ function table(hands?: Record<string, Role[]>) {
 // 三项倾向都为 0：从不诈唬，最不爱质疑
 const CALM: Temperament = { bluff: 0, suspicion: 0, aggression: 0 };
 const EVEN: Temperament = { bluff: 0.5, suspicion: 0.5, aggression: 0.5 };
-const BOLD: Temperament = { ...EVEN, bluff: 1 };
+const KEEN: Temperament = { ...EVEN, bluff: 0.8 }; // 爱诈唬，但没到极爱：故事上限仍是 3 个角色
+const BOLD: Temperament = { ...EVEN, bluff: 1 }; // 极爱诈唬：故事上限放宽到 4 个角色
 // 决策函数在公开状态和自己的暗牌之外还要的三样；测试里没给的用这里的默认值
 interface Mind {
   events: GameEvent[];
@@ -369,7 +370,7 @@ describe('decideComputerIntent', () => {
     expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: BOLD })).sort()).toEqual(['foreignAid', 'income', 'steal']);
   });
 
-  it('不在同一局里轮流声称四五个角色：已声称过 3 个角色后，手里真有的新角色也不拿来行动', () => {
+  it('自己实际换牌后故事重新计数：换牌前声称过 3 个角色，摸到的真牌照样拿来行动', () => {
     const { g, events, did, unopposed, income } = table({ a: ['duke', 'captain'] });
     unopposed('a', 'tax');
     income('b', 'c');
@@ -382,7 +383,22 @@ describe('decideComputerIntent', () => {
     drawn[1].role = 'contessa';
     did(resolveExchange(g, 'a', drawn.map((card) => card.id)));
     income('b', 'c');
-    expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: BOLD })).sort()).toEqual(['foreignAid', 'income']);
+    expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: CALM })).sort()).toEqual(['assassinate', 'foreignAid', 'income']);
+  });
+
+  it('只宣布交换、被质疑抓到没换成：故事不重置，已声称过 3 个角色后手里真有的新角色也不拿来行动', () => {
+    const { g, events, did, unopposed, income } = table({ a: ['duke', 'assassin'], b: ['contessa', 'contessa'] });
+    unopposed('a', 'tax');
+    income('b', 'c');
+    unopposed('a', 'steal', 'c');
+    income('b', 'c');
+    did(chooseAction(g, 'a', 'exchange'));
+    did(challenge(g, 'b'));
+    did(revealShowdownCard(g, 'a', cardOf(g, 'a', 'duke')));
+    income('b', 'c');
+    expect(seat(g, 'a').hand.map((c) => c.role)).toEqual(['assassin']);
+    seat(g, 'a').coins = 3; // 够暗杀，不够政变
+    expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: KEEN })).sort()).toEqual(['foreignAid', 'income', 'steal']);
   });
 
   it('选目标：优先打领先者（金币多、影响力多），但不是每次', () => {
@@ -509,7 +525,7 @@ describe('电脑玩家自对弈', () => {
       : { type: 'chooseAction', action: 'coup', targetId: rivals[Math.floor(mind.random() * rivals.length)].id };
   };
 
-  // 打 games 局，返回各座位的胜局数和声称、质疑、阻挡窗口的统计。fourthRoles：一个座位在一局里自愿声称第 4 个不同角色的次数
+  // 打 games 局，返回各座位的胜局数和声称、质疑、阻挡窗口的统计。fourthRoles：一个座位自最近一次实际交换以来自愿声称第 4 个不同角色的次数
   function play(games: number, seats: Seat[]) {
     const random = seeded(SEED + seats.length);
     vi.spyOn(Math, 'random').mockImplementation(random); // 引擎洗牌也跟着种子走
@@ -545,6 +561,8 @@ describe('电脑玩家自对弈', () => {
         const wasBlockWindow = g.phase === 'awaitingBlock';
         const produced = apply(g, id, intent);
         events.push(...produced);
+        // 实际换了牌的座位故事重新计数
+        for (const e of produced) if (e.type === 'exchangeDrew') claimed[ids.indexOf(e.playerId)].clear();
         if (!wasBlockWindow && g.phase === 'awaitingBlock') stats.blockWindows++;
         turns += produced.filter((e) => e.type === 'turnChanged').length;
         if (turns > TURN_LIMIT) throw new Error(`no winner within ${TURN_LIMIT} turns (${where})`);

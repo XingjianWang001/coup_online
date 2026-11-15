@@ -53,7 +53,7 @@ function pickAction(weights: readonly (readonly [ActionType, number])[], random:
 // 局内记忆：只从本局的公开事件里得来，换一局事件清空，记忆也就没了
 interface Memory {
   standing: Map<string, Set<Role>>; // 各玩家声称过、现在还作数的角色：被对质检验过、亮出来了或交换过牌就不再作数
-  mine: Set<Role>; // 自己本局声称过的全部角色，作数不作数都算
+  mine: Set<Role>; // 自己的故事：最近一次实际交换以来声称过的全部角色，作数不作数都算
   caught: Map<string, number>; // 被抓到诈唬的次数
   proven: Map<string, number>; // 声称被对质证明为真的次数
   attacker?: string; // 最近打过自己的玩家
@@ -84,6 +84,7 @@ function recall(events: readonly GameEvent[], me: string): Memory {
       memory.standing.get(e.playerId)?.delete(e.role);
     } else if (e.type === 'exchangeDrew') {
       memory.standing.delete(e.playerId); // 交换之后手里是什么牌没人知道
+      if (e.playerId === me) memory.mine.clear(); // 自己换了牌可以改口：故事从头讲。只宣布、被抓到没换成的没有这个事件
     }
   }
   return memory;
