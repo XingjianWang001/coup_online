@@ -42,6 +42,10 @@ const REPEAT_BLUFF = 2;
 // 诈唬倾向不低于 RECKLESS_BLUFF 的放宽到 4 个。故事比暗牌多是有意留下的破绽：别人能从自相矛盾里抓到它
 const STORY_ROLES = 3;
 const RECKLESS_BLUFF = 0.9;
+// 对方的声称自相矛盾时，质疑概率乘这么多：更想质疑，不是必然质疑
+const CONTRADICTION = 2.5;
+// 对方的声称被证明为真过，质疑概率最多降到这个比例：CONTRADICTION 乘它仍大于 1，眼前的矛盾盖得过旧信用
+const PROVEN_FLOOR = 0.6;
 
 function pickAction(weights: readonly (readonly [ActionType, number])[], random: () => number): ActionType {
   let roll = random() * weights.reduce((sum, [, weight]) => sum + weight, 0);
@@ -172,10 +176,15 @@ export function decideComputerIntent(
   const challengeChance = (claimantId: string, role: Role, onAction: boolean) => {
     if (allSeen(role)) return 1;
     const { action } = pending!;
-    // 多疑程度定基调；看得见的同角色牌越多、对方本局被抓过越可疑，被证明过越可信
+    // 自相矛盾：对方仍作数的声称角色（含眼前这个）比暗牌多，没有换牌能解释。同一角色声称几次只算一个，声称一致也不算证明
+    const contradicts = (memory.standing.get(claimantId)?.size ?? 0) > state.players.find((p) => p.id === claimantId)!.handCount;
+    // 被证明为真的信用：每次把质疑概率打七五折，最低到 PROVEN_FLOOR。证明用的那张牌已洗回牌堆，说明不了对方现在拿着什么
+    const credit = Math.max(PROVEN_FLOOR, 0.75 ** (memory.proven.get(claimantId) ?? 0));
+    // 多疑程度定基调；看得见的同角色牌越多、对方本局被抓过、声称自相矛盾越可疑，被证明过略可信。
+    // 基调比没有矛盾推理时低四分之一：质疑的总量不变，没有依据的少了，冲着矛盾去的多了
     const p = Math.min(
       0.9,
-      ((0.055 + 0.17 * temperament.suspicion) * (1 + seen(role)) * (1 + (memory.caught.get(claimantId) ?? 0))) / (1 + (memory.proven.get(claimantId) ?? 0)),
+      (0.04 + 0.13 * temperament.suspicion) * (1 + seen(role)) * (1 + (memory.caught.get(claimantId) ?? 0)) * (contradicts ? CONTRADICTION : 1) * credit,
     );
     if (dying && !held.has('contessa')) {
       // 放弃等于认输：不质疑就留到阻挡窗口假装女伯爵。多疑的倾向质疑，爱诈唬的倾向假装；女伯爵 3 张都亮了就没人会信，只能质疑

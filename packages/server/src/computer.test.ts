@@ -256,6 +256,82 @@ describe('decideComputerIntent', () => {
     expect(challengesOfTax(['duke', 'captain'], true)).toBeLessThan(neutral * 0.8);
   });
 
+  it('质疑看声称是否自相矛盾：仍作数的声称角色比暗牌多就更想质疑；同一角色声称几次、换牌后改口都不算', () => {
+    // a 先走 before 里的几手（都没有人质疑），再收税：数 b 质疑这次收税的次数。同一个随机源，质疑概率相同则次数相同
+    type Table = ReturnType<typeof table>;
+    const challengesOfTax = (before: (t: Table) => void, aHand: Role[] = ['duke', 'duke']) => {
+      const t = table({ a: aHand, b: ['contessa', 'contessa'], c: ['ambassador', 'ambassador'] });
+      before(t);
+      t.did(chooseAction(t.g, 'a', 'tax'));
+      return tally(4000, byType, t.g, 'b', { events: t.events }).challenge;
+    };
+    // a 的一手，b 和 c 各收入一次
+    const turn = (t: Table, action: ActionType) => {
+      seat(t.g, 'a').coins = 3;
+      if (action === 'income') t.income('a');
+      else t.unopposed('a', action, action === 'tax' || action === 'exchange' ? undefined : 'c');
+      if (t.g.phase === 'choosingLoss') t.did(resolveLoss(t.g, 'c', seat(t.g, 'c').hand[0].id));
+      if (t.g.phase === 'choosingExchange') t.did(resolveExchange(t.g, 'a', seat(t.g, 'a').hand.slice(0, 2).map((card) => card.id)));
+      t.income('b', 'c');
+    };
+    const after = (...actions: ActionType[]) => challengesOfTax((t) => actions.forEach((action) => turn(t, action)));
+
+    const first = after('income', 'income');
+    expect(after('tax', 'tax')).toBe(first); // 连续声称同一角色：不更可疑，也不更可信
+    expect(after('income', 'steal')).toBe(first); // 2 个角色、2 张暗牌：说得通
+    expect(after('steal', 'assassinate')).toBeGreaterThan(first * 1.5); // 3 个角色、2 张暗牌
+    expect(after('steal', 'assassinate', 'exchange')).toBe(first); // 换过牌，之前的声称不作数
+
+    // a 只剩 1 张暗牌：声称过队长再声称公爵就是矛盾
+    const lastCard = (stole: boolean) =>
+      challengesOfTax(
+        (t) => {
+          if (stole) t.unopposed('a', 'steal', 'c');
+          else t.income('a');
+          t.coup('b', 'a', 'contessa');
+          t.income('c');
+        },
+        ['duke', 'contessa'],
+      );
+    expect(lastCard(true)).toBeGreaterThan(lastCard(false) * 1.5);
+  });
+
+  it('被证明为真的信用有上限，眼前的矛盾盖得过它', () => {
+    // c 出局后只剩 a 和 b：c 两次质疑 a 的收税都失败（a 的声称两次被证明为真），或被 a 政变两次（没有证明）。再数 b 质疑 a 收税的次数
+    const challengesOfTax = (proven: boolean, contradiction: boolean) => {
+      const { g, events, did, coup, income, unopposed } = table({ a: ['duke', 'duke'], b: ['contessa', 'contessa'], c: ['ambassador', 'ambassador'] });
+      for (let i = 0; i < 2; i++) {
+        if (proven) {
+          did(chooseAction(g, 'a', 'tax'));
+          did(challenge(g, 'c'));
+          did(revealShowdownCard(g, 'a', cardOf(g, 'a', 'duke')));
+          did(resolveLoss(g, 'c', seat(g, 'c').hand[0].id));
+        } else {
+          coup('a', 'c', 'ambassador');
+        }
+        income('b');
+        if (i === 0) income('c');
+      }
+      expect(seat(g, 'c').alive).toBe(false);
+      seat(g, 'a').coins = 2; // 离 10 金币的强制政变远一点
+      if (contradiction) {
+        // a 偷 b（队长），再用大使阻挡 b 的偷窃，接着收税（公爵）：3 个角色、2 张暗牌
+        unopposed('a', 'steal', 'b');
+        did(chooseAction(g, 'b', 'steal', 'a'));
+        did(passChallenge(g, 'a'));
+        did(block(g, 'a', 'ambassador'));
+        did(passChallenge(g, 'b'));
+      }
+      did(chooseAction(g, 'a', 'tax'));
+      return tally(4000, byType, g, 'b', { events }).challenge;
+    };
+    const fresh = challengesOfTax(false, false);
+    const trusted = challengesOfTax(true, false);
+    expect(trusted).toBeLessThan(fresh);
+    expect(trusted).toBeGreaterThan(fresh * 0.5); // 证明两次：没有上限时只剩三分之一
+    expect(challengesOfTax(true, true)).toBeGreaterThan(fresh * 1.2);
+  });
+
   it('质疑看代价：冲着自己来的行动比与己无关的更想质疑，只剩 1 点影响力时更谨慎，偷不走金币的偷窃不算代价', () => {
     const challengesOfSteal = (target: string, before = (_t: ReturnType<typeof table>) => {}) => {
       const t = table({ b: ['duke', 'contessa'] });
