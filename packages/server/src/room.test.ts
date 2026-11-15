@@ -864,6 +864,43 @@ describe('Room 电脑出手', () => {
     expect(events.onBroadcast).toHaveBeenLastCalledWith(room, expect.arrayContaining([expect.objectContaining({ type: 'actionChosen', actorId: computerId })]));
   });
 
+  it('电脑记得本局的公开事件：报复最近打过自己的玩家；下一局不记得', () => {
+    vi.useFakeTimers();
+    // 随机源恒为 0.999：电脑不凭概率质疑或假装阻挡，选目标时的随机项对谁都一样
+    const { room } = makeRoom({ startingPlayerRandom: () => 0.34, computerRandom: () => 0.999, computerDelayMs: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.addComputer(alice.id, 'sock1');
+    const computerId = room.playerList.find((p) => p.isComputer)!.id;
+    const coins = (id: string, n: number) => (room.game!.players.find((p) => p.id === id)!.coins = n);
+    // Bob 先手；Alice 金币最多，是领先者
+    const start = () => {
+      room.startGame(alice.id, 'sock1');
+      coins(alice.id, 5);
+      coins(computerId, 9);
+    };
+
+    start();
+    room.dispatch(bob.id, 'sock2', { type: 'chooseAction', action: 'steal', targetId: computerId });
+    room.dispatch(alice.id, 'sock1', { type: 'passChallenge' });
+    vi.advanceTimersToNextTimer(); // 电脑放弃质疑
+    vi.advanceTimersToNextTimer(); // 电脑阻挡（手里有对应角色）或放弃
+    if (room.game!.phase === 'awaitingChallenge') {
+      room.dispatch(alice.id, 'sock1', { type: 'passChallenge' });
+      room.dispatch(bob.id, 'sock2', { type: 'passChallenge' });
+    }
+    vi.advanceTimersToNextTimer(); // 电脑的回合：政变
+    expect(room.game!.lossToResolve?.playerId).toBe(bob.id);
+
+    room.apply((g) => forfeit(g, computerId));
+    room.apply((g) => forfeit(g, bob.id));
+    room.rematch(alice.id, 'sock1');
+    start();
+    room.dispatch(bob.id, 'sock2', { type: 'chooseAction', action: 'income' });
+    vi.advanceTimersToNextTimer();
+    expect(room.game!.lossToResolve?.playerId).toBe(alice.id);
+  });
+
   it('注入零延迟：1 位真人（只靠默认行动）加 3 个电脑的牌局打到 gameOver，不留计时器', () => {
     vi.useFakeTimers();
     let seed = 1;
