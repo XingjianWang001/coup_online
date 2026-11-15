@@ -31,6 +31,8 @@ export const drawTemperament = (random: () => number): Temperament => ({ bluff: 
 // 它们由自对弈检查（computer.test.ts）的区间和人工验收一起约束，调任何一个都要重跑自对弈检查
 // 一张牌对自己有多大用：失去影响力、对质翻牌、交换选牌时留下大的
 const WORTH: Record<Role, number> = { duke: 5, captain: 4, assassin: 3, contessa: 3, ambassador: 2 };
+// 眼前有暗杀或偷窃的威胁时，能挡住它的牌多值这么多。是倾向不是规则：别的牌更值钱时仍不留
+const THREAT = 1.5;
 // 冲着自己来的行动（或拦下自己行动的阻挡）有多疼：越疼越想质疑
 const HARM: Partial<Record<ActionType, number>> = { foreignAid: 0.5, steal: 1, assassinate: 1.5 };
 // 诈唬的意愿都要乘诈唬倾向。起一个新的诈唬：声称角色行动用 NEW_BLUFF，假装阻挡按被阻挡的行动用 FAKE_BLOCK；
@@ -127,7 +129,14 @@ export function decideComputerIntent(
   const allSeen = (role: Role) => seen(role) >= ROLE_COPIES;
   // 把「这件事总共有 p 的概率被某人做」折算成自己这一份：有资格的人越多，每人越少出手
   const perSeat = (p: number) => 1 - (1 - p) ** (1 / rivals.length);
-  const worth = (role: Role) => WORTH[role] + (role === 'assassin' ? temperament.aggression : 0) + (memory.mine.has(role) ? 1.5 : 0);
+  // 眼前的威胁：有对手仍作数地声称刺客且金币够暗杀，或仍作数地声称队长而自己有金币可偷。能挡住它的牌更值得留
+  const assassinAbout = rivals.some((p) => stillClaims(p.id, 'assassin') && p.coins >= ASSASSINATE_COST);
+  const captainAbout = self.coins > 0 && rivals.some((p) => stillClaims(p.id, 'captain'));
+  const worth = (role: Role) =>
+    WORTH[role] +
+    (role === 'assassin' ? temperament.aggression : 0) +
+    (memory.mine.has(role) ? 1.5 : 0) +
+    ((assassinAbout && BLOCK_ROLES.assassinate.includes(role)) || (captainAbout && BLOCK_ROLES.steal.includes(role)) ? THREAT : 0);
   const leastUseful = () => hand.reduce((a, b) => (worth(b.role) < worth(a.role) ? b : a));
 
   // 领先者优先（影响力多、金币多），最近打过自己的加分，再带一点随机。wary：对方声称过这些角色就多半会阻挡

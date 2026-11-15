@@ -598,6 +598,93 @@ describe('decideComputerIntent', () => {
     expect(intent.keepIds.map((id) => seat(g, 'a').hand.find((c) => c.id === id)!.role).sort()).toEqual(kept);
     expect(() => apply(g, 'a', intent)).not.toThrow();
   });
+
+  describe('保牌看眼前的威胁', () => {
+    // 决定留牌的是 b，可能威胁它的是 c。c 手里是两张公爵：声称刺客或队长都是诈唬，被质疑就被拆穿。
+    // 下面每个函数是 c 的一手（连同 a、b 各收入一次），走完轮到 a
+    type Table = ReturnType<typeof table>;
+    const hands = (b: Role[]) => ({ b, c: ['duke', 'duke'] as Role[] });
+    const cDoesNothing = (t: Table) => t.income('a', 'b', 'c');
+    const cClaims = (action: 'assassinate' | 'steal') => (t: Table) => {
+      t.income('a', 'b');
+      seat(t.g, 'c').coins = 3;
+      t.unopposed('c', action, 'a');
+      if (t.g.phase === 'choosingLoss') t.did(resolveLoss(t.g, 'a', seat(t.g, 'a').hand[0].id));
+    };
+    const cIsCaughtClaiming = (action: 'assassinate' | 'steal') => (t: Table) => {
+      t.income('a', 'b');
+      seat(t.g, 'c').coins = 3;
+      t.did(chooseAction(t.g, 'c', action, 'a'));
+      t.did(challenge(t.g, 'a'));
+      t.did(revealShowdownCard(t.g, 'c', seat(t.g, 'c').hand[0].id));
+    };
+    const cExchanges = (t: Table) => {
+      t.income('a', 'b');
+      t.unopposed('c', 'exchange');
+      t.did(resolveExchange(t.g, 'c', seat(t.g, 'c').hand.slice(0, 2).map((card) => card.id)));
+    };
+
+    // b 拿 roles 里的一张配另外的每种角色、各换 25 种性格，被 a 政变时留下 roles 里那张的次数。同一个随机源：估值相同则次数相同
+    const kept = (roles: Role[], moves: ((t: Table) => void)[], bCoins = 2, cCoins = 3) => {
+      const random = seeded(5);
+      let count = 0;
+      for (const role of roles) {
+        for (const other of ROLE_ORDER.filter((r) => !roles.includes(r))) {
+          for (let i = 0; i < 25; i++) {
+            const t = table(hands([role, other]));
+            moves.forEach((move) => move(t));
+            seat(t.g, 'a').coins = COUP_COST;
+            t.did(chooseAction(t.g, 'a', 'coup', 'b'));
+            seat(t.g, 'b').coins = bCoins;
+            seat(t.g, 'c').coins = cCoins;
+            const intent = decide(t.g, 'b', { events: t.events, temperament: drawTemperament(random), random });
+            if (intent?.type !== 'resolveLoss') throw new Error(`unexpected ${JSON.stringify(intent)}`);
+            if (intent.cardId !== cardOf(t.g, 'b', role)) count++;
+          }
+        }
+      }
+      return count;
+    };
+
+    it('暗杀威胁：有对手仍作数地声称刺客且金币够暗杀时更常留下女伯爵；声称被拆穿、对手换过牌或金币不够，修正就消失', () => {
+      const calm = kept(['contessa'], [cDoesNothing]);
+      const threatened = kept(['contessa'], [cClaims('assassinate')]);
+      expect(threatened).toBeGreaterThan(calm * 1.5);
+      expect(threatened).toBeLessThan(100); // 是倾向不是规则：另一张更值钱时仍不留女伯爵
+      expect(kept(['contessa'], [cIsCaughtClaiming('assassinate')])).toBe(calm);
+      expect(kept(['contessa'], [cClaims('assassinate'), cExchanges])).toBe(calm);
+      expect(kept(['contessa'], [cClaims('assassinate')], 2, 2)).toBe(calm);
+    });
+
+    it('偷窃威胁：有对手仍作数地声称队长且自己有金币可偷时更常留下大使或队长；声称被拆穿、对手换过牌或自己没有金币，修正就消失', () => {
+      const blockers: Role[] = ['captain', 'ambassador'];
+      const calm = kept(blockers, [cDoesNothing]);
+      const threatened = kept(blockers, [cClaims('steal')]);
+      expect(threatened).toBeGreaterThan(calm * 1.5);
+      expect(threatened).toBeLessThan(150);
+      expect(kept(blockers, [cIsCaughtClaiming('steal')])).toBe(calm);
+      expect(kept(blockers, [cClaims('steal'), cExchanges])).toBe(calm);
+      expect(kept(blockers, [cClaims('steal')], 0)).toBe(calm);
+    });
+
+    it('交换选牌也看威胁：有暗杀威胁时女伯爵比队长值得留', () => {
+      const keptRoles = (move: (t: Table) => void) => {
+        const t = table(hands(['duke', 'contessa']));
+        move(t);
+        t.income('a');
+        t.unopposed('b', 'exchange');
+        const drawn = seat(t.g, 'b').hand.slice(2);
+        drawn[0].role = 'captain'; // 摸到什么由测试指定
+        drawn[1].role = 'ambassador';
+        seat(t.g, 'c').coins = 3;
+        const intent = decide(t.g, 'b', { events: t.events });
+        if (intent?.type !== 'resolveExchange') throw new Error(`unexpected ${JSON.stringify(intent)}`);
+        return intent.keepIds.map((id) => seat(t.g, 'b').hand.find((c) => c.id === id)!.role).sort();
+      };
+      expect(keptRoles(cDoesNothing)).toEqual(['captain', 'duke']);
+      expect(keptRoles(cClaims('assassinate'))).toEqual(['contessa', 'duke']);
+    });
+  });
 });
 
 // 自对弈检查（#57）：电脑对电脑打几千局，看它不出错、打得完，而且诈唬和质疑的比例像人。
