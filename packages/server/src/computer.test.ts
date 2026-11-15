@@ -2,6 +2,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ACTION_CLAIM,
+  COUP_COST,
+  ROLE_COPIES,
+  ROLE_ORDER,
   block,
   challenge,
   chooseAction,
@@ -13,6 +16,7 @@ import {
   resolveExchange,
   resolveLoss,
   revealShowdownCard,
+  type ActionType,
   type GameEvent,
   type GameState,
   type Role,
@@ -30,22 +34,60 @@ function seeded(seed: number): () => number {
 }
 
 const IDS = ['a', 'b', 'c'];
-function game(hands?: Record<string, Role[]>): GameState {
-  return createGame(IDS.map((id) => ({ id, name: id })), { startingPlayerId: 'a', hands });
+// 引擎的 hands 选项不给没写到的玩家发牌：没指定暗牌的玩家按固定顺序从剩下的牌里各拿 2 张，免得出现没有暗牌的存活玩家
+function game(hands: Record<string, Role[]> = {}): GameState {
+  const left = Array.from({ length: ROLE_ORDER.length * ROLE_COPIES }, (_, i) => ROLE_ORDER[i % ROLE_ORDER.length]);
+  for (const role of Object.values(hands).flat()) left.splice(left.indexOf(role), 1);
+  const dealt = Object.fromEntries(IDS.map((id) => [id, hands[id] ?? left.splice(0, 2)]));
+  return createGame(IDS.map((id) => ({ id, name: id })), { startingPlayerId: 'a', hands: dealt });
+}
+const seat = (g: GameState, id: string) => g.players.find((p) => p.id === id)!;
+const cardOf = (g: GameState, id: string, role: Role) => seat(g, id).hand.find((c) => c.role === role)!.id;
+
+// 一桌按真实流程推进的牌局：did 记下引擎产生的事件，电脑的局内记忆和在房间里一样只从这些事件来
+function table(hands?: Record<string, Role[]>) {
+  const g = game(hands);
+  const events: GameEvent[] = [];
+  const did = (produced: GameEvent[]) => void events.push(...produced);
+  return {
+    g,
+    events,
+    did,
+    income: (...ids: string[]) => ids.forEach((id) => did(chooseAction(g, id, 'income'))),
+    // 轮到 by 时政变 target，target 亮出 lose
+    coup(by: string, target: string, lose: Role) {
+      seat(g, by).coins = COUP_COST;
+      did(chooseAction(g, by, 'coup', target));
+      did(resolveLoss(g, target, cardOf(g, target, lose)));
+    },
+    // 轮到 by 时执行声称角色的行动，没有人质疑，目标也不阻挡
+    unopposed(by: string, action: ActionType, target?: string) {
+      did(chooseAction(g, by, action, target));
+      for (const id of IDS) if (id !== by && seat(g, id).alive) did(passChallenge(g, id));
+      if (g.phase === 'awaitingBlock') did(passBlock(g, target!));
+    },
+  };
 }
 
-// 三项倾向都为 0：不起新的诈唬，最不爱质疑
+// 三项倾向都为 0：从不诈唬，最不爱质疑
 const CALM: Temperament = { bluff: 0, suspicion: 0, aggression: 0 };
 const EVEN: Temperament = { bluff: 0.5, suspicion: 0.5, aggression: 0.5 };
-const decide = (g: GameState, id: string, random = seeded(1), events: GameEvent[] = [], temperament = CALM) =>
+const BOLD: Temperament = { ...EVEN, bluff: 1 };
+// 决策函数在公开状态和自己的暗牌之外还要的三样；测试里没给的用这里的默认值
+interface Mind {
+  events: GameEvent[];
+  temperament: Temperament;
+  random: () => number;
+}
+const decide = (g: GameState, id: string, { events = [], temperament = CALM, random = seeded(1) }: Partial<Mind> = {}) =>
   decideComputerIntent(publicState(g), privateState(g, id), events, temperament, random);
 
-// 同一局面下重复决定 times 次，数各种结果出现的次数
-function tally(times: number, key: (intent: ComputerIntent) => string, g: GameState, id: string, events: GameEvent[] = [], temperament = EVEN): Record<string, number> {
+// 同一局面下以中等性格重复决定 times 次，数各种结果出现的次数
+function tally(times: number, key: (intent: ComputerIntent) => string, g: GameState, id: string, mind: Partial<Omit<Mind, 'random'>> = {}): Record<string, number> {
   const random = seeded(11);
   const counts: Record<string, number> = {};
   for (let i = 0; i < times; i++) {
-    const k = key(decide(g, id, random, events, temperament)!);
+    const k = key(decide(g, id, { temperament: EVEN, ...mind, random })!);
     counts[k] = (counts[k] ?? 0) + 1;
   }
   return counts;
@@ -80,8 +122,8 @@ describe('decideComputerIntent', () => {
   it('满 10 金币必须政变一个存活的对手', () => {
     for (let seed = 0; seed < 20; seed++) {
       const g = game();
-      g.players[0].coins = 10;
-      const intent = decide(g, 'a', seeded(seed));
+      seat(g, 'a').coins = 10;
+      const intent = decide(g, 'a', { random: seeded(seed) });
       expect(intent).toMatchObject({ type: 'chooseAction', action: 'coup' });
       expect(() => apply(g, 'a', intent!)).not.toThrow();
     }
@@ -97,8 +139,8 @@ describe('decideComputerIntent', () => {
     const seen = new Set<string>();
     for (let i = 0; i < 200; i++) {
       const g = game({ a: hand });
-      g.players[0].coins = coins;
-      const intent = decide(g, 'a', random);
+      seat(g, 'a').coins = coins;
+      const intent = decide(g, 'a', { random });
       if (intent?.type !== 'chooseAction') throw new Error(`unexpected ${JSON.stringify(intent)}`);
       seen.add(intent.action);
       expect(() => apply(g, 'a', intent)).not.toThrow();
@@ -108,7 +150,7 @@ describe('decideComputerIntent', () => {
 
   it('满 7 金币时政变', () => {
     const g = game({ a: ['duke', 'duke'] });
-    g.players[0].coins = 7;
+    seat(g, 'a').coins = 7;
     expect(decide(g, 'a')).toMatchObject({ type: 'chooseAction', action: 'coup' });
   });
 
@@ -123,14 +165,11 @@ describe('decideComputerIntent', () => {
 
   it('明牌加自己的暗牌已凑齐被声称角色的 3 张时必质疑', () => {
     for (let seed = 0; seed < 50; seed++) {
-      const g = game({ a: ['contessa', 'captain'], b: ['duke', 'duke'], c: ['duke', 'assassin'] });
-      g.players[0].coins = 7;
-      chooseAction(g, 'a', 'coup', 'c');
-      resolveLoss(g, 'c', g.players[2].hand[0].id);
-      chooseAction(g, 'b', 'income');
-      chooseAction(g, 'c', 'income');
+      const { g, coup, income } = table({ a: ['contessa', 'captain'], b: ['duke', 'duke'], c: ['duke', 'assassin'] });
+      coup('a', 'c', 'duke');
+      income('b', 'c');
       chooseAction(g, 'a', 'tax');
-      expect(decide(g, 'b', seeded(seed))).toEqual({ type: 'challenge' });
+      expect(decide(g, 'b', { random: seeded(seed) })).toEqual({ type: 'challenge' });
     }
   });
 
@@ -139,18 +178,36 @@ describe('decideComputerIntent', () => {
     for (let seed = 0; seed < 200; seed++) {
       const random = seeded(seed);
       const temperament = drawTemperament(random);
-      const g = game({ a: ['assassin', 'duke'], b: ['captain'], c: ['duke', 'duke'] });
-      g.players[0].coins = 3;
-      chooseAction(g, 'a', 'assassinate', 'b');
-      const first = decide(g, 'b', random, [], temperament)!;
+      const { g, events, did, coup, income } = table({ a: ['assassin', 'duke'], b: ['captain', 'ambassador'], c: ['duke', 'duke'] });
+      coup('a', 'b', 'ambassador');
+      income('b', 'c');
+      seat(g, 'a').coins = 3;
+      did(chooseAction(g, 'a', 'assassinate', 'b'));
+      const first = decide(g, 'b', { events, temperament, random })!;
       ways.add(first.type);
       if (first.type === 'challenge') continue;
-      apply(g, 'b', first);
-      passChallenge(g, 'c');
+      did(apply(g, 'b', first));
+      did(passChallenge(g, 'c'));
       expect(g.phase).toBe('awaitingBlock');
-      expect(decide(g, 'b', random, [], temperament)).toEqual({ type: 'block', role: 'contessa' });
+      expect(decide(g, 'b', { events, temperament, random })).toEqual({ type: 'block', role: 'contessa' });
     }
     expect([...ways].sort()).toEqual(['challenge', 'passChallenge']);
+  });
+
+  it('被暗杀且只剩 1 点影响力：女伯爵 3 张都亮在桌上、别人的质疑已失败，仍假装女伯爵阻挡而不放弃', () => {
+    const { g, events, did, coup } = table({ a: ['assassin', 'contessa'], b: ['captain', 'contessa'], c: ['duke', 'contessa'] });
+    coup('a', 'b', 'contessa');
+    coup('b', 'c', 'contessa');
+    coup('c', 'a', 'contessa');
+    seat(g, 'a').coins = 3;
+    did(chooseAction(g, 'a', 'assassinate', 'b'));
+    did(challenge(g, 'c'));
+    did(revealShowdownCard(g, 'a', cardOf(g, 'a', 'assassin')));
+    did(resolveLoss(g, 'c', cardOf(g, 'c', 'duke')));
+    expect(g.phase).toBe('awaitingBlock');
+    for (let seed = 0; seed < 50; seed++) {
+      expect(decide(g, 'b', { events, random: seeded(seed) })).toEqual({ type: 'block', role: 'contessa' });
+    }
   });
 
   it('质疑率按有资格质疑的人数折算：2 人局和 6 人局里一个声称被质疑的总概率接近', () => {
@@ -163,7 +220,7 @@ describe('decideComputerIntent', () => {
       const random = seeded(count);
       let challenged = 0;
       for (let i = 0; i < 4000; i++) {
-        if (ids.slice(1).some((id) => decide(g, id, random, [], EVEN)?.type === 'challenge')) challenged++;
+        if (ids.slice(1).some((id) => decide(g, id, { temperament: EVEN, random })?.type === 'challenge')) challenged++;
       }
       return challenged / 4000;
     };
@@ -174,26 +231,47 @@ describe('decideComputerIntent', () => {
   });
 
   it('质疑看证据：对方本局被抓过诈唬则更怀疑，声称被证明过则更相信', () => {
-    const g = game({ a: ['duke', 'captain'], b: ['assassin', 'contessa'] });
-    chooseAction(g, 'a', 'tax');
-    const earlier: GameEvent = { type: 'actionChosen', actorId: 'a', action: 'steal', targetId: 'c', claimedRole: 'captain' };
-    const caught: GameEvent[] = [earlier, { type: 'challengeResolved', truth: false, loserId: 'a', claimantId: 'a', role: 'contessa', slot: 0 }];
-    const proven: GameEvent[] = [earlier, { type: 'challengeResolved', truth: true, loserId: 'c', claimantId: 'a', role: 'captain', slot: 0 }];
-    const neutral = tally(4000, byType, g, 'b').challenge;
-    expect(tally(4000, byType, g, 'b', caught).challenge).toBeGreaterThan(neutral * 1.3);
-    expect(tally(4000, byType, g, 'b', proven).challenge).toBeLessThan(neutral * 0.8);
+    // a 先偷 c（c 质疑或不质疑），各走一手后 a 收税：数 b 质疑这次收税的次数
+    const challengesOfTax = (aHand: Role[], challenged: boolean) => {
+      const { g, events, did, unopposed, income } = table({ a: aHand, b: ['assassin', 'contessa'], c: ['ambassador', 'ambassador'] });
+      if (challenged) {
+        did(chooseAction(g, 'a', 'steal', 'c'));
+        did(challenge(g, 'c'));
+        did(revealShowdownCard(g, 'a', seat(g, 'a').hand[1].id));
+        // a 翻出队长：c 失去影响力，偷窃继续；否则 a 自己失去翻开的牌，行动作废
+        if (g.phase === 'choosingLoss') {
+          did(resolveLoss(g, 'c', seat(g, 'c').hand[0].id));
+          did(passBlock(g, 'c'));
+        }
+      } else {
+        unopposed('a', 'steal', 'c');
+      }
+      income('b', 'c');
+      did(chooseAction(g, 'a', 'tax'));
+      return tally(4000, byType, g, 'b', { events }).challenge;
+    };
+    const neutral = challengesOfTax(['duke', 'captain'], false);
+    expect(challengesOfTax(['duke', 'contessa'], true)).toBeGreaterThan(neutral * 1.3);
+    expect(challengesOfTax(['duke', 'captain'], true)).toBeLessThan(neutral * 0.8);
   });
 
-  it('质疑看代价：冲着自己来的行动比与己无关的更想质疑，只剩 1 点影响力时更谨慎', () => {
-    const stolen = (target: string, hands: Record<string, Role[]>) => {
-      const g = game(hands);
-      chooseAction(g, 'a', 'steal', target);
-      return tally(4000, byType, g, 'b').challenge;
+  it('质疑看代价：冲着自己来的行动比与己无关的更想质疑，只剩 1 点影响力时更谨慎，偷不走金币的偷窃不算代价', () => {
+    const challengesOfSteal = (target: string, before = (_t: ReturnType<typeof table>) => {}) => {
+      const t = table({ b: ['duke', 'contessa'] });
+      before(t);
+      t.did(chooseAction(t.g, 'a', 'steal', target));
+      return tally(4000, byType, t.g, 'b', { events: t.events }).challenge;
     };
-    const bystander = stolen('c', { b: ['duke', 'contessa'] });
-    const victim = stolen('b', { b: ['duke', 'contessa'] });
+    const bystander = challengesOfSteal('c');
+    const victim = challengesOfSteal('b');
     expect(victim).toBeGreaterThan(bystander * 1.5);
-    expect(stolen('b', { b: ['duke'] })).toBeLessThan(victim * 0.8);
+    const lastCard = challengesOfSteal('b', ({ coup, income }) => {
+      coup('a', 'b', 'contessa');
+      income('b', 'c');
+    });
+    expect(lastCard).toBeLessThan(victim * 0.8);
+    const broke = challengesOfSteal('b', ({ g }) => (seat(g, 'b').coins = 0));
+    expect(broke).toBeLessThan(bystander * 1.3);
   });
 
   it('没有对应角色时按诈唬倾向决定是否假装阻挡', () => {
@@ -201,60 +279,139 @@ describe('decideComputerIntent', () => {
     chooseAction(g, 'a', 'steal', 'b');
     passChallenge(g, 'b');
     passChallenge(g, 'c');
-    expect(tally(300, byType, g, 'b', [], CALM)).toEqual({ passBlock: 300 });
-    const bold = tally(300, byType, g, 'b', [], { ...EVEN, bluff: 1 });
+    expect(tally(300, byType, g, 'b', { temperament: CALM })).toEqual({ passBlock: 300 });
+    const bold = tally(300, byType, g, 'b', { temperament: BOLD });
     expect(bold.block).toBeGreaterThan(30);
     expect(bold.passBlock).toBeGreaterThan(30);
   });
 
-  it('本局声称过的角色被优先再次声称', () => {
-    const g = game({ a: ['contessa', 'contessa'] });
-    g.players[0].coins = 3;
-    const claimedDuke: GameEvent[] = [{ type: 'actionChosen', actorId: 'a', action: 'tax', claimedRole: 'duke' }];
-    const { tax = 0, steal = 0, assassinate = 0, exchange = 0 } = tally(1000, byAction, g, 'a', claimedDuke);
+  it('声称过队长的接着假装队长阻挡偷窃；自己没有金币可偷时不必假装', () => {
+    const { g, events, did, unopposed, income } = table({ a: ['captain', 'duke'], b: ['duke', 'contessa'] });
+    income('a');
+    unopposed('b', 'steal', 'c');
+    income('c');
+    did(chooseAction(g, 'a', 'steal', 'b'));
+    did(passChallenge(g, 'b'));
+    did(passChallenge(g, 'c'));
+    expect(tally(300, byType, g, 'b', { events, temperament: BOLD })).toEqual({ block: 300 });
+    seat(g, 'b').coins = 0;
+    expect(tally(300, byType, g, 'b', { events, temperament: BOLD })).toEqual({ passBlock: 300 });
+  });
+
+  it('本局声称过的角色被优先再次声称，越爱诈唬越常接着演，从不诈唬的不演', () => {
+    const { g, events, unopposed, income } = table({ a: ['contessa', 'contessa'] });
+    unopposed('a', 'tax');
+    income('b', 'c');
+    const { tax = 0, steal = 0, assassinate = 0, exchange = 0 } = tally(1000, byAction, g, 'a', { events });
     expect(steal + assassinate + exchange).toBeGreaterThan(0); // 还会起别的诈唬，只是少得多
     expect(tax).toBeGreaterThan(1.5 * (steal + assassinate + exchange));
+    const timid = tally(1000, byAction, g, 'a', { events, temperament: { ...EVEN, bluff: 0.1 } }).tax;
+    expect(timid).toBeLessThan(0.7 * tally(1000, byAction, g, 'a', { events, temperament: BOLD }).tax);
+    expect(tally(1000, byAction, g, 'a', { events, temperament: CALM }).tax).toBeUndefined();
   });
 
   it('声称被对质证明为真后牌已换走：不再把它当作自己的牌', () => {
-    const g = game({ a: ['contessa', 'contessa'] });
-    const claimedDuke: GameEvent = { type: 'actionChosen', actorId: 'a', action: 'tax', claimedRole: 'duke' };
-    const proven: GameEvent = { type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 0 };
-    expect(tally(300, byAction, g, 'a', [claimedDuke], CALM).tax).toBeGreaterThan(0);
-    expect(tally(300, byAction, g, 'a', [claimedDuke, proven], CALM).tax).toBeUndefined();
+    const afterTax = (challenged: boolean) => {
+      const { g, events, did, unopposed, income } = table({ a: ['duke', 'contessa'], b: ['captain', 'captain'] });
+      if (challenged) {
+        did(chooseAction(g, 'a', 'tax'));
+        did(challenge(g, 'b'));
+        did(revealShowdownCard(g, 'a', cardOf(g, 'a', 'duke')));
+        seat(g, 'a').hand[0].role = 'contessa'; // 换来什么牌由测试指定
+        did(resolveLoss(g, 'b', seat(g, 'b').hand[0].id));
+      } else {
+        unopposed('a', 'tax');
+      }
+      income('b', 'c');
+      return tally(300, byAction, g, 'a', { events, temperament: CALM }).tax;
+    };
+    expect(afterTax(false)).toBeGreaterThan(0);
+    expect(afterTax(true)).toBeUndefined();
   });
 
-  it('不在同一局里轮流声称四五个角色：声称过的角色数达到暗牌数后不再起新的诈唬', () => {
-    const g = game({ a: ['contessa', 'contessa'] });
-    g.players[0].coins = 3;
-    const story: GameEvent[] = [
-      { type: 'actionChosen', actorId: 'a', action: 'tax', claimedRole: 'duke' },
-      { type: 'actionChosen', actorId: 'a', action: 'steal', targetId: 'b', claimedRole: 'captain' },
-    ];
-    const counts = tally(1000, byAction, g, 'a', story, { ...EVEN, bluff: 1 });
-    expect(Object.keys(counts).sort()).toEqual(['foreignAid', 'income', 'steal', 'tax']);
+  it('交换之后手里是什么牌没人知道：换走的角色不再照旧声称', () => {
+    const { g, events, did, unopposed, income } = table({ a: ['duke', 'ambassador'] });
+    unopposed('a', 'tax');
+    income('b', 'c');
+    unopposed('a', 'exchange');
+    const [duke, ambassador, ...drawn] = seat(g, 'a').hand;
+    drawn.forEach((card) => (card.role = 'contessa')); // 摸到什么由测试指定
+    did(resolveExchange(g, 'a', drawn.map((card) => card.id)));
+    expect([duke.role, ambassador.role]).toEqual(['duke', 'ambassador']);
+    income('b', 'c');
+    expect(Object.keys(tally(300, byAction, g, 'a', { events, temperament: CALM })).sort()).toEqual(['foreignAid', 'income']);
+  });
+
+  it('不在同一局里轮流声称四五个角色：声称过的加手里有的凑到 3 个角色后不再起新的诈唬', () => {
+    const { g, events, unopposed, income } = table({ a: ['contessa', 'contessa'] });
+    unopposed('a', 'tax');
+    income('b', 'c');
+    unopposed('a', 'steal', 'c');
+    income('b', 'c');
+    seat(g, 'a').coins = 3;
+    expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: BOLD })).sort()).toEqual(['foreignAid', 'income', 'steal', 'tax']);
+  });
+
+  it('不在同一局里轮流声称四五个角色：声称被对质检验过、不再作数，也不腾出位置给新的诈唬', () => {
+    const { g, events, did, unopposed, income } = table({ a: ['duke', 'captain'], b: ['assassin', 'assassin'] });
+    unopposed('a', 'tax');
+    income('b', 'c');
+    unopposed('a', 'steal', 'c');
+    income('b', 'c');
+    seat(g, 'a').coins = 2;
+    did(chooseAction(g, 'a', 'tax'));
+    did(challenge(g, 'b'));
+    did(revealShowdownCard(g, 'a', cardOf(g, 'a', 'duke')));
+    seat(g, 'a').hand[0].role = 'contessa'; // 换来什么牌由测试指定
+    did(resolveLoss(g, 'b', seat(g, 'b').hand[0].id));
+    income('b', 'c');
+    expect(seat(g, 'a').coins).toBe(5);
+    expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: BOLD })).sort()).toEqual(['foreignAid', 'income', 'steal']);
+  });
+
+  it('不在同一局里轮流声称四五个角色：已声称过 3 个角色后，手里真有的新角色也不拿来行动', () => {
+    const { g, events, did, unopposed, income } = table({ a: ['duke', 'captain'] });
+    unopposed('a', 'tax');
+    income('b', 'c');
+    unopposed('a', 'steal', 'c');
+    income('b', 'c');
+    seat(g, 'a').coins = 3;
+    unopposed('a', 'exchange');
+    const drawn = seat(g, 'a').hand.slice(2);
+    drawn[0].role = 'assassin'; // 摸到什么由测试指定
+    drawn[1].role = 'contessa';
+    did(resolveExchange(g, 'a', drawn.map((card) => card.id)));
+    income('b', 'c');
+    expect(Object.keys(tally(1000, byAction, g, 'a', { events, temperament: BOLD })).sort()).toEqual(['foreignAid', 'income']);
   });
 
   it('选目标：优先打领先者（金币多、影响力多），但不是每次', () => {
     const richer = game();
-    richer.players[0].coins = 7;
-    richer.players[1].coins = 6;
+    seat(richer, 'a').coins = 7;
+    seat(richer, 'b').coins = 6;
     const counts = tally(1000, byTarget, richer, 'a');
     expect(counts.b).toBeGreaterThan(700);
     expect(counts.c).toBeGreaterThan(0);
 
-    const stronger = game();
-    stronger.players[0].coins = 7;
-    stronger.players[2].hand.pop(); // c 只剩 1 点影响力
-    expect(tally(1000, byTarget, stronger, 'a').b).toBeGreaterThan(700);
+    const { g, events, coup, income } = table({ c: ['duke', 'captain'] });
+    income('a');
+    coup('b', 'c', 'duke');
+    income('c');
+    for (const p of g.players) p.coins = p.id === 'a' ? 7 : 2;
+    expect(tally(1000, byTarget, g, 'a', { events }).b).toBeGreaterThan(700);
   });
 
   it('选目标：对最近打过自己的玩家有报复倾向', () => {
-    const g = game();
-    g.players[0].coins = 7;
-    const attacked: GameEvent[] = [{ type: 'actionChosen', actorId: 'c', action: 'steal', targetId: 'a', claimedRole: 'captain' }];
-    expect(tally(1000, byTarget, g, 'a').c).toBeLessThan(600);
-    expect(tally(1000, byTarget, g, 'a', attacked).c).toBeGreaterThan(700);
+    // c 偷了 victim 之后轮到 a 政变，b 和 c 金币、影响力都一样
+    const coupsOnC = (victim: string) => {
+      const { g, events, unopposed, income } = table();
+      income('a', 'b');
+      unopposed('c', 'steal', victim);
+      for (const p of g.players) p.coins = p.id === 'a' ? 7 : 2;
+      return tally(1000, byTarget, g, 'a', { events }).c;
+    };
+    expect(coupsOnC('b')).toBeLessThan(600);
+    expect(coupsOnC('a')).toBeGreaterThan(700);
   });
 
   it('外援：有公爵的阻挡，没有的放弃', () => {
@@ -297,39 +454,38 @@ describe('decideComputerIntent', () => {
       const g = game({ a: ['duke', 'ambassador'] });
       chooseAction(g, 'a', 'steal', 'b');
       challenge(g, 'c');
-      const intent = decide(g, 'a', seeded(seed));
+      const intent = decide(g, 'a', { random: seeded(seed) });
       expect(intent).toEqual({ type: 'revealShowdownCard', cardId: g.players[0].hand[1].id });
       expect(() => apply(g, 'a', intent!)).not.toThrow();
     }
   });
 
   it.each([
-    { claimed: 'assassin' as Role, action: 'assassinate' as const, lost: 'captain' },
-    { claimed: 'captain' as Role, action: 'steal' as const, lost: 'assassin' },
-  ])('失去影响力：留下本局一直在声称的 $claimed', ({ claimed, action, lost }) => {
-    const g = game({ a: ['captain', 'assassin'] });
-    g.players[1].coins = 7;
-    chooseAction(g, 'a', 'income');
-    chooseAction(g, 'b', 'coup', 'a');
-    const events: GameEvent[] = [{ type: 'actionChosen', actorId: 'a', action, targetId: 'b', claimedRole: claimed }];
+    { claimed: 'assassin' as Role, action: 'assassinate' as const, lost: 'captain' as Role },
+    { claimed: 'captain' as Role, action: 'steal' as const, lost: 'assassin' as Role },
+  ])('失去影响力：留下本局一直在声称的 $claimed', ({ action, lost }) => {
+    const { g, events, did, unopposed } = table({ a: ['captain', 'assassin'] });
+    seat(g, 'a').coins = 3;
+    unopposed('a', action, 'b');
+    if (g.phase === 'choosingLoss') did(resolveLoss(g, 'b', seat(g, 'b').hand[0].id));
+    seat(g, 'b').coins = COUP_COST;
+    did(chooseAction(g, 'b', 'coup', 'a'));
     for (let seed = 0; seed < 20; seed++) {
-      const intent = decide(g, 'a', seeded(seed), events, EVEN);
-      expect(intent).toEqual({ type: 'resolveLoss', cardId: g.players[0].hand.find((c) => c.role === lost)!.id });
+      const intent = decide(g, 'a', { events, temperament: EVEN, random: seeded(seed) });
+      expect(intent).toEqual({ type: 'resolveLoss', cardId: cardOf(g, 'a', lost) });
     }
   });
 
   it.each([
-    { hand: ['ambassador', 'contessa', 'duke', 'captain'] as Role[], kept: ['captain', 'duke'] },
-    { hand: ['duke', 'duke', 'ambassador', 'captain'] as Role[], kept: ['captain', 'duke'] }, // 不留两张一样的
-  ])('交换选牌：留下更有用的牌 $hand', ({ hand, kept }) => {
-    const g = game({ a: ['ambassador', 'contessa'] });
-    chooseAction(g, 'a', 'exchange');
-    passChallenge(g, 'b');
-    passChallenge(g, 'c');
-    g.players[0].hand.forEach((card, i) => (card.role = hand[i])); // 摸到什么由测试指定
-    const intent = decide(g, 'a');
+    { hand: ['ambassador', 'contessa'] as Role[], drawn: ['duke', 'captain'] as Role[], kept: ['captain', 'duke'] },
+    { hand: ['duke', 'duke'] as Role[], drawn: ['ambassador', 'captain'] as Role[], kept: ['captain', 'duke'] }, // 不留两张一样的
+  ])('交换选牌：留下更有用的牌 $hand 摸到 $drawn', ({ hand, drawn, kept }) => {
+    const { g, events, unopposed } = table({ a: hand });
+    unopposed('a', 'exchange');
+    seat(g, 'a').hand.slice(2).forEach((card, i) => (card.role = drawn[i])); // 摸到什么由测试指定
+    const intent = decide(g, 'a', { events });
     if (intent?.type !== 'resolveExchange') throw new Error(`unexpected ${JSON.stringify(intent)}`);
-    expect(intent.keepIds.map((id) => g.players[0].hand.find((c) => c.id === id)!.role).sort()).toEqual(kept);
+    expect(intent.keepIds.map((id) => seat(g, 'a').hand.find((c) => c.id === id)!.role).sort()).toEqual(kept);
     expect(() => apply(g, 'a', intent)).not.toThrow();
   });
 });
@@ -339,43 +495,51 @@ describe('decideComputerIntent', () => {
 describe('电脑玩家自对弈', () => {
   const SEED = Date.now() | 0;
   const TURN_LIMIT = 300;
-  type Seat = (g: GameState, id: string, events: GameEvent[], temperament: Temperament, random: () => number) => ComputerIntent | null;
-  const computer: Seat = (g, id, events, temperament, random) => decide(g, id, random, events, temperament);
+  type Seat = (g: GameState, id: string, mind: Mind) => ComputerIntent | null;
+  const computer: Seat = decide;
   // 「只会收入和政变」的对手：借电脑的决策得知此刻轮不轮到它，再把决定换成最朴素的
-  const plain: Seat = (g, id, events, temperament, random) => {
-    const intent = computer(g, id, events, temperament, random);
+  const plain: Seat = (g, id, mind) => {
+    const intent = computer(g, id, mind);
     if (intent?.type === 'challenge') return { type: 'passChallenge' };
     if (intent?.type === 'block') return { type: 'passBlock' };
     if (intent?.type !== 'chooseAction') return intent;
     const rivals = g.players.filter((p) => p.alive && p.id !== id);
-    return g.players.find((p) => p.id === id)!.coins < 7
+    return seat(g, id).coins < COUP_COST
       ? { type: 'chooseAction', action: 'income' }
-      : { type: 'chooseAction', action: 'coup', targetId: rivals[Math.floor(random() * rivals.length)].id };
+      : { type: 'chooseAction', action: 'coup', targetId: rivals[Math.floor(mind.random() * rivals.length)].id };
   };
 
-  // 打 games 局，返回各座位的胜局数和问询窗口的统计
+  // 打 games 局，返回各座位的胜局数和声称、质疑、阻挡窗口的统计。fourthRoles：一个座位在一局里自愿声称第 4 个不同角色的次数
   function play(games: number, seats: Seat[]) {
     const random = seeded(SEED + seats.length);
     vi.spyOn(Math, 'random').mockImplementation(random); // 引擎洗牌也跟着种子走
     const ids = seats.map((_, i) => `p${i}`);
-    const stats = { wins: seats.map(() => 0), claims: 0, bluffs: 0, challenges: 0, blockWindows: 0 };
+    const stats = { wins: seats.map(() => 0), claims: 0, bluffs: 0, challenges: 0, blockWindows: 0, fourthRoles: 0 };
     for (let n = 0; n < games; n++) {
       const where = `seed ${SEED}, ${seats.length} players, game ${n}`;
       const g = createGame(ids.map((id) => ({ id, name: id })), { startingPlayerId: ids[Math.floor(random() * ids.length)] });
       const temperaments = ids.map(() => drawTemperament(random));
+      const claimed = ids.map(() => new Set<Role>());
       const events: GameEvent[] = [];
       let turns = 0;
       while (g.phase !== 'gameOver') {
         const deciders = ids.flatMap((id, i) => {
-          const intent = seats[i](g, id, events, temperaments[i], random);
+          const intent = seats[i](g, id, { events, temperament: temperaments[i], random });
           return intent ? [{ id, intent }] : [];
         });
         if (deciders.length === 0) throw new Error(`nobody has anything to decide in ${g.phase} (${where})`);
         const { id, intent } = deciders[Math.floor(random() * deciders.length)];
         const role = intent.type === 'chooseAction' ? ACTION_CLAIM[intent.action] : intent.type === 'block' ? intent.role : null;
         if (role) {
+          const { hand } = privateState(g, id);
+          const bluff = !hand.some((c) => c.role === role);
+          const roles = claimed[ids.indexOf(id)];
+          // 不得不声称的不算自愿：手里真有的阻挡，以及不阻挡就出局时的假阻挡
+          const forced = intent.type === 'block' && (!bluff || (g.pending!.type === 'assassinate' && hand.length === 1));
           stats.claims++;
-          if (!privateState(g, id).hand.some((c) => c.role === role)) stats.bluffs++;
+          if (bluff) stats.bluffs++;
+          if (!forced && !roles.has(role) && roles.size >= 3) stats.fourthRoles++;
+          roles.add(role);
         }
         if (intent.type === 'challenge') stats.challenges++;
         const wasBlockWindow = g.phase === 'awaitingBlock';
@@ -389,24 +553,28 @@ describe('电脑玩家自对弈', () => {
     }
     return stats;
   }
+  const within = (rate: number, low: number, high: number) => {
+    expect(rate, `seed ${SEED}`).toBeGreaterThan(low);
+    expect(rate, `seed ${SEED}`).toBeLessThan(high);
+  };
 
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it.each([2, 3, 5, 6])('%i 人局：每局都在回合数上限内分出胜负', (count) => {
-    const { wins } = play(250, Array<Seat>(count).fill(computer));
-    expect(wins.reduce((a, b) => a + b)).toBe(250);
-  });
-
-  it('4 人局：诈唬占全部角色声称的 20% 到 40%，以质疑收场的问询窗口占 10% 到 25%', () => {
-    const { claims, bluffs, challenges, blockWindows } = play(1500, Array<Seat>(4).fill(computer));
-    const within = (rate: number, low: number, high: number) => {
-      expect(rate, `seed ${SEED}`).toBeGreaterThan(low);
-      expect(rate, `seed ${SEED}`).toBeLessThan(high);
-    };
+  it.each([
+    [2, 500],
+    [3, 500],
+    [4, 1500],
+    [5, 250],
+    [6, 250],
+  ])('%i 人局：每局都在回合数上限内分出胜负，诈唬占全部角色声称的 20% 到 40%，没有人自愿声称第 4 个角色', (count, games) => {
+    const { wins, claims, bluffs, challenges, blockWindows, fourthRoles } = play(games, Array<Seat>(count).fill(computer));
+    expect(wins.reduce((a, b) => a + b)).toBe(games);
     within(bluffs / claims, 0.2, 0.4);
-    // 每个声称开一个质疑窗口，问询窗口还包括阻挡窗口：只数质疑窗口或两种都数，比例都要落在区间里
+    expect(fourthRoles, `seed ${SEED}`).toBe(0);
+    if (count !== 4) return;
+    // 4 人局里以质疑收场的问询窗口占 10% 到 25%。每个声称开一个质疑窗口，问询窗口还包括阻挡窗口：只数质疑窗口或两种都数，比例都要落在区间里
     within(challenges / claims, 0.1, 0.25);
     within(challenges / (claims + blockWindows), 0.1, 0.25);
   });
