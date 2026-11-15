@@ -20,6 +20,7 @@ export {
   COUP_COST,
   MAX_PLAYERS,
   GameRuleError,
+  ROLE_COPIES,
   ROLE_ORDER,
   needsTarget,
   block,

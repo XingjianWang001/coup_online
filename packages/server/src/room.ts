@@ -28,7 +28,7 @@ import {
 import type { GameRepository } from './repository.ts';
 import { PHRASES, type LobbyPlayer, type Phrase, type Reaction } from '@coup/shared';
 import { ClientError } from './errors.ts';
-import { decideComputerIntent, type ComputerIntent } from './computer.ts';
+import { decideComputerIntent, drawTemperament, type ComputerIntent, type Temperament } from './computer.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
@@ -142,6 +142,9 @@ export class Room {
   previousWinnerId: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private computerTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // 电脑玩家本局的性格，和它的局内记忆所依据的本局公开事件：每次开局重抽、清空，不带到下一局
+  private temperaments = new Map<string, Temperament>();
+  private gameEvents: GameEvent[] = [];
   private lastFocusAt = 0;
   // ponytail: 离开房间的玩家不删条目；一个房间至多几位玩家、空房 5 分钟后整个回收，不值得在每条移除路径上清理
   private lastReactionAt = new Map<string, number>();
@@ -340,6 +343,8 @@ export class Room {
       startingPlayerId,
     });
     this.gameNumber += 1;
+    this.temperaments = new Map(entries.filter((p) => p.isComputer).map((p) => [p.id, drawTemperament(this.computerRandom)]));
+    this.gameEvents = [];
     this.repo.save(this.code, this.game);
     this.startTimer(ACTION_TIMEOUT_MS);
     this.scheduleComputers(COMPUTER_FIRST_MOVE_MS);
@@ -361,6 +366,7 @@ export class Room {
     if (!this.game) throw new ClientError({ code: 'gameNotStarted' });
     const before = this.timerKey();
     const events = fn(this.game);
+    this.gameEvents.push(...events);
     this.repo.save(this.code, this.game);
     this.afterMutation(events, before);
     return events;
@@ -419,7 +425,7 @@ export class Room {
 
   private decideComputer(id: string): ComputerIntent | null {
     const g = this.game;
-    return g ? decideComputerIntent(publicState(g), privateState(g, id), [], this.computerRandom) : null;
+    return g ? decideComputerIntent(publicState(g), privateState(g, id), this.gameEvents, this.temperaments.get(id)!, this.computerRandom) : null;
   }
 
   // 到点再决定一次：这期间局面可能已变（窗口已关、已轮到别人），此刻无需它决定就什么也不做

@@ -17,7 +17,8 @@ export class GameRuleError extends Error {
 
 export const ROLE_ORDER: readonly Role[] = ['duke', 'assassin', 'captain', 'ambassador', 'contessa'];
 
-const DECK: Role[] = ROLE_ORDER.flatMap((r) => [r, r, r]); // 5 角色 × 3 = 15 张
+export const ROLE_COPIES = 3;
+const DECK: Role[] = ROLE_ORDER.flatMap((r) => Array<Role>(ROLE_COPIES).fill(r)); // 5 角色 × 3 = 15 张
 
 const START_COINS = 2;
 const START_CARDS = 2;
