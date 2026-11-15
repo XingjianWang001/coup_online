@@ -64,6 +64,7 @@ interface LatestReaction extends ReactionBubble {
 }
 const REACTION_MS = 3000; // 与 style.css 里 .nameplate-text 的淡出时刻对齐
 const REACTION_COOLDOWN_MS = 2000; // 服务器按玩家只拦 1.5 秒，留出网络抖动（见 server/src/room.ts）
+const CONTROLS_ARM_MS = 500; // 控制区换内容后多久才收输入，见 GameBoard 的 armedKey
 
 interface TransientErrorState {
   id: number;
@@ -1876,6 +1877,13 @@ function GameBoard(props: {
   // 操作区外壳常驻，换内容（换模式、进出选目标、等待提示变化）时高度平滑过渡；内层按 controlKey 重挂载播入场动画
   const controlsRef = useRef<HTMLDivElement>(null);
   useSmoothHeight(controlsRef, [controlKey, props.selectedAction, waiting, props.locale]);
+  // 换内容后短暂 inert：别人抢先阻挡外援时，按钮原地从「阻挡」换成「质疑」，手快的那一下不能落到新按钮上。
+  // 固定时长是刻意的粗略估计：盖过入场动画和一次手快的点击，远短于决策倒计时
+  const [armedKey, setArmedKey] = useState(controlKey);
+  useEffect(() => {
+    const timer = setTimeout(() => setArmedKey(controlKey), CONTROLS_ARM_MS);
+    return () => clearTimeout(timer);
+  }, [controlKey]);
 
   const groups = groupLog(props.log, state, props.locale).reverse();
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -1922,7 +1930,7 @@ function GameBoard(props: {
       {seats.self && renderSeat(seats.self)}
 
       <div className="controls" ref={controlsRef}>
-      <div className="controls-body" key={controlKey}>
+      <div className="controls-body" key={controlKey} {...{ inert: armedKey === controlKey ? undefined : '' }}>
         {state.phase === 'choosingAction' && isMyTurn && (
           <Actions
             coins={myView?.coins ?? 0}
