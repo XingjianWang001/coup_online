@@ -31,6 +31,8 @@ export const drawTemperament = (random: () => number): Temperament => ({ bluff: 
 // 它们由自对弈检查（computer.test.ts）的区间和人工验收一起约束，调任何一个都要重跑自对弈检查
 // 一张牌对自己有多大用：失去影响力、对质翻牌、交换选牌时留下大的
 const WORTH: Record<Role, number> = { duke: 5, captain: 4, assassin: 3, contessa: 3, ambassador: 2 };
+// 眼前有暗杀或偷窃的威胁时，能挡住它的牌多值这么多。是倾向不是规则：别的牌更值钱时仍不留
+const THREAT = 1.5;
 // 冲着自己来的行动（或拦下自己行动的阻挡）有多疼：越疼越想质疑
 const HARM: Partial<Record<ActionType, number>> = { foreignAid: 0.5, steal: 1, assassinate: 1.5 };
 // 诈唬的意愿都要乘诈唬倾向。起一个新的诈唬：声称角色行动用 NEW_BLUFF，假装阻挡按被阻挡的行动用 FAKE_BLOCK；
@@ -38,8 +40,17 @@ const HARM: Partial<Record<ActionType, number>> = { foreignAid: 0.5, steal: 1, a
 const NEW_BLUFF = 0.5;
 const FAKE_BLOCK: Partial<Record<ActionType, number>> = { foreignAid: 0.3, steal: 0.5, assassinate: 0.5 };
 const REPEAT_BLUFF = 2;
-// 一局里声称过的角色加手里有的角色凑到这么多个，就不再起新的诈唬：不会轮流声称四五个角色
+// 故事（最近一次实际交换以来声称过的角色）加手里有的角色凑到这么多个，就不再起新的诈唬：不会轮流声称四五个角色。
+// 诈唬倾向不低于 RECKLESS_BLUFF 的放宽到 4 个。故事比暗牌多是有意留下的破绽：别人能从自相矛盾里抓到它
 const STORY_ROLES = 3;
+const RECKLESS_BLUFF = 0.9;
+// 金币够政变（COUP_COST）但还没到规则强制政变的数目（引擎里写死的 10）时，政变的概率
+const FORCED_COUP = 10;
+const COUP_EAGERNESS = 0.85;
+// 对方的声称自相矛盾时，质疑概率乘这么多：更想质疑，不是必然质疑
+const CONTRADICTION = 2.5;
+// 对方的声称被证明为真过，质疑概率最多降到这个比例：CONTRADICTION 乘它仍大于 1，眼前的矛盾盖得过旧信用
+const PROVEN_FLOOR = 0.6;
 
 function pickAction(weights: readonly (readonly [ActionType, number])[], random: () => number): ActionType {
   let roll = random() * weights.reduce((sum, [, weight]) => sum + weight, 0);
@@ -53,7 +64,7 @@ function pickAction(weights: readonly (readonly [ActionType, number])[], random:
 // 局内记忆：只从本局的公开事件里得来，换一局事件清空，记忆也就没了
 interface Memory {
   standing: Map<string, Set<Role>>; // 各玩家声称过、现在还作数的角色：被对质检验过、亮出来了或交换过牌就不再作数
-  mine: Set<Role>; // 自己本局声称过的全部角色，作数不作数都算
+  mine: Set<Role>; // 自己的故事：最近一次实际交换以来声称过的全部角色，作数不作数都算
   caught: Map<string, number>; // 被抓到诈唬的次数
   proven: Map<string, number>; // 声称被对质证明为真的次数
   attacker?: string; // 最近打过自己的玩家
@@ -84,6 +95,7 @@ function recall(events: readonly GameEvent[], me: string): Memory {
       memory.standing.get(e.playerId)?.delete(e.role);
     } else if (e.type === 'exchangeDrew') {
       memory.standing.delete(e.playerId); // 交换之后手里是什么牌没人知道
+      if (e.playerId === me) memory.mine.clear(); // 自己换了牌可以改口：故事从头讲。只宣布、被抓到没换成的没有这个事件
     }
   }
   return memory;
@@ -106,6 +118,7 @@ export function decideComputerIntent(
   const rivals = state.players.filter((p) => p.alive && p.id !== me);
   const memory = recall(events, me);
   const stillClaims = (id: string, role: Role) => memory.standing.get(id)?.has(role) ?? false;
+  const storyRoles = temperament.bluff >= RECKLESS_BLUFF ? STORY_ROLES + 1 : STORY_ROLES;
   const lastCard = self.handCount === 1;
   const caution = lastCard ? 0.5 : 1; // 只剩 1 点影响力时，冒险的事少做一半
   const dying = pending?.action === 'assassinate' && pending.targetId === me && lastCard; // 这次暗杀成了自己就出局
@@ -116,7 +129,14 @@ export function decideComputerIntent(
   const allSeen = (role: Role) => seen(role) >= ROLE_COPIES;
   // 把「这件事总共有 p 的概率被某人做」折算成自己这一份：有资格的人越多，每人越少出手
   const perSeat = (p: number) => 1 - (1 - p) ** (1 / rivals.length);
-  const worth = (role: Role) => WORTH[role] + (role === 'assassin' ? temperament.aggression : 0) + (memory.mine.has(role) ? 1.5 : 0);
+  // 眼前的威胁：有对手仍作数地声称刺客且金币够暗杀，或仍作数地声称队长而自己有金币可偷。能挡住它的牌更值得留
+  const assassinAbout = rivals.some((p) => stillClaims(p.id, 'assassin') && p.coins >= ASSASSINATE_COST);
+  const captainAbout = self.coins > 0 && rivals.some((p) => stillClaims(p.id, 'captain'));
+  const worth = (role: Role) =>
+    WORTH[role] +
+    (role === 'assassin' ? temperament.aggression : 0) +
+    (memory.mine.has(role) ? 1.5 : 0) +
+    ((assassinAbout && BLOCK_ROLES.assassinate.includes(role)) || (captainAbout && BLOCK_ROLES.steal.includes(role)) ? THREAT : 0);
   const leastUseful = () => hand.reduce((a, b) => (worth(b.role) < worth(a.role) ? b : a));
 
   // 领先者优先（影响力多、金币多），最近打过自己的加分，再带一点随机。wary：对方声称过这些角色就多半会阻挡
@@ -131,21 +151,24 @@ export function decideComputerIntent(
   };
 
   // 手里没有某角色时声称它的意愿（0 到 1），全看诈唬倾向。声称过、还作数的角色接着演，意愿高得多；
-  // 其余的要起一个新的诈唬（意愿再乘 fresh），而且只在声称过的加手里有的还不满 STORY_ROLES 个角色时才起
+  // 其余的要起一个新的诈唬（意愿再乘 fresh），而且只在故事里的加手里有的还不满 storyRoles 个角色时才起
   const bluffWillingness = (role: Role, fresh: number) => {
     if (stillClaims(me, role)) return Math.min(1, REPEAT_BLUFF * temperament.bluff);
-    return new Set([...memory.mine, ...held]).size < STORY_ROLES ? fresh * temperament.bluff * caution : 0;
+    return new Set([...memory.mine, ...held]).size < storyRoles ? fresh * temperament.bluff * caution : 0;
   };
 
-  // 声称某角色来行动的权重：手里有就照实声称，但本局已声称过 STORY_ROLES 个角色后不再添新的，哪怕是真的：
+  // 声称某角色来行动的权重：手里有就照实声称，但故事里已有 storyRoles 个角色后不再添新的，哪怕是真的：
   // 别人看不见暗牌，只看见它什么都声称。手里没有时看诈唬的意愿，3 张都亮在桌上的角色不碰
   const claimWeight = (role: Role) => {
-    if (held.has(role)) return memory.mine.has(role) || memory.mine.size < STORY_ROLES ? 1 : 0;
+    if (held.has(role)) return memory.mine.has(role) || memory.mine.size < storyRoles ? 1 : 0;
     return allSeen(role) ? 0 : bluffWillingness(role, NEW_BLUFF);
   };
 
   const chooseAction = (): ComputerIntent => {
-    if (self.coins >= COUP_COST) return { type: 'chooseAction', action: 'coup', targetId: pickTarget(rivals) };
+    // 够政变就多半政变，偶尔先做别的；到了 FORCED_COUP 规则只许政变
+    if (self.coins >= FORCED_COUP || (self.coins >= COUP_COST && random() < COUP_EAGERNESS)) {
+      return { type: 'chooseAction', action: 'coup', targetId: pickTarget(rivals) };
+    }
     const victims = rivals.filter((p) => p.coins > 0);
     const dukeAbout = rivals.some((p) => stillClaims(p.id, 'duke'));
     const action = pickAction(
@@ -168,10 +191,15 @@ export function decideComputerIntent(
   const challengeChance = (claimantId: string, role: Role, onAction: boolean) => {
     if (allSeen(role)) return 1;
     const { action } = pending!;
-    // 多疑程度定基调；看得见的同角色牌越多、对方本局被抓过越可疑，被证明过越可信
+    // 自相矛盾：对方仍作数的声称角色（含眼前这个）比暗牌多，没有换牌能解释。同一角色声称几次只算一个，声称一致也不算证明
+    const contradicts = (memory.standing.get(claimantId)?.size ?? 0) > state.players.find((p) => p.id === claimantId)!.handCount;
+    // 被证明为真的信用：每次把质疑概率打七五折，最低到 PROVEN_FLOOR。证明用的那张牌已洗回牌堆，说明不了对方现在拿着什么
+    const credit = Math.max(PROVEN_FLOOR, 0.75 ** (memory.proven.get(claimantId) ?? 0));
+    // 多疑程度定基调；看得见的同角色牌越多、对方本局被抓过、声称自相矛盾越可疑，被证明过略可信。
+    // 基调比没有矛盾推理时低四分之一：质疑的总量不变，没有依据的少了，冲着矛盾去的多了
     const p = Math.min(
       0.9,
-      ((0.055 + 0.17 * temperament.suspicion) * (1 + seen(role)) * (1 + (memory.caught.get(claimantId) ?? 0))) / (1 + (memory.proven.get(claimantId) ?? 0)),
+      (0.04 + 0.13 * temperament.suspicion) * (1 + seen(role)) * (1 + (memory.caught.get(claimantId) ?? 0)) * (contradicts ? CONTRADICTION : 1) * credit,
     );
     if (dying && !held.has('contessa')) {
       // 放弃等于认输：不质疑就留到阻挡窗口假装女伯爵。多疑的倾向质疑，爱诈唬的倾向假装；女伯爵 3 张都亮了就没人会信，只能质疑
