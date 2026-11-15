@@ -2,6 +2,7 @@ import {
   ASSASSINATE_COST,
   BLOCK_ROLES,
   COUP_COST,
+  FORCED_COUP_COINS,
   ROLE_COPIES,
   type ActionType,
   type Card,
@@ -44,8 +45,7 @@ const REPEAT_BLUFF = 2;
 // 诈唬倾向不低于 RECKLESS_BLUFF 的放宽到 4 个。故事比暗牌多是有意留下的破绽：别人能从自相矛盾里抓到它
 const STORY_ROLES = 3;
 const RECKLESS_BLUFF = 0.9;
-// 金币够政变（COUP_COST）但还没到规则强制政变的数目（引擎里写死的 10）时，政变的概率
-const FORCED_COUP = 10;
+// 金币够政变（COUP_COST）但还没到规则强制政变的数目（FORCED_COUP_COINS）时，政变的概率
 const COUP_EAGERNESS = 0.85;
 // 对方的声称自相矛盾时，质疑概率乘这么多：更想质疑，不是必然质疑
 const CONTRADICTION = 2.5;
@@ -165,8 +165,8 @@ export function decideComputerIntent(
   };
 
   const chooseAction = (): ComputerIntent => {
-    // 够政变就多半政变，偶尔先做别的；到了 FORCED_COUP 规则只许政变
-    if (self.coins >= FORCED_COUP || (self.coins >= COUP_COST && random() < COUP_EAGERNESS)) {
+    // 够政变就多半政变，偶尔先做别的；到了 FORCED_COUP_COINS 规则只许政变
+    if (self.coins >= FORCED_COUP_COINS ||(self.coins >= COUP_COST && random() < COUP_EAGERNESS)) {
       return { type: 'chooseAction', action: 'coup', targetId: pickTarget(rivals) };
     }
     const victims = rivals.filter((p) => p.coins > 0);
