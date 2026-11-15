@@ -129,14 +129,18 @@ export function decideComputerIntent(
   const allSeen = (role: Role) => seen(role) >= ROLE_COPIES;
   // 把「这件事总共有 p 的概率被某人做」折算成自己这一份：有资格的人越多，每人越少出手
   const perSeat = (p: number) => 1 - (1 - p) ** (1 / rivals.length);
-  // 眼前的威胁：有对手仍作数地声称刺客且金币够暗杀，或仍作数地声称队长而自己有金币可偷。能挡住它的牌更值得留
-  const assassinAbout = rivals.some((p) => stillClaims(p.id, 'assassin') && p.coins >= ASSASSINATE_COST);
-  const captainAbout = self.coins > 0 && rivals.some((p) => stillClaims(p.id, 'captain'));
+  // 眼前的威胁，能挡住它的牌更值得留。一种是对手仍作数的声称：声称刺客且金币够暗杀，或声称队长而自己有金币可偷。
+  // 另一种是冲着自己来、还没结算的行动（incoming）：自己质疑它失败、正为此失去影响力，接下来就是它的阻挡窗口。
+  // 这个声称刚被证明、已不作数，暗杀的金币也已付过，只能从「上一条事件是自己质疑失败」认出它
+  const last = events.at(-1);
+  const incoming = last?.type === 'challengeResolved' && last.truth && last.loserId === me && pending?.targetId === me ? pending.action : undefined;
+  const assassinationThreat = incoming === 'assassinate' || rivals.some((p) => stillClaims(p.id, 'assassin') && p.coins >= ASSASSINATE_COST);
+  const stealThreat = self.coins > 0 && (incoming === 'steal' || rivals.some((p) => stillClaims(p.id, 'captain')));
   const worth = (role: Role) =>
     WORTH[role] +
     (role === 'assassin' ? temperament.aggression : 0) +
     (memory.mine.has(role) ? 1.5 : 0) +
-    ((assassinAbout && BLOCK_ROLES.assassinate.includes(role)) || (captainAbout && BLOCK_ROLES.steal.includes(role)) ? THREAT : 0);
+    ((assassinationThreat && BLOCK_ROLES.assassinate.includes(role)) || (stealThreat && BLOCK_ROLES.steal.includes(role)) ? THREAT : 0);
   const leastUseful = () => hand.reduce((a, b) => (worth(b.role) < worth(a.role) ? b : a));
 
   // 领先者优先（影响力多、金币多），最近打过自己的加分，再带一点随机。wary：对方声称过这些角色就多半会阻挡

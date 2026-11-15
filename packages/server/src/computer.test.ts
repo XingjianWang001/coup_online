@@ -667,6 +667,31 @@ describe('decideComputerIntent', () => {
       expect(kept(blockers, [cClaims('steal')], 0)).toBe(calm);
     });
 
+    it('冲着自己来、还没结算的行动也是威胁：质疑它失败后，留下能阻挡它的牌', () => {
+      // a 对 b 行动，challenger 质疑，a 证明为真。走到 b 失去影响力时，它亮出哪张
+      const lost = (action: 'assassinate' | 'steal', bHand: Role[], challenger: 'b' | 'c', bCoins = 2) => {
+        const { g, events, did } = table({ a: ['assassin', 'captain'], b: bHand, c: ['duke', 'duke'] });
+        seat(g, 'a').coins = 3;
+        seat(g, 'b').coins = bCoins;
+        did(chooseAction(g, 'a', action, 'b'));
+        did(challenge(g, challenger));
+        did(revealShowdownCard(g, 'a', cardOf(g, 'a', ACTION_CLAIM[action]!)));
+        if (challenger === 'c') {
+          did(resolveLoss(g, 'c', seat(g, 'c').hand[0].id));
+          did(passBlock(g, 'b'));
+        }
+        const intent = decide(g, 'b', { events });
+        if (intent?.type !== 'resolveLoss') throw new Error(`unexpected ${JSON.stringify(intent)}`);
+        return seat(g, 'b').hand.find((c) => c.id === intent.cardId)!.role;
+      };
+      // 接下来是阻挡窗口：留着女伯爵就能照实阻挡
+      expect(lost('assassinate', ['contessa', 'captain'], 'b')).toBe('captain');
+      // 质疑失败的是 c，b 没有阻挡：这张牌就是暗杀要走的，行动到此结算完，不再是威胁
+      expect(lost('assassinate', ['contessa', 'captain'], 'c')).toBe('contessa');
+      expect(lost('steal', ['ambassador', 'assassin'], 'b')).toBe('assassin');
+      expect(lost('steal', ['ambassador', 'assassin'], 'b', 0)).toBe('ambassador'); // 没有金币可偷
+    });
+
     it('交换选牌也看威胁：有暗杀威胁时女伯爵比队长值得留', () => {
       const keptRoles = (move: (t: Table) => void) => {
         const t = table(hands(['duke', 'contessa']));
