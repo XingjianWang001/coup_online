@@ -674,6 +674,213 @@ describe('Room 牌局结束后', () => {
   });
 });
 
+describe('Room 电脑玩家', () => {
+  afterEach(() => vi.useRealTimers());
+
+  function lobby() {
+    const made = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = made.room.addPlayer('Alice', 'sock1');
+    const bob = made.room.addPlayer('Bob', 'sock2');
+    return { ...made, alice, bob };
+  }
+  const computers = (room: Room) => room.playerList.filter((p) => p.isComputer);
+
+  it('房主在大厅阶段一次加一个电脑玩家，名字取自固定名单且不重复，标为电脑、不显示离线', () => {
+    const { room, events, alice } = lobby();
+    room.addComputer(alice.id, 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    expect(events.onBroadcast).toHaveBeenLastCalledWith(room, []);
+    const added = computers(room);
+    expect(added).toHaveLength(2);
+    expect(new Set(added.map((p) => p.name)).size).toBe(2);
+    expect(added.every((p) => p.connected && !p.isHost)).toBe(true);
+    expect(room.playerList.filter((p) => !p.isComputer).map((p) => p.name)).toEqual(['Alice', 'Bob']);
+  });
+
+  it('非房主、牌局中或满 6 座时添加被拒绝', () => {
+    const { room, alice, bob } = lobby();
+    expect(() => room.addComputer(bob.id, 'sock2')).toThrow('hostOnly');
+    for (let i = 0; i < 4; i += 1) room.addComputer(alice.id, 'sock1');
+    expect(() => room.addComputer(alice.id, 'sock1')).toThrow('roomFull');
+    room.removeComputer(alice.id, 'sock1', computers(room)[0].id);
+    room.startGame(alice.id, 'sock1');
+    expect(() => room.addComputer(alice.id, 'sock1')).toThrow('illegalIntent');
+    expect(room.players.size).toBe(5);
+  });
+
+  it('房主按玩家 ID 移除电脑玩家；非房主、牌局中或目标不是电脑时被拒绝', () => {
+    const { room, alice, bob } = lobby();
+    room.addComputer(alice.id, 'sock1');
+    const [computer] = computers(room);
+    expect(() => room.removeComputer(bob.id, 'sock2', computer.id)).toThrow('hostOnly');
+    expect(() => room.removeComputer(alice.id, 'sock1', bob.id)).toThrow('illegalIntent');
+    expect(() => room.removeComputer(alice.id, 'sock1', 'nobody')).toThrow('illegalIntent');
+    room.startGame(alice.id, 'sock1');
+    expect(() => room.removeComputer(alice.id, 'sock1', computer.id)).toThrow('illegalIntent');
+    room.game = null;
+    room.removeComputer(alice.id, 'sock1', computer.id);
+    expect(computers(room)).toEqual([]);
+  });
+
+  it('满 6 座且有电脑玩家时，新的真人加入让最后加入的电脑让座；重连不让座', () => {
+    const { room, alice } = lobby();
+    for (let i = 0; i < 4; i += 1) room.addComputer(alice.id, 'sock1');
+    const [first, , , last] = computers(room);
+    room.addPlayer('Alice', 'sock1b', { id: alice.id, secret: alice.secret });
+    expect(room.players.size).toBe(6);
+
+    const carol = room.addPlayer('Carol', 'sock3');
+    expect(room.players.has(last.id)).toBe(false);
+    expect(room.players.has(first.id)).toBe(true);
+    expect([...room.players.keys()].at(-1)).toBe(carol.id);
+    expect(room.players.size).toBe(6);
+  });
+
+  it('电脑玩家永远不当房主：房主离开或离线时跳过电脑，只剩电脑时没有房主，下一位真人加入即成为房主', () => {
+    vi.useFakeTimers();
+    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.markDisconnected(alice.id, 'sock1');
+    expect(room.hostId).toBe(bob.id);
+    room.addPlayer('Alice', 'sock1b', { id: alice.id, secret: alice.secret });
+    room.leavePlayer(bob.id, 'sock2');
+    room.leavePlayer(alice.id, 'sock1b');
+    const dave = room.addPlayer('Dave', 'sock4');
+    room.leavePlayer(dave.id, 'sock4'); // Dave 是房主，离开时只剩电脑
+    expect(room.playerList.some((p) => p.isHost)).toBe(false);
+
+    const carol = room.addPlayer('Carol', 'sock3');
+    room.addPlayer('Erin', 'sock5');
+    room.leavePlayer(carol.id, 'sock3'); // 最早加入的是电脑，继承跳过它
+    expect(room.playerList.find((p) => p.isHost)?.name).toBe('Erin');
+  });
+
+  it('在场只算真人：只剩电脑玩家的房间按空房处理，5 分钟后回收', () => {
+    vi.useFakeTimers();
+    const { room, events, alice } = lobby();
+    room.addComputer(alice.id, 'sock1');
+    room.leavePlayer(room.playerList[1].id, 'sock2');
+    room.leavePlayer(alice.id, 'sock1');
+    vi.advanceTimersByTime(5 * 60_000);
+    expect(events.onEmpty).toHaveBeenCalledWith(room);
+  });
+
+  it('再来一局后电脑玩家留在房间里', () => {
+    const { room, alice, bob } = lobby();
+    room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    room.leavePlayer(bob.id, 'sock2');
+    room.apply((g) => forfeit(g, computers(room)[0].id));
+    expect(room.game?.phase).toBe('gameOver');
+    room.rematch(alice.id, 'sock1');
+    expect(computers(room)).toHaveLength(1);
+  });
+
+  function soloGame() {
+    // 电脑随机源固定：宽限期里电脑照常出手，牌局走向要确定
+    const made = makeRoom({ startingPlayerRandom: () => 0, computerRandom: () => 0 });
+    const alice = made.room.addPlayer('Alice', 'sock1');
+    made.room.addComputer(alice.id, 'sock1');
+    made.room.addComputer(alice.id, 'sock1');
+    made.room.startGame(alice.id, 'sock1');
+    return { ...made, alice };
+  }
+
+  it('牌局中最后一位真人离开：牌局作废回到大厅阶段，电脑留座，只剩空房回收计时', () => {
+    vi.useFakeTimers();
+    const { room, events, alice } = soloGame();
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' }); // 轮到电脑，它的出手已排上
+    room.leavePlayer(alice.id, 'sock1');
+    expect(room.game).toBeNull();
+    expect(computers(room)).toHaveLength(2);
+    expect(room.getDeadlineMs()).toBeNull();
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(5 * 60_000);
+    expect(events.onEmpty).toHaveBeenCalledWith(room);
+  });
+
+  it('最后一位真人断线宽限期到：牌局作废，其座位移除，凭旧凭证回来只能作为新玩家进大厅', () => {
+    vi.useFakeTimers();
+    const { room, alice } = soloGame();
+    room.markDisconnected(alice.id, 'sock1');
+    vi.advanceTimersByTime(90_000);
+    expect(room.game).toBeNull();
+    expect([...room.players.values()].every((p) => p.isComputer)).toBe(true);
+    expect(vi.getTimerCount()).toBe(1);
+
+    const back = room.addPlayer('Alice', 'sock1b', { id: alice.id, secret: alice.secret });
+    expect(back.id).not.toBe(alice.id);
+    expect(room.hostId).toBe(back.id);
+    room.startGame(back.id, 'sock1b');
+    expect(room.game?.players).toHaveLength(3);
+  });
+
+  it('真人只是被淘汰、仍在房间里旁观时牌局继续', () => {
+    const { room, alice, bob } = lobby();
+    room.addComputer(alice.id, 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    room.apply((g) => forfeit(g, bob.id));
+    room.leavePlayer(alice.id, 'sock1');
+    expect(room.game?.phase).not.toBe('gameOver');
+    expect(room.getDeadlineMs()).not.toBeNull();
+  });
+});
+
+describe('Room 电脑出手', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('开局第一手：电脑等发牌展示的顺延加选行动延迟后才出手', () => {
+    vi.useFakeTimers();
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0.5, computerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    const computerId = room.game!.currentPlayerId;
+    expect(computerId).not.toBe(alice.id);
+
+    vi.advanceTimersByTime(4_999); // 发牌展示顺延 3 秒 + 选行动最短 2 秒
+    expect(room.game!.currentPlayerId).toBe(computerId);
+    vi.advanceTimersByTime(1);
+    expect(events.onBroadcast).toHaveBeenLastCalledWith(room, expect.arrayContaining([expect.objectContaining({ type: 'actionChosen', actorId: computerId })]));
+    expect(room.game!.currentPlayerId).toBe(alice.id);
+  });
+
+  it('房里的真人全被淘汰、只剩旁观时，电脑 1 秒一步，不按选行动的 2 秒起步', () => {
+    vi.useFakeTimers();
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0, computerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    room.apply((g) => forfeit(g, alice.id)); // Alice 被淘汰但留在房里
+    const computerId = room.game!.currentPlayerId;
+
+    vi.advanceTimersByTime(999);
+    expect(room.game!.currentPlayerId).toBe(computerId);
+    vi.advanceTimersByTime(1);
+    expect(events.onBroadcast).toHaveBeenLastCalledWith(room, expect.arrayContaining([expect.objectContaining({ type: 'actionChosen', actorId: computerId })]));
+  });
+
+  it('注入零延迟：1 位真人（只靠默认行动）加 3 个电脑的牌局打到 gameOver，不留计时器', () => {
+    vi.useFakeTimers();
+    let seed = 1;
+    const computerRandom = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0, computerRandom, computerDelayMs: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    for (let i = 0; i < 3; i += 1) room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    for (let step = 0; step < 2_000 && room.game!.phase !== 'gameOver'; step += 1) vi.advanceTimersToNextTimer();
+    expect(room.game!.phase).toBe('gameOver');
+    expect(vi.getTimerCount()).toBe(0);
+    // 默认行动只会收入或政变：出现别的行动，说明是电脑自己在出手，而不是超时替它出
+    const chosen = events.onBroadcast.mock.calls.flatMap(([, evs]) => evs).filter((e) => e.type === 'actionChosen' && e.actorId !== alice.id);
+    expect(chosen.some((e) => e.action !== 'income' && e.action !== 'coup')).toBe(true);
+  });
+});
+
 describe('Room 推送', () => {
   it('每次改变房间都经 onBroadcast 推送，并带上对应事件', () => {
     const { room, events } = makeRoom({ startingPlayerRandom: () => 0 });

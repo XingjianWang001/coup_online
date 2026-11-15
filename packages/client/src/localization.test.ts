@@ -75,6 +75,18 @@ describe('translate', () => {
     expect(notice).toEqual({ key: 'challengeSucceeded' });
   });
 
+  it('names computer players and the host controls for them in both locales', () => {
+    expect(translate('en', 'computerPlayer')).toBe('Computer player');
+    expect(translate('zh-CN', 'computerPlayer')).toBe('电脑玩家');
+    expect(translate('en', 'addComputer')).toBe('Add computer player');
+    expect(translate('zh-CN', 'addComputer')).toBe('添加电脑玩家');
+    expect(translate('en', 'removeComputer', { name: 'Ada' })).toBe('Remove Ada');
+    expect(translate('zh-CN', 'removeComputer', { name: 'Ada' })).toBe('移除 Ada');
+    // 可见文字是可访问名称的前缀（label-in-name）
+    expect(translate('en', 'removeComputer', { name: 'Ada' }).startsWith(translate('en', 'remove'))).toBe(true);
+    expect(translate('zh-CN', 'removeComputer', { name: 'Ada' }).startsWith(translate('zh-CN', 'remove'))).toBe(true);
+  });
+
   it('uses grammatical singular and plural coin displays', () => {
     expect(localizeCoinCount('en', 1)).toBe('1 coin');
     expect(localizeCoinCount('en', 2)).toBe('2 coins');
