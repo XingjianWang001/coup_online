@@ -131,7 +131,8 @@ export function decideComputerIntent(
   const perSeat = (p: number) => 1 - (1 - p) ** (1 / rivals.length);
   // 眼前的威胁，能挡住它的牌更值得留。一种是对手仍作数的声称：声称刺客且金币够暗杀，或声称队长而自己有金币可偷。
   // 另一种是冲着自己来、还没结算的行动（incoming）：自己质疑它失败、正为此失去影响力，接下来就是它的阻挡窗口。
-  // 这个声称刚被证明、已不作数，暗杀的金币也已付过，只能从「上一条事件是自己质疑失败」认出它
+  // 这个声称刚被证明、已不作数，暗杀的金币也已付过，只能从「上一条事件是自己质疑失败」认出它。
+  // ponytail: 旁人恰在这时弃权会插进事件，就认不出来，退回只看声称；行动者弃权则行动作废，本来就不算威胁
   const last = events.at(-1);
   const incoming = last?.type === 'challengeResolved' && last.truth && last.loserId === me && pending?.targetId === me ? pending.action : undefined;
   const assassinationThreat = incoming === 'assassinate' || rivals.some((p) => stillClaims(p.id, 'assassin') && p.coins >= ASSASSINATE_COST);
