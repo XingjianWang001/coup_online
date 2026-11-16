@@ -24,7 +24,6 @@ export interface Player {
 }
 
 export type Phase =
-  | 'lobby'
   | 'choosingAction'
   | 'awaitingChallenge' // 有声称（行动或阻挡）等待质疑
   | 'showdown' // 对质：被质疑者选一张暗牌公开翻开

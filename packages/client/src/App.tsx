@@ -358,7 +358,7 @@ export function App() {
 
   function createRoom() {
     setError(null);
-    send(socket, { type: 'createRoom', name, playerId: identity?.playerId, secret: identity?.secret });
+    send(socket, { type: 'createRoom', name });
   }
 
   function joinRoom() {
@@ -519,7 +519,6 @@ export function App() {
           onStart={startGame}
           onAction={chooseAction}
           socket={socket}
-          identity={identity}
           tunnelUrl={tunnelUrl}
           canStartTunnel={canStartTunnel}
           tunnelLoading={tunnelLoading}
@@ -842,7 +841,6 @@ interface RoomViewProps {
   onStart: () => void;
   onAction: (action: ActionType, targetId?: string) => void;
   socket: ReturnType<typeof connect>;
-  identity: { playerId: string; name: string } | null;
   clock: Clock;
   log: LogEntry[];
   tunnelUrl: string | null;
@@ -1122,9 +1120,9 @@ const animate = (el: Element, frames: Keyframe[], options: KeyframeAnimationOpti
   el.animate(frames, { fill: 'forwards', ...options }).finished;
 // 翻牌器从 180°（牌背朝外）转到 0°（牌面朝外）
 const flipTo = (deg: number): Keyframe => ({ transform: `perspective(1000px) rotateY(${deg}deg)` });
+// 整段揭晓（悬念 + 翻牌 + 盖印 + 换牌或落回座位）约 6 秒：改动这里的时长要同步 server/src/room.ts 的 REVEAL_MS
 const SUSPENSE_MS = 1900; // 悬念：四周已暗，牌静止，只有牌框升温
 const VERDICT_HOLD_MS = 1300;
-// 整段揭晓（悬念 + 翻牌 + 盖印 + 换牌或落回座位）约 6 秒：改动这里的时长要同步 server/src/room.ts 的 REVEAL_MS
 const FOCUS_SEND_MS = 100;
 
 // 放大展示的一张牌：down 是翻开前朝外的一面，up 是翻开后的牌面；incoming 是质疑失败后换来的新牌

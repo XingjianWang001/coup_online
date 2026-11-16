@@ -2,6 +2,7 @@ import type { GameState, GameEvent, Role, ActionType, Phase } from '@coup/engine
 import { randomBytes } from 'node:crypto';
 import {
   ACTION_CLAIM,
+  FORCED_COUP_COINS,
   GameRuleError,
   MAX_PLAYERS,
   ROLE_ORDER,
@@ -45,7 +46,7 @@ const COMPUTER_NAMES = ['Ada', 'Alan', 'Grace', 'Hedy', 'Linus', 'Edsger'];
 
 // 每个进行中的阶段都要有时限和超时后的处理，否则在线却不操作的玩家能让牌局永远卡住（#24）。
 // 用 Record 而不是 switch：新增阶段时漏写这里会编译报错。
-type TimedPhase = Exclude<Phase, 'lobby' | 'gameOver'>;
+type TimedPhase = Exclude<Phase, 'gameOver'>;
 const PHASE_TIMEOUTS: Record<TimedPhase, { ms: number; resolve: (g: GameState) => GameEvent[] }> = {
   choosingAction: { ms: ACTION_TIMEOUT_MS, resolve: autoAction },
   awaitingChallenge: { ms: WINDOW_TIMEOUT_MS, resolve: resolveChallengeTimeout },
@@ -70,10 +71,10 @@ const COMPUTER_FIRST_MOVE_MS = 3_000;
 // 房里的真人全被淘汰、只剩旁观时，电脑约 1 秒一步
 const COMPUTER_SPECTATED_MS = 1_000;
 
-// 行动超时的默认行动：满 10 金币必须政变（随机目标），否则收入
+// 行动超时的默认行动：金币到了 FORCED_COUP_COINS 必须政变（随机目标），否则收入
 function autoAction(g: GameState): GameEvent[] {
   const cur = g.currentPlayerId!;
-  if (g.players.find((p) => p.id === cur)!.coins >= 10) {
+  if (g.players.find((p) => p.id === cur)!.coins >= FORCED_COUP_COINS) {
     const targets = g.players.filter((p) => p.alive && p.id !== cur);
     return chooseAction(g, cur, 'coup', targets[Math.floor(Math.random() * targets.length)].id);
   }
