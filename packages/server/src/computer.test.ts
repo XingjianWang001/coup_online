@@ -600,6 +600,152 @@ describe('decideComputerIntent', () => {
     expect(() => apply(g, 'a', intent)).not.toThrow();
   });
 
+  describe('两人对峙、只剩 1 点影响力、对手快要政变时会挣扎', () => {
+    // 只剩 a 和 b 两人、轮到 b：c 被 a 政变两次出局。决定的是 b，可能政变它的是 a。
+    // lose：b 再挨 a 一次政变亮出的牌，之后只剩 1 点影响力；不给就还有 2 点
+    const duel = (bHand: Role[], lose?: Role) => {
+      const t = table({ b: bHand, c: ['ambassador', 'ambassador'] });
+      t.coup('a', 'c', 'ambassador');
+      t.income('b', 'c');
+      t.coup('a', 'c', 'ambassador');
+      if (lose) {
+        t.income('b');
+        t.coup('a', 'b', lose);
+      }
+      return t;
+    };
+    const coins = (t: Table, a: number, b: number) => {
+      seat(t.g, 'a').coins = a;
+      seat(t.g, 'b').coins = b;
+    };
+    // b 有 3 金币（够暗杀）、a 有 aCoins 时，b 选各种行动的次数
+    const actions = (t: Table, aCoins: number) => {
+      coins(t, aCoins, 3);
+      return tally(2000, byAction, t.g, 'b', { events: t.events });
+    };
+    const withAssassin = () => duel(['assassin', 'contessa'], 'contessa');
+    const withCaptain = () => duel(['captain', 'contessa'], 'contessa');
+    const fights = (counts: Record<string, number>) => (counts.steal ?? 0) + (counts.assassinate ?? 0);
+
+    it('对手金币够政变：更常暗杀和偷窃，手里没有也更常装；对手 9 金币时偷了也拦不住政变，不为此多偷', () => {
+      const level = 3; // 金币一样多：没有风险
+      expect(actions(withAssassin(), 7).assassinate).toBeGreaterThan(actions(withAssassin(), level).assassinate * 1.3);
+      const calm = actions(withCaptain(), level);
+      const cornered = actions(withCaptain(), 7);
+      expect(cornered.steal).toBeGreaterThan(calm.steal * 1.2);
+      expect(cornered.assassinate).toBeGreaterThan(calm.assassinate * 1.5); // 手里没有刺客：装的
+      const tooRich = actions(withCaptain(), 9);
+      expect(tooRich.steal).toBeLessThan(calm.steal);
+      expect(tooRich.assassinate).toBeGreaterThan(calm.assassinate * 1.5);
+    });
+
+    it('对手金币领先：他会先攒够政变，也算风险，只是小一些', () => {
+      const behind = fights(actions(withCaptain(), 5));
+      expect(behind).toBeGreaterThan(fights(actions(withCaptain(), 3)) * 1.15);
+      expect(behind).toBeLessThan(fights(actions(withCaptain(), 7)));
+    });
+
+    it('还有 2 点影响力，或不止两人对峙：对手金币够政变也照常行动', () => {
+      const twoCards = () => duel(['assassin', 'captain']);
+      expect(actions(twoCards(), 7)).toEqual(actions(twoCards(), 3));
+      const threeWay = () => {
+        const t = table({ b: ['captain', 'contessa'] });
+        t.coup('a', 'b', 'contessa');
+        return t;
+      };
+      expect(actions(threeWay(), 7)).toEqual(actions(threeWay(), 3));
+    });
+
+    it('更想质疑对手：他阻挡自己的偷窃，或金币领先时收税；还有 2 点影响力时照常', () => {
+      // b 偷 a，a 声称队长阻挡：数 b 质疑这次阻挡的次数。b 有 6 金币，a 有 4 金币时不领先
+      const challengesOfBlock = (t: Table, aCoins: number) => {
+        coins(t, aCoins, 6);
+        t.did(chooseAction(t.g, 'b', 'steal', 'a'));
+        t.did(passChallenge(t.g, 'a'));
+        t.did(block(t.g, 'a', 'captain'));
+        return tally(4000, byType, t.g, 'b', { events: t.events }).challenge;
+      };
+      expect(challengesOfBlock(withCaptain(), 7)).toBeGreaterThan(challengesOfBlock(withCaptain(), 4) * 2.5);
+      const twoCards = () => duel(['captain', 'contessa']);
+      expect(challengesOfBlock(twoCards(), 7)).toBe(challengesOfBlock(twoCards(), 4));
+
+      // a 收税：数 b 质疑的次数。b 有 4 金币
+      const challengesOfTax = (aCoins: number) => {
+        const t = withCaptain();
+        t.income('b');
+        coins(t, aCoins, 4);
+        t.did(chooseAction(t.g, 'a', 'tax'));
+        return tally(4000, byType, t.g, 'b', { events: t.events }).challenge;
+      };
+      expect(challengesOfTax(6)).toBeGreaterThan(challengesOfTax(3) * 1.5);
+    });
+  });
+
+  describe('两人对峙、对手只剩 1 点影响力、自己快要政变赢时求稳', () => {
+    // 只剩 a 和 b 两人、轮到 a：c 被 b 政变两次出局。决定的是 b，它要政变的是 a。
+    // aLoses：a 再挨 b 一次政变亮出公爵，只剩 1 点影响力；false 时还有 2 点
+    const endgame = (aLoses = true) => {
+      const t = table({ a: ['duke', 'captain'], b: ['assassin', 'contessa'], c: ['ambassador', 'ambassador'] });
+      t.income('a');
+      t.coup('b', 'c', 'ambassador');
+      t.income('c', 'a');
+      t.coup('b', 'c', 'ambassador');
+      if (aLoses) {
+        t.income('a');
+        t.coup('b', 'a', 'duke');
+      }
+      return t;
+    };
+    const coins = (t: Table, a: number, b: number) => {
+      seat(t.g, 'a').coins = a;
+      seat(t.g, 'b').coins = b;
+    };
+
+    it('金币够政变就必政变', () => {
+      const coups = (aLoses: boolean) => {
+        const t = endgame(aLoses);
+        t.income('a');
+        coins(t, 0, 7);
+        return tally(1000, byAction, t.g, 'b', { events: t.events }).coup;
+      };
+      expect(coups(true)).toBe(1000);
+      expect(coups(false)).toBeLessThan(1000);
+    });
+
+    it('金币领先时少诈唬收税，也少假装阻挡', () => {
+      // 轮到 b，b 有 5 金币：a 有 2 金币时 b 领先
+      const taxes = (aCoins: number) => {
+        const t = endgame();
+        t.income('a');
+        coins(t, aCoins, 5);
+        return tally(4000, byAction, t.g, 'b', { events: t.events, temperament: KEEN }).tax;
+      };
+      expect(taxes(2)).toBeLessThan(taxes(5) * 0.85);
+      // a 偷 b，b 没有队长和大使：数 b 假装阻挡的次数。a 有 3 金币
+      const fakeBlocks = (bCoins: number) => {
+        const t = endgame();
+        coins(t, 3, bCoins);
+        t.did(chooseAction(t.g, 'a', 'steal', 'b'));
+        t.did(passChallenge(t.g, 'b'));
+        return tally(4000, byType, t.g, 'b', { events: t.events, temperament: KEEN }).block;
+      };
+      expect(fakeBlocks(7)).toBeLessThan(fakeBlocks(3) * 0.4);
+    });
+
+    it('只为切身的代价质疑：a 收税少质疑，a 偷自己照样常质疑；a 还有 2 点影响力时照常', () => {
+      // a 行动，数 b 质疑的次数。a 有 3 金币，b 有 7 金币时够政变
+      const challenges = (bCoins: number, action: ActionType, aLoses = true) => {
+        const t = endgame(aLoses);
+        coins(t, 3, bCoins);
+        t.did(chooseAction(t.g, 'a', action, action === 'steal' ? 'b' : undefined));
+        return tally(4000, byType, t.g, 'b', { events: t.events }).challenge ?? 0;
+      };
+      expect(challenges(7, 'tax')).toBeLessThan(challenges(3, 'tax') * 0.4);
+      expect(challenges(7, 'steal')).toBeGreaterThan(challenges(3, 'steal') * 0.5);
+      expect(challenges(7, 'tax', false)).toBe(challenges(3, 'tax', false));
+    });
+  });
+
   describe('保牌看眼前的威胁', () => {
     // 决定留牌的是 b，可能威胁它的是 c。c 手里是两张公爵：声称刺客或队长都是诈唬，被质疑就被抓到诈唬。
     // 下面每个函数是 c 的一手（连同 a、b 各收入一次），走完轮到 a

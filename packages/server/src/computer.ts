@@ -4,6 +4,7 @@ import {
   COUP_COST,
   FORCED_COUP_COINS,
   ROLE_COPIES,
+  STEAL_AMOUNT,
   type ActionType,
   type Card,
   type GameEvent,
@@ -51,6 +52,12 @@ const COUP_EAGERNESS = 0.85;
 const CONTRADICTION = 2.5;
 // 对方的声称被证明为真过，质疑概率最多降到这个比例：CONTRADICTION 乘它仍大于 1，眼前的矛盾盖得过旧信用
 const PROVEN_FLOOR = 0.6;
+// 两人对峙、自己只剩 1 点影响力、对手快要政变时会挣扎：暗杀和偷窃的权重最多乘到 1 + STRUGGLE；
+// 对手有声称可质疑时，质疑的代价最多加 COUP_HARM（和 HARM 同一把尺：政变挡不了，比暗杀更疼）
+const STRUGGLE = 3;
+const COUP_HARM = 2;
+// 反过来，两人对峙、对手只剩 1 点影响力、自己快要政变赢下来时求稳：诈唬和没有切身代价的质疑最多少做这么多比例
+const RESTRAINT = 0.75;
 
 function pickAction(weights: readonly (readonly [ActionType, number])[], random: () => number): ActionType {
   let roll = random() * weights.reduce((sum, [, weight]) => sum + weight, 0);
@@ -120,7 +127,14 @@ export function decideComputerIntent(
   const stillClaims = (id: string, role: Role) => memory.standing.get(id)?.has(role) ?? false;
   const storyCap = temperament.bluff >= RECKLESS_BLUFF ? STORY_ROLES + 1 : STORY_ROLES;
   const lastCard = self.handCount === 1;
-  const caution = lastCard ? 0.5 : 1; // 只剩 1 点影响力时，冒险的事少做一半
+  // striker 政变 victim 结束这局的把握（0 到 1）：只剩两人对峙、victim 只剩 1 点影响力时才算。striker 金币够政变，
+  // 轮到他多半就政变；他金币领先也算半份：他会先攒够
+  const [foe] = rivals;
+  const finishing = (striker: PublicPlayerView, victim: PublicPlayerView) =>
+    rivals.length === 1 && victim.handCount === 1 ? (striker.coins >= COUP_COST ? 1 : striker.coins > victim.coins ? 0.5 : 0) : 0;
+  const coupRisk = finishing(foe, self); // 挨政变出局的风险
+  const calm = 1 - RESTRAINT * finishing(self, foe); // 快要政变赢了：别节外生枝
+  const caution = lastCard ? 0.5 + coupRisk / 2 : 1; // 只剩 1 点影响力时，冒险的事少做一半；横竖要挨政变出局就没什么可小心的
   const dying = pending?.action === 'assassinate' && pending.targetId === me && lastCard; // 这次暗杀成了自己就出局
   const nothingToSteal = pending?.action === 'steal' && pending.targetId === me && self.coins === 0;
 
@@ -158,8 +172,8 @@ export function decideComputerIntent(
   // 手里没有某角色时声称它的意愿（0 到 1），全看诈唬倾向。声称过、还作数的角色接着演，意愿高得多；
   // 其余的要起一个新的诈唬（意愿再乘 fresh），而且只在故事里的加手里有的还不满 storyCap 个角色时才起
   const bluffWillingness = (role: Role, fresh: number) => {
-    if (stillClaims(me, role)) return Math.min(1, REPEAT_BLUFF * temperament.bluff);
-    return new Set([...memory.story, ...held]).size < storyCap ? fresh * temperament.bluff * caution : 0;
+    if (stillClaims(me, role)) return Math.min(1, REPEAT_BLUFF * temperament.bluff) * calm;
+    return new Set([...memory.story, ...held]).size < storyCap ? fresh * temperament.bluff * caution * calm : 0;
   };
 
   // 声称某角色来行动的权重：手里有就照实声称，但故事里已有 storyCap 个角色后不再添新的，哪怕是真的：
@@ -170,19 +184,22 @@ export function decideComputerIntent(
   };
 
   const chooseAction = (): ComputerIntent => {
-    // 够政变就多半政变，偶尔先做别的；到了 FORCED_COUP_COINS 规则只许政变
-    if (self.coins >= FORCED_COUP_COINS || (self.coins >= COUP_COST && random() < COUP_EAGERNESS)) {
+    // 够政变就多半政变，偶尔先做别的；政变就能赢、或到了 FORCED_COUP_COINS（规则只许政变）时必政变
+    if (self.coins >= FORCED_COUP_COINS || (self.coins >= COUP_COST && (calm < 1 || random() < COUP_EAGERNESS))) {
       return { type: 'chooseAction', action: 'coup', targetId: pickTarget(rivals) };
     }
     const victims = rivals.filter((p) => p.coins > 0);
     const dukeAbout = rivals.some((p) => stillClaims(p.id, 'duke'));
+    // 挨政变出局的风险越大越想先下手。暗杀去掉他一点影响力；偷窃只在偷完他就不够政变时才拦得住
+    const struggle = 1 + STRUGGLE * coupRisk;
+    const stealStalls = foe.coins < COUP_COST + STEAL_AMOUNT;
     const action = pickAction(
       [
         ['income', 1],
         ['foreignAid', dukeAbout ? 1 : 3],
         ['tax', 5 * claimWeight('duke')],
-        ['steal', victims.length ? (2 + 2 * temperament.aggression) * claimWeight('captain') : 0],
-        ['assassinate', self.coins >= ASSASSINATE_COST ? (3 + 4 * temperament.aggression) * claimWeight('assassin') : 0],
+        ['steal', victims.length ? (2 + 2 * temperament.aggression) * claimWeight('captain') * (stealStalls ? struggle : 1) : 0],
+        ['assassinate', self.coins >= ASSASSINATE_COST ? (3 + 4 * temperament.aggression) * claimWeight('assassin') * struggle : 0],
         ['exchange', 1.5 * claimWeight('ambassador')],
       ],
       random,
@@ -197,7 +214,8 @@ export function decideComputerIntent(
     if (allSeen(role)) return 1;
     const { action } = pending!;
     // 自相矛盾：对方仍作数的声称角色（含眼前这个）比暗牌多，没有换牌能解释。同一角色声称几次只算一个，声称一致也不算证明
-    const contradicts = (memory.standing.get(claimantId)?.size ?? 0) > state.players.find((p) => p.id === claimantId)!.handCount;
+    const claimant = state.players.find((p) => p.id === claimantId)!;
+    const contradicts = (memory.standing.get(claimantId)?.size ?? 0) > claimant.handCount;
     // 被证明为真的信用：每次把质疑概率打七五折，最低到 PROVEN_FLOOR。证明用的那张牌已洗回牌堆，说明不了对方现在拿着什么
     const credit = Math.max(PROVEN_FLOOR, 0.75 ** (memory.proven.get(claimantId) ?? 0));
     // 多疑程度定基调；看得见的同角色牌越多、对方本局被抓过、声称自相矛盾越可疑，被证明过略可信。
@@ -212,11 +230,13 @@ export function decideComputerIntent(
       const base = 0.5 + (temperament.suspicion - temperament.bluff) / 2;
       return base + (1 - base) * p;
     }
-    // 冲着自己来才有额外的代价；能照实阻挡、或对方偷不走什么，就不必为此冒险
+    // 冲着自己来才有额外的代价；能照实阻挡、或对方偷不走什么，就不必为此冒险。
+    // 有挨政变出局的风险时，声称的人就是要政变自己的那个，抓到他诈唬能先去掉他一点影响力：这份风险也算代价。
+    // 快要政变赢了时只为代价质疑，没有代价的那份少做
     const aimedAtMe = onAction ? pending!.targetId === me : pending!.actorId === me;
     const canBlock = onAction && BLOCK_ROLES[action].some((r) => held.has(r));
-    const stake = aimedAtMe && !canBlock && !nothingToSteal ? (HARM[action] ?? 0) : 0;
-    return (perSeat(p) + p * stake) * caution;
+    const stake = (aimedAtMe && !canBlock && !nothingToSteal ? (HARM[action] ?? 0) : 0) + COUP_HARM * coupRisk;
+    return (perSeat(p) * calm + p * stake) * caution;
   };
 
   // 手里没有能阻挡的角色时，假装有 role 来阻挡的概率
