@@ -1103,8 +1103,9 @@ describe('decideComputerIntent', () => {
 });
 
 // 自对弈检查（#57）：电脑对电脑打几千局，看它不出错、打得完，而且诈唬和质疑的比例像人。
-// 每次运行换一个种子，失败信息里带着它：把 SEED 写死成那个数就能复现
-describe('电脑玩家自对弈', () => {
+// 每次运行换一个种子，失败信息里带着它：把 SEED 写死成那个数就能复现。
+// 几千局要跑好几秒，4 人局贴着 vitest 默认的 5 秒时限，机器一忙就超时（#67）：整组放宽到 30 秒
+describe('电脑玩家自对弈', { timeout: 30_000 }, () => {
   const SEED = Date.now() | 0;
   const TURN_LIMIT = 300;
   type Seat = (g: GameState, id: string, mind: Mind) => ComputerIntent | null;
