@@ -14,7 +14,7 @@ Coup Online 是可在浏览器中游玩的线上版政变（Coup）桌游。服�
 
 每位玩家以两张暗牌（两点影响力）和两枚金币开始，轮流选择收入、外援、政变或声称角色来执行征税、暗杀、偷窃、交换。角色声称可以被质疑，部分行动可以被阻挡；失去全部影响力即被淘汰，最后仍有影响力的玩家获胜。
 
-标准版 Indie Boards & Cards《Coup》基础规则是游戏行为的权威来源。本项目另行标注倒计时、自动行动、重连和弃权等线上对局规则。完整玩法请打开游戏页眉中的「规则」，并在「简要规则」与「详细规则」之间切换；README 不重复整份规则。
+标准版 Indie Boards & Cards《Coup》基础规则是游戏行为的权威来源。本项目另行标注倒计时、自动行动、重连和弃权等线上牌局规则。完整玩法请打开游戏页眉中的「规则」，并在「简要规则」与「详细规则」之间切换；README 不重复整份规则。
 
 ### 架构
 
@@ -31,7 +31,7 @@ Coup Online 是可在浏览器中游玩的线上版政变（Coup）桌游。服�
 
 ### 快速开始
 
-需要 Node.js 20+、pnpm 9，以及可选的 `cloudflared`（仅公网隧道需要）。
+需要 Node.js 22+、pnpm 9，以及可选的 `cloudflared`（仅公网隧道需要）。
 
 ```bash
 pnpm install
@@ -53,7 +53,7 @@ cloudflared tunnel --url http://localhost:8787
 
 ### 云服务器部署
 
-仓库提供 Docker Compose 配置。默认只在服务器的 `127.0.0.1:8787` 监听，可通过 SSH 端口转发私有验证；取得域名并完成公开发布所需手续后，才启用 Caddy 的 `public` 配置。操作步骤见 [`docs/deployment.md`](docs/deployment.md)。房间和对局只保存在内存中，服务器或容器重启后会消失。
+仓库提供 Docker Compose 配置。默认只在服务器的 `127.0.0.1:8787` 监听，可通过 SSH 端口转发私有验证；取得域名并完成公开发布所需手续后，才启用 Caddy 的 `public` 配置。操作步骤见 [`docs/deployment.md`](docs/deployment.md)。房间和牌局只保存在内存中，服务器或容器重启后会消失。
 
 ### 开发
 
@@ -100,7 +100,7 @@ See [`CONTEXT.md`](CONTEXT.md) and [`docs/adr/`](docs/adr/) for the detailed des
 
 ### Quick start
 
-You need Node.js 20+, pnpm 9, and optionally `cloudflared` for a public tunnel.
+You need Node.js 22+, pnpm 9, and optionally `cloudflared` for a public tunnel.
 
 ```bash
 pnpm install

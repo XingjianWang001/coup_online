@@ -68,8 +68,12 @@ const httpServer = createServer((req, res) => {
     '.svg': 'image/svg+xml',
     '.png': 'image/png',
     '.json': 'application/json',
+    '.woff2': 'font/woff2',
   };
-  res.writeHead(200, { 'Content-Type': types[ext] ?? 'application/octet-stream' });
+  const headers: Record<string, string> = { 'Content-Type': types[ext] ?? 'application/octet-stream' };
+  // Vite 给 assets/ 下的文件名带内容哈希：内容变了文件名就变，浏览器可以一直缓存，不必每次打开或刷新都重新下载
+  if (relativePath.startsWith(`assets${sep}`)) headers['Cache-Control'] = 'public, max-age=31536000, immutable';
+  res.writeHead(200, headers);
   res.end(readFileSync(filePath));
 });
 

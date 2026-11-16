@@ -1,6 +1,6 @@
 # 云服务器部署
 
-本配置适用于一台 Ubuntu 24.04 云服务器。Node 服务同时提供网页和 Socket.IO；Docker Compose 默认仅将端口绑定到服务器的 `127.0.0.1:8787`。不需要数据库，房间及对局在服务重启后清空。
+本配置适用于一台 Ubuntu 24.04 云服务器。Node 服务同时提供网页和 Socket.IO；Docker Compose 默认仅将端口绑定到服务器的 `127.0.0.1:8787`。不需要数据库，房间及牌局在服务重启后清空。
 
 ## 一键私有部署（Windows / Mac）
 
@@ -8,7 +8,7 @@
 
 命令从 `origin/dev` 取得最新提交，只打包该提交中的文件，不包含未提交改动；通过 SSH 上传、在 Ubuntu 24.04 上检查或安装 Docker、构建并启动应用，然后检查服务器和本机隧道两端的 `/healthz`。成功后打开 `http://127.0.0.1:18887`，保持命令窗口运行；按 `Ctrl+C` 关闭隧道；若 Windows 继续询问 `Terminate batch job (Y/N)?`，输入 `Y`。之后只想重新打开私有访问而不更新服务器时，运行 `.\deploy.cmd -AccessOnly`（Mac 为 `./deploy.sh -AccessOnly`）。SSH 密钥口令或远端 `sudo` 密码如有要求，会在运行时提示，不会保存。
 
-更新前请确认无人正在对局。构建失败不会替换正在运行的容器；如果启动或健康检查失败，命令会报错并显示日志，不会自动回滚。需要恢复时可运行 `.\deploy.cmd -Revision <上次成功的完整提交 SHA>`，上次成功的 SHA 记录在服务器的 `~/.coup-online/current`。服务器上的旧版本目录会保留；磁盘空间不足时需人工清理。本机需要 Git 和 OpenSSH 客户端，服务器需要能访问软件源和 Docker 镜像仓库。
+更新前请确认没有进行中的牌局。构建失败不会替换正在运行的容器；如果启动或健康检查失败，命令会报错并显示日志，不会自动回滚。需要恢复时可运行 `.\deploy.cmd -Revision <上次成功的完整提交 SHA>`，上次成功的 SHA 记录在服务器的 `~/.coup-online/current`。服务器上的旧版本目录会保留；磁盘空间不足时需人工清理。本机需要 Git 和 OpenSSH 客户端，服务器需要能访问软件源和 Docker 镜像仓库。
 
 ## 私有部署与验证
 
@@ -51,7 +51,7 @@
 
 ## 更新与排查
 
-更新源码后，在服务器目录执行 `sudo docker compose up -d --build app`。构建成功后 Compose 会替换容器；正在进行的房间和对局会丢失，宜先通知玩家。`sudo docker compose logs --tail=100 app` 查看日志，`sudo docker compose ps` 查看容器状态。云服务器防火墙无需为私有验证开放 8787 端口。
+更新源码后，在服务器目录执行 `sudo docker compose up -d --build app`。构建成功后 Compose 会替换容器；正在进行的房间和牌局会丢失，宜先通知玩家。`sudo docker compose logs --tail=100 app` 查看日志，`sudo docker compose ps` 查看容器状态。云服务器防火墙无需为私有验证开放 8787 端口。
 
 ## 启用固定网址
 

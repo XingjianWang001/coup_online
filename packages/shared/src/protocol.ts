@@ -11,7 +11,7 @@ export type Reaction =
 
 // 客户端 → 服务器 的意图
 export type ClientIntent =
-  | { type: 'createRoom'; name: string; playerId?: string; secret?: string }
+  | { type: 'createRoom'; name: string }
   | { type: 'joinRoom'; roomCode: string; name: string; playerId?: string; secret?: string }
   | { type: 'startTunnel' }
   | { type: 'startGame' }

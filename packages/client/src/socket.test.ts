@@ -1,6 +1,23 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Socket } from 'socket.io-client';
-import { send } from './socket.ts';
+import { clearIdentity, clearRoomCode, loadIdentity, loadRoomCode, saveIdentity, saveRoomCode, send } from './socket.ts';
+
+describe('本机保存的身份与房间码', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('浏览器禁用存储时读不到按没有处理、写入和清除不抛错', () => {
+    const denied = () => { throw new Error('SecurityError'); };
+    vi.stubGlobal('localStorage', { getItem: denied, setItem: denied, removeItem: denied });
+    expect(loadIdentity()).toBeNull();
+    expect(loadRoomCode()).toBeNull();
+    expect(() => {
+      saveIdentity({ playerId: 'a', name: '张三', secret: 's' });
+      saveRoomCode('ABC123');
+      clearIdentity();
+      clearRoomCode();
+    }).not.toThrow();
+  });
+});
 
 describe('send', () => {
   const fakeSocket = (connected: boolean) => ({ connected, emit: vi.fn() }) as unknown as Socket & { emit: ReturnType<typeof vi.fn> };

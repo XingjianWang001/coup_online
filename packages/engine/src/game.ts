@@ -1,7 +1,6 @@
 import type {
   ActionType,
   Card,
-  ChallengeSubject,
   GameEvent,
   GameState,
   LossContinuation,
@@ -29,10 +28,10 @@ export const MAX_PLAYERS = 6;
 export const STEAL_AMOUNT = 2;
 const EXCHANGE_DRAW = 2;
 
-// 行动声称的角色（null = 不声称角色）
 /** 政变、暗杀、偷窃要指定目标；其余行动不能指定 */
 export const needsTarget = (action: ActionType): boolean => action === 'coup' || action === 'assassinate' || action === 'steal';
 
+// 行动声称的角色（null = 不声称角色）
 export const ACTION_CLAIM: Readonly<Record<ActionType, Role | null>> = {
   income: null,
   foreignAid: null,
@@ -216,7 +215,7 @@ export function createGame(
   }
   const startingPlayerIndex = players.findIndex((player) => player.id === options.startingPlayerId);
   if (startingPlayerIndex < 0) throw new GameRuleError('starting player not found');
-  let deck = DECK.map((role, i) => ({ id: `${role}-${i}`, role }));
+  const deck = DECK.map((role, i) => ({ id: `${role}-${i}`, role }));
   shuffle(deck);
 
   const playerStates: Player[] = players.map((p, index) => ({

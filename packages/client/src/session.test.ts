@@ -9,17 +9,38 @@ function run(messages: ServerMessage[], from: Session = initialSession): Session
   return messages.reduce((s, msg) => reduceSession(s, msg, 0), from);
 }
 
-const inGame = run([
-  { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players, hostId: 'a', tunnelUrl: 'https://t', canStartTunnel: true, gameNumber: 0 },
-  { type: 'gameStarted', turnOrder: ['a'], gameNumber: 1 },
-  { type: 'publicState', state: table, remainingMs: 1000, deadlineAt: 5000, hostId: 'a' },
+// 两人局：服务器至少两人才能开局，回合也才能真的交给另一位玩家
+const pair = [players[0], { id: 'b', name: '李四', isHost: false, connected: true, isPreviousWinner: false, isComputer: false }];
+
+// 一次收入的完整推送：events → publicState → privateState
+const income = (actorId: string, nextId: string, coins: number, state: PublicState = table): ServerMessage[] => [
+  { type: 'events', events: [{ type: 'actionChosen', actorId, action: 'income' }, { type: 'coinsChanged', playerId: actorId, coins }, { type: 'turnChanged', playerId: nextId }] },
+  { type: 'publicState', state, remainingMs: 1000, deadlineAt: 6000, hostId: 'a' },
   { type: 'privateState', hand: [{ id: 'c1', role: 'duke' }] },
-  { type: 'events', events: [{ type: 'started', turnOrder: ['a'] }] },
+];
+
+const inGame = run([
+  { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: pair, hostId: 'a', tunnelUrl: 'https://t', canStartTunnel: true, gameNumber: 0 },
+  { type: 'gameStarted', turnOrder: ['a', 'b'], gameNumber: 1 },
+  { type: 'publicState', state: { ...table, currentPlayerId: 'a' }, remainingMs: 1000, deadlineAt: 5000, hostId: 'a' },
+  { type: 'privateState', hand: [{ id: 'c1', role: 'duke' }] },
+  ...income('a', 'b', 3),
 ]);
 
+// b 离线超过宽限期而弃权，两张牌都翻开，a 获胜
+const ended = run([
+  { type: 'events', events: [{ type: 'influenceLost', playerId: 'b', role: 'duke' }, { type: 'influenceLost', playerId: 'b', role: 'captain' }, { type: 'eliminated', playerId: 'b' }, { type: 'gameOver', winnerId: 'a' }] },
+  { type: 'publicState', state: { ...table, phase: 'gameOver' }, remainingMs: null, deadlineAt: null, hostId: 'a' },
+], inGame);
+
+// 房主点「再来一局」回到大厅，再开下一局
+const rematch: ServerMessage[] = [
+  { type: 'lobby', players: pair, hostId: 'a' },
+  { type: 'gameStarted', turnOrder: ['a', 'b'], gameNumber: 2 },
+  { type: 'publicState', state: { ...table, currentPlayerId: 'a' }, remainingMs: 1000, deadlineAt: 5000, hostId: 'a' },
+];
+
 describe('房间会话', () => {
-  // 两人局：只有这样回合才能真的交给另一位玩家
-  const pair = [players[0], { id: 'b', name: '李四', isHost: false, connected: true, isPreviousWinner: false, isComputer: false }];
   const myTurn = (selectedAction: Session['selectedAction']) => ({
     ...run([
       { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: pair, hostId: 'a', canStartTunnel: true, gameNumber: 0 },
@@ -80,12 +101,8 @@ describe('房间会话', () => {
   });
 
   it('开局重置日志，后续事件的日志 id 从 0 递增', () => {
-    const s = run([
-      { type: 'gameStarted', turnOrder: ['a'], gameNumber: 1 },
-      { type: 'events', events: [{ type: 'started', turnOrder: ['a'] }, { type: 'started', turnOrder: ['a'] }] },
-      { type: 'events', events: [{ type: 'started', turnOrder: ['a'] }] },
-    ], inGame);
-    expect(s.log.map((e) => e.id)).toEqual([0, 1, 2]);
+    const s = run([...rematch, { type: 'privateState', hand: [{ id: 'c1', role: 'duke' }] }, ...income('a', 'b', 3), ...income('b', 'a', 3)], ended);
+    expect(s.log.map((e) => e.id)).toEqual([0, 1, 2, 3, 4, 5]);
   });
 
   it('牌局状态记录收到时刻供倒计时使用', () => {
@@ -95,7 +112,7 @@ describe('房间会话', () => {
 
   it('开局后收到手牌即发牌展示；刷新重连只收到手牌时不展示', () => {
     const hand = [{ id: 'c1', role: 'duke' as const }, { id: 'c2', role: 'captain' as const }];
-    const dealt = run([{ type: 'gameStarted', turnOrder: ['a'], gameNumber: 1 }, { type: 'privateState', hand }], inGame);
+    const dealt = run([...rematch, { type: 'privateState', hand }], ended);
     expect(dealt.showcase).toEqual({ kind: 'deal', cards: hand });
     expect(run([{ type: 'privateState', hand }], dealt).showcase).toEqual({ kind: 'deal', cards: hand });
     const rejoined = run([
@@ -108,12 +125,8 @@ describe('房间会话', () => {
 
   it('离线期间上一局结束、再来一局已开局：重连后不沿用上一局的日志；同一局内重连仍保留', () => {
     // a 看到上一局结束后断线；宽限期内房主再来一局并开局，a 错过 lobby 与 gameStarted
-    const ended = run([
-      { type: 'events', events: [{ type: 'influenceLost', playerId: 'b', role: 'duke' }, { type: 'eliminated', playerId: 'b' }, { type: 'gameOver', winnerId: 'a' }] },
-      { type: 'publicState', state: { ...table, phase: 'gameOver' }, remainingMs: null, deadlineAt: null, hostId: 'a' },
-    ], inGame);
     const rejoin = (gameNumber: number) => run([
-      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players, hostId: 'a', canStartTunnel: false, gameNumber },
+      { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: pair, hostId: 'a', canStartTunnel: false, gameNumber },
       { type: 'publicState', state: table, remainingMs: 1000, deadlineAt: 5000, hostId: 'a' },
       { type: 'privateState', hand: [{ id: 'c1', role: 'duke' }] },
     ], ended);

@@ -215,11 +215,6 @@ button.ghost:hover:not(:disabled) {
   color: var(--text);
 }
 
-button.active {
-  outline: 2px solid var(--gold);
-  outline-offset: 2px;
-}
-
 /* 角色动作按钮：颜色即语义（用 X 阻挡 / 翻开 X / 交换） */
 .role-btn {
   border-color: currentColor;
@@ -1778,10 +1773,6 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   color: var(--gold);
-}
-
-@keyframes fade-out {
-  to { opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

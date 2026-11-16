@@ -27,7 +27,7 @@ export default async function blockSwitchScenario(ui) {
     const current = pub.players.find((p) => p.id === pub.currentPlayerId).name;
     if (current === 'A') break;
     if (current === 'B') b.intent({ type: 'chooseAction', action: 'income' });
-    else { await ui.waitFor('.controls .action-grid, .controls button'); await ui.click('^收入|^Income', '.controls'); }
+    else { await ui.waitFor('.controls .actions button'); await ui.click('^收入|^Income', '.controls'); }
     await until(a, (s) => s.currentPlayerId !== pub.currentPlayerId, '换人');
   }
 
