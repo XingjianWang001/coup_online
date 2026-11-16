@@ -37,6 +37,13 @@ const WORTH: Record<Role, number> = { duke: 5, captain: 4, assassin: 3, contessa
 const THREAT = 1.5;
 // 冲着自己来的行动（或拦下自己行动的阻挡）有多疼：越疼越想质疑
 const HARM: Partial<Record<ActionType, number>> = { foreignAid: 0.5, steal: 1, assassinate: 1.5 };
+// 声称对自己没有切身代价时，质疑只做这么多比例：替别人出头的输赢都便宜了旁观的人
+const BYSTANDER = 0.5;
+// 好感（结盟）：每点好感让冲着他来的声称多一份质疑的代价 GRATITUDE（像是冲着自己来的，只是轻些），选目标时少 ALLY 分
+const GRATITUDE = 0.5;
+const ALLY = 2;
+// 好感是相互的：对方对自己的好感每变 1 点（自己替他出头、自己对他发起行动），自己对他的好感跟着变这么多
+const RECIPROCITY = 0.5;
 // 诈唬的意愿都要乘诈唬倾向。起一个新的诈唬：声称角色行动用 NEW_BLUFF，假装阻挡按被阻挡的行动用 FAKE_BLOCK；
 // 接着演声称过的角色用 REPEAT_BLUFF（乘完封顶为 1，即和手里真有一样）
 const NEW_BLUFF = 0.5;
@@ -48,8 +55,13 @@ const STORY_ROLES = 3;
 const RECKLESS_BLUFF = 0.9;
 // 金币够政变（COUP_COST）但还没到规则强制政变的数目（FORCED_COUP_COINS）时，政变的概率
 const COUP_EAGERNESS = 0.85;
-// 对方的声称自相矛盾时，质疑概率乘这么多：更想质疑，不是必然质疑
-const CONTRADICTION = 2.5;
+// 能偷、能暗杀的人都仍作数地声称过能挡它的角色、或有人仍作数地声称过公爵时外援，这个行动的权重乘这么多：他多半会挡，但可能是装的，偶尔还试
+const GUARDED = 0.2;
+// 手里有公爵、还没仍作数地声称过它时，有这么大的概率藏着不挡外援，留着以后收税或设套。挡过一次就一直挡。
+// 偷窃、暗杀冲着自己来，不挡太疼，照旧必挡
+const SLOWPLAY = 0.2;
+// 对方的声称自相矛盾时，质疑概率乘这么多：更想质疑，不是必然质疑。矛盾时诈唬的多半超过一半，质疑才划算，所以给得重
+const CONTRADICTION = 5;
 // 对方的声称被证明为真过，质疑概率最多降到这个比例：CONTRADICTION 乘它仍大于 1，眼前的矛盾盖得过旧信用
 const PROVEN_FLOOR = 0.6;
 // 两人对峙、自己只剩 1 点影响力、对手快要政变时会挣扎：暗杀和偷窃的权重最多乘到 1 + STRUGGLE；
@@ -74,17 +86,26 @@ interface Memory {
   story: Set<Role>; // 自己的故事：最近一次实际交换以来声称过的全部角色，作数不作数都算
   caught: Map<string, number>; // 被抓到诈唬的次数
   proven: Map<string, number>; // 声称被对质证明为真的次数
-  // 当众没挡的角色：外援、偷窃、暗杀照常生效了，有资格阻挡的人就像是没有能挡它的牌。换过牌（交换、对质证明后补牌）就不再算。
-  // 电脑有真牌必挡，对自己这是确定的；真人可能有牌不挡，对别人只是像
-  unblocked: Map<string, Set<Role>>;
+  // 看起来没有的角色，换过牌（交换、对质证明后补牌）就不再算。一种是当众没挡的：外援、偷窃、暗杀照常生效了，有资格阻挡的人
+  // 就像是没有能挡它的牌；有牌也可能不挡（电脑偶尔藏着公爵不挡外援，SLOWPLAY），所以只是像。记在自己身上无妨：只在手里没有时才看它。
+  // 另一种是自己丢掉的：失去哪张牌是自己选的，丢了它、留下另一张，剩下的多半不是它。
+  // ponytail: 手里两张同角色、丢一张的也算进来，只是更想质疑，不是必然质疑；超时代选的随机一张也当作自己选的
+  lacking: Map<string, Set<Role>>;
   attacker?: string; // 最近打过自己的玩家
+  // 好感：替自己出过头（质疑过冲着自己来的声称，成败都算）一次加 1，对自己发起行动（以自己为目标）一次减 1，最低到 0。
+  // 反过来自己替他出头、对他发起行动，各按 RECIPROCITY 加减
+  favor: Map<string, number>;
 }
 
 // ponytail: 每次决定都把本局的事件（Room.gameEvents，一局内只增不减）从头数一遍。一局几百条事件、一次决定几微秒；
 // 事件多到要紧时改成随事件增量更新
 function recall(events: readonly GameEvent[], me: string, ids: readonly string[]): Memory {
-  const memory: Memory = { standing: new Map(), story: new Set(), caught: new Map(), proven: new Map(), unblocked: new Map() };
+  const memory: Memory = { standing: new Map(), story: new Set(), caught: new Map(), proven: new Map(), lacking: new Map(), favor: new Map() };
+  const befriend = (id: string, by: number) => memory.favor.set(id, Math.max(0, (memory.favor.get(id) ?? 0) + by));
   let underChallenge: Role | undefined; // 最近一次声称的角色：对质检验的就是它
+  // 最近一次声称冲着谁来：行动的目标，阻挡则是被拦下的行动者
+  let actor: string | undefined;
+  let aimedAt: string | undefined;
   const note = (id: string, role: Role) => {
     underChallenge = role;
     if (id === me) memory.story.add(role);
@@ -93,26 +114,35 @@ function recall(events: readonly GameEvent[], me: string, ids: readonly string[]
   // 本回合的行动：它生效了而没人阻挡，有资格阻挡的人都算没挡。事件里没有「放弃阻挡」，只能从效果认出来
   let turn: { action: ActionType; actorId: string; targetId?: string } | undefined;
   let owing: string | undefined; // 对质输了、接下来那次失去影响力是在付这笔账的人：那次不是暗杀生效
+  const lack = (id: string, role: Role) => {
+    memory.lacking.set(id, (memory.lacking.get(id) ?? new Set()).add(role));
+    memory.standing.get(id)?.delete(role); // 声称过也不再作数
+  };
   const wave = () => {
     const { action, actorId, targetId } = turn!;
     turn = undefined;
     for (const id of action === 'foreignAid' ? ids.filter((id) => id !== actorId) : [targetId!]) {
-      const roles = memory.unblocked.get(id) ?? new Set();
-      for (const r of BLOCK_ROLES[action]) {
-        roles.add(r);
-        memory.standing.get(id)?.delete(r); // 声称过也不再作数
-      }
-      memory.unblocked.set(id, roles);
+      for (const r of BLOCK_ROLES[action]) lack(id, r);
     }
   };
   for (const e of events) {
     if (e.type === 'actionChosen') {
       turn = BLOCK_ROLES[e.action].length ? { action: e.action, actorId: e.actorId, targetId: e.targetId } : undefined;
       if (e.claimedRole) note(e.actorId, e.claimedRole);
-      if (e.targetId === me) memory.attacker = e.actorId;
+      if (e.targetId === me) {
+        memory.attacker = e.actorId;
+        befriend(e.actorId, -1);
+      }
+      if (e.actorId === me && e.targetId) befriend(e.targetId, -RECIPROCITY);
+      actor = e.actorId;
+      aimedAt = e.targetId;
     } else if (e.type === 'blocked') {
       turn = undefined;
       note(e.blockerId, e.role);
+      aimedAt = actor;
+    } else if (e.type === 'challenged') {
+      if (aimedAt === me && e.challengerId !== me) befriend(e.challengerId, 1);
+      if (e.challengerId === me && aimedAt && aimedAt !== me) befriend(aimedAt, RECIPROCITY);
     } else if (e.type === 'coinsChanged') {
       // 外援、偷窃的行动者金币变了就是生效了（偷窃先记目标、再记行动者）。暗杀的金币在宣布时付、被抓时退，不算
       if (turn && turn.action !== 'assassinate' && e.playerId === turn.actorId) wave();
@@ -121,15 +151,15 @@ function recall(events: readonly GameEvent[], me: string, ids: readonly string[]
       if (underChallenge) memory.standing.get(e.claimantId)?.delete(underChallenge);
       const count = e.truth ? memory.proven : memory.caught;
       count.set(e.claimantId, (count.get(e.claimantId) ?? 0) + 1);
-      if (e.truth) memory.unblocked.delete(e.claimantId); // 补了一张新牌
+      if (e.truth) memory.lacking.delete(e.claimantId); // 补了一张新牌
       owing = e.loserId;
     } else if (e.type === 'influenceLost') {
-      memory.standing.get(e.playerId)?.delete(e.role);
+      lack(e.playerId, e.role);
       if (owing === e.playerId) owing = undefined;
       else if (turn?.action === 'assassinate' && e.playerId === turn.targetId) wave();
     } else if (e.type === 'exchangeDrew') {
       memory.standing.delete(e.playerId); // 交换之后手里是什么牌没人知道
-      memory.unblocked.delete(e.playerId);
+      memory.lacking.delete(e.playerId);
       if (e.playerId === me) memory.story.clear(); // 自己换了牌可以改口：故事从头讲。只宣布、被抓到没换成的没有这个事件
     }
   }
@@ -153,7 +183,7 @@ export function decideComputerIntent(
   const rivals = state.players.filter((p) => p.alive && p.id !== me);
   const memory = recall(events, me, state.players.map((p) => p.id));
   const stillClaims = (id: string, role: Role) => memory.standing.get(id)?.has(role) ?? false;
-  const letThrough = (id: string, role: Role) => memory.unblocked.get(id)?.has(role) ?? false;
+  const lacks = (id: string, role: Role) => memory.lacking.get(id)?.has(role) ?? false;
   const storyCap = temperament.bluff >= RECKLESS_BLUFF ? STORY_ROLES + 1 : STORY_ROLES;
   const lastCard = self.handCount === 1;
   // striker 政变 victim 结束这局的把握（0 到 1）：只剩两人对峙、victim 只剩 1 点影响力时才算。striker 金币够政变，
@@ -187,22 +217,22 @@ export function decideComputerIntent(
     ((assassinationThreat && BLOCK_ROLES.assassinate.includes(role)) || (stealThreat && BLOCK_ROLES.steal.includes(role)) ? THREAT : 0);
   const leastUseful = () => hand.reduce((a, b) => (worth(b.role) < worth(a.role) ? b : a));
 
-  // 领先者优先（影响力多、金币多），最近打过自己的加分，再带一点随机。wary：对方声称过这些角色就多半会阻挡
-  const pickTarget = (candidates: PublicPlayerView[], wary: Role[] = []) => {
+  // 领先者优先（影响力多、金币多），最近打过自己的加分，有好感的减分，再带一点随机
+  const pickTarget = (candidates: PublicPlayerView[]) => {
     const score = (p: PublicPlayerView) =>
       p.handCount * 3 +
       p.coins / 2 +
       (p.id === memory.attacker ? 1 + 2 * temperament.aggression : 0) -
-      (wary.some((r) => stillClaims(p.id, r)) ? 3 : 0) +
+      ALLY * (memory.favor.get(p.id) ?? 0) +
       random() * 3;
     return candidates.map((p) => [p.id, score(p)] as const).reduce((a, b) => (b[1] > a[1] ? b : a))[0];
   };
 
   // 手里没有某角色时声称它的意愿（0 到 1），全看诈唬倾向。声称过、还作数的角色接着演，意愿高得多；
   // 其余的要起一个新的诈唬（意愿再乘 fresh），而且只在故事里的加手里有的还不满 storyCap 个角色时才起
-  // 当众没挡过的角色不装：谁都看得出是假的
+  // 看起来没有的角色（当众没挡过、自己丢掉的）不装：谁都看得出是假的
   const bluffWillingness = (role: Role, fresh: number) => {
-    if (letThrough(me, role)) return 0;
+    if (lacks(me, role)) return 0;
     if (stillClaims(me, role)) return Math.min(1, REPEAT_BLUFF * temperament.bluff) * calm;
     return new Set([...memory.story, ...held]).size < storyCap ? fresh * temperament.bluff * caution * calm : 0;
   };
@@ -224,19 +254,26 @@ export function decideComputerIntent(
     // 挨政变出局的风险越大越想先下手。暗杀去掉他一点影响力；偷窃只在偷完他就不够政变时才拦得住
     const struggle = 1 + STRUGGLE * coupRisk;
     const stealStalls = foe.coins < COUP_COST + STEAL_AMOUNT;
+    // 仍作数地声称过能挡它的角色的人多半会挡：有别人可打就不打他，只剩这样的人可打时少做（GUARDED）
+    const aim = (action: ActionType, candidates: PublicPlayerView[]) => {
+      const open = candidates.filter((p) => !BLOCK_ROLES[action].some((r) => stillClaims(p.id, r)));
+      return open.length ? { targets: open, weight: 1 } : { targets: candidates, weight: GUARDED };
+    };
+    const stealAim = aim('steal', victims);
+    const assassinateAim = aim('assassinate', rivals);
     const action = pickAction(
       [
         ['income', 1],
-        ['foreignAid', dukeAbout ? 1 : 3],
+        ['foreignAid', 3 * (dukeAbout ? GUARDED : 1)],
         ['tax', 5 * claimWeight('duke')],
-        ['steal', victims.length ? (2 + 2 * temperament.aggression) * claimWeight('captain') * (stealStalls ? struggle : 1) : 0],
-        ['assassinate', self.coins >= ASSASSINATE_COST ? (3 + 4 * temperament.aggression) * claimWeight('assassin') * struggle : 0],
+        ['steal', victims.length ? (2 + 2 * temperament.aggression) * claimWeight('captain') * (stealStalls ? struggle : 1) * stealAim.weight : 0],
+        ['assassinate', self.coins >= ASSASSINATE_COST ? (3 + 4 * temperament.aggression) * claimWeight('assassin') * struggle * assassinateAim.weight : 0],
         ['exchange', 1.5 * claimWeight('ambassador')],
       ],
       random,
     );
-    if (action === 'steal') return { type: 'chooseAction', action, targetId: pickTarget(victims, ['captain', 'ambassador']) };
-    if (action === 'assassinate') return { type: 'chooseAction', action, targetId: pickTarget(rivals, ['contessa']) };
+    if (action === 'steal') return { type: 'chooseAction', action, targetId: pickTarget(stealAim.targets) };
+    if (action === 'assassinate') return { type: 'chooseAction', action, targetId: pickTarget(assassinateAim.targets) };
     return { type: 'chooseAction', action };
   };
 
@@ -244,17 +281,18 @@ export function decideComputerIntent(
   const challengeChance = (claimantId: string, role: Role, onAction: boolean) => {
     if (allSeen(role)) return 1;
     const { action } = pending!;
-    // 自相矛盾：对方仍作数的声称角色（含眼前这个）比暗牌多，或声称的是换牌以来当众没挡过的角色，没有换牌能解释。
+    // 自相矛盾：对方仍作数的声称角色（含眼前这个）比暗牌多，或声称的是换牌以来看起来没有的角色（当众没挡过、自己丢掉的），没有换牌能解释。
     // 同一角色声称几次只算一个，声称一致也不算证明
     const claimant = state.players.find((p) => p.id === claimantId)!;
-    const contradicts = (memory.standing.get(claimantId)?.size ?? 0) > claimant.handCount || letThrough(claimantId, role);
+    const contradicts = (memory.standing.get(claimantId)?.size ?? 0) > claimant.handCount || lacks(claimantId, role);
     // 被证明为真的信用：每次把质疑概率打七五折，最低到 PROVEN_FLOOR。证明用的那张牌已洗回牌堆，说明不了对方现在拿着什么
     const credit = Math.max(PROVEN_FLOOR, 0.75 ** (memory.proven.get(claimantId) ?? 0));
     // 多疑程度定基调；看得见的同角色牌越多、对方本局被抓过、声称自相矛盾越可疑，被证明过略可信。
-    // 基调定得低，给证据的加成留出余量：没有依据时很少质疑，加成叠上来之后质疑的总量才落在自对弈检查的区间里
+    // 基调定得低，给证据的加成留出余量：没有依据时很少质疑，加成叠上来之后质疑的总量才落在自对弈检查的区间里。
+    // 没有依据的质疑多半落空（声称里诈唬的不到三成），对质又是一换一、让旁观者得利：基调再高，从不质疑的人就占了便宜
     const p = Math.min(
       0.9,
-      (0.04 + 0.13 * temperament.suspicion) * (1 + seen(role)) * (1 + (memory.caught.get(claimantId) ?? 0)) * (contradicts ? CONTRADICTION : 1) * credit,
+      (0.02 + 0.065 * temperament.suspicion) * (1 + seen(role)) * (1 + (memory.caught.get(claimantId) ?? 0)) * (contradicts ? CONTRADICTION : 1) * credit,
     );
     if (dying && !held.has('contessa')) {
       // 放弃等于认输：不质疑就留到阻挡窗口假装女伯爵。多疑的倾向质疑，爱诈唬的倾向假装；女伯爵 3 张都亮了就没人会信，只能质疑
@@ -264,11 +302,16 @@ export function decideComputerIntent(
     }
     // 冲着自己来才有额外的代价；能照实阻挡、或对方偷不走什么，就不必为此冒险。
     // 有挨政变出局的风险时，声称的人就是要政变自己的那个，抓到他诈唬能先去掉他一点影响力：这份风险也算代价。
-    // 快要政变赢了时只为代价质疑，没有代价的那份少做
-    const aimedAtMe = onAction ? pending!.targetId === me : pending!.actorId === me;
+    // 冲着有好感的人来，每点好感也算一份代价（GRATITUDE）。
+    // 快要政变赢了时只为代价质疑，没有代价的那份少做；完全没有代价时那份也少做（BYSTANDER）
+    const aimedAt = onAction ? pending!.targetId : pending!.actorId;
+    const aimedAtMe = aimedAt === me;
     const canBlock = onAction && BLOCK_ROLES[action].some((r) => held.has(r));
-    const stake = (aimedAtMe && !canBlock && !nothingToSteal ? (HARM[action] ?? 0) : 0) + COUP_HARM * coupRisk;
-    return (perSeat(p) * calm + p * stake) * caution;
+    const stake =
+      (aimedAtMe && !canBlock && !nothingToSteal ? (HARM[action] ?? 0) : 0) +
+      GRATITUDE * (aimedAt ? (memory.favor.get(aimedAt) ?? 0) : 0) +
+      COUP_HARM * coupRisk;
+    return (perSeat(p) * calm * (stake ? 1 : BYSTANDER) + p * stake) * caution;
   };
 
   // 手里没有能阻挡的角色时，假装有 role 来阻挡的概率
@@ -294,9 +337,12 @@ export function decideComputerIntent(
       if (!eligible || state.passed.includes(me)) return null;
       const roles = BLOCK_ROLES[pending!.action];
       const real = roles.find((r) => held.has(r));
-      if (real) return { type: 'block', role: real };
-      // 3 张都亮在桌上的角色没人会信，不装；除非不阻挡就出局
-      const fakes = dying ? roles : roles.filter((r) => !allSeen(r));
+      if (real) {
+        const slowplay = pending!.action === 'foreignAid' && !stillClaims(me, real) && random() < SLOWPLAY;
+        return slowplay ? { type: 'passBlock' } : { type: 'block', role: real };
+      }
+      // 3 张都亮在桌上的角色没人会信，看起来没有的角色也不装（还有别的可装就装别的）；除非不阻挡就出局
+      const fakes = dying ? roles : roles.filter((r) => !allSeen(r) && !lacks(me, r));
       if (fakes.length === 0) return { type: 'passBlock' };
       const fake = fakes.find((r) => stillClaims(me, r)) ?? fakes[Math.floor(random() * fakes.length)];
       return random() < fakeBlockChance(fake) ? { type: 'block', role: fake } : { type: 'passBlock' };
