@@ -1,19 +1,23 @@
-import type { Role } from '@coup/shared';
-import type { ActionType } from '@coup/shared';
+import { ACTION_CLAIM, ASSASSINATE_COST, COUP_COST, needsTarget, ROLE_ORDER, STEAL_AMOUNT } from '@coup/shared';
+import type { ActionType, Role } from '@coup/shared';
 import type { Locale } from './localization.ts';
 
-export const ROLES: readonly Role[] = ['duke', 'assassin', 'captain', 'ambassador', 'contessa'];
+export const ROLES = ROLE_ORDER;
 
-// 行动按钮与行动预告共用。coins 只用于悬浮气泡里的图标说明；claim 是该行动要声称的角色（也决定预告里行动名的颜色）
-export const ACTIONS: readonly { type: ActionType; needsTarget: boolean; coins?: string; claim?: Role }[] = [
-  { type: 'income', needsTarget: false, coins: '+1' },
-  { type: 'foreignAid', needsTarget: false, coins: '+2' },
-  { type: 'coup', needsTarget: true, coins: '−7' },
-  { type: 'tax', needsTarget: false, coins: '+3', claim: 'duke' },
-  { type: 'assassinate', needsTarget: true, coins: '−3', claim: 'assassin' },
-  { type: 'steal', needsTarget: true, coins: '+2', claim: 'captain' },
-  { type: 'exchange', needsTarget: false, claim: 'ambassador' },
-];
+// 悬浮气泡里的金币图标说明；收入、外援、征税的金额引擎没有导出常量
+const ACTION_COINS: Partial<Record<ActionType, string>> = {
+  income: '+1',
+  foreignAid: '+2',
+  coup: `−${COUP_COST}`,
+  tax: '+3',
+  assassinate: `−${ASSASSINATE_COST}`,
+  steal: `+${STEAL_AMOUNT}`,
+};
+
+// 行动按钮与行动预告共用，按引擎 ACTION_CLAIM 的顺序排列；claim 是该行动要声称的角色（也决定预告里行动名的颜色）
+export const ACTIONS: readonly { type: ActionType; needsTarget: boolean; coins?: string; claim?: Role }[] = (
+  Object.keys(ACTION_CLAIM) as ActionType[]
+).map((type) => ({ type, needsTarget: needsTarget(type), coins: ACTION_COINS[type], claim: ACTION_CLAIM[type] ?? undefined }));
 
 const ROLE_NAMES: Record<Locale, Record<Role, string>> = {
   'zh-CN': { duke: '公爵', assassin: '刺客', captain: '队长', ambassador: '大使', contessa: '女伯爵' },

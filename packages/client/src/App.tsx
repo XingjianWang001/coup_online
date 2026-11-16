@@ -12,7 +12,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { MAX_PLAYERS, parseServerError, PHRASES } from '@coup/shared';
+import { ACTION_CLAIM, ASSASSINATE_COST, BLOCK_ROLES, COUP_COST, FORCED_COUP_COINS, MAX_PLAYERS, parseServerError, PHRASES } from '@coup/shared';
 import type { ActionType, Card, LobbyPlayer, PublicState, Reaction, Role, ServerError } from '@coup/shared';
 import {
   clearIdentity,
@@ -1114,7 +1114,7 @@ function DealShowcase({ showcase, locale, clock, onClose }: {
   );
 }
 
-// ---------- 对质舞台与私下选牌（动效方案见 prototype/showdown-motion 分支的 A） ----------
+// ---------- 对质舞台与私下选牌（动效：聚光、静止的牌带发热边框、快速翻牌、盖章；原型分支未归档） ----------
 const prefersReducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const animate = (el: Element, frames: Keyframe[], options: KeyframeAnimationOptions) =>
@@ -1754,16 +1754,11 @@ function GameBoard(props: {
   const canChallenge = state.phase === 'awaitingChallenge' && !!myView?.alive && !meIsClaimant && !passed;
 
   let canBlock = false;
-  let canBlockRoles: Role[] = [];
+  let canBlockRoles: readonly Role[] = [];
   if (state.phase === 'awaitingBlock' && pending) {
-    if (pending.action === 'foreignAid') {
-      canBlock = pending.actorId !== me && !!myView?.alive && !passed;
-      canBlockRoles = ['duke'];
-    } else {
-      canBlock = pending.targetId === me && !!myView?.alive && !passed;
-      canBlockRoles =
-        pending.action === 'assassinate' ? ['contessa'] : pending.action === 'steal' ? ['captain', 'ambassador'] : [];
-    }
+    // 外援人人可挡；其余可阻挡的行动只有目标能挡
+    canBlock = (pending.action === 'foreignAid' ? pending.actorId !== me : pending.targetId === me) && !!myView?.alive && !passed;
+    canBlockRoles = BLOCK_ROLES[pending.action];
   }
 
   const amLosing = state.phase === 'choosingLoss' && state.lossPlayerId === me;
@@ -2184,17 +2179,17 @@ function Actions(props: {
   locale: Locale;
 }) {
   const sel = ACTIONS.find((a) => a.type === props.selectedAction);
-  const mustCoup = props.coins >= 10;
+  const mustCoup = props.coins >= FORCED_COUP_COINS;
   const label = (action: ActionType): string => {
     const name = actionName(props.locale, action);
+    const claim = ACTION_CLAIM[action];
     switch (action) {
       case 'income': return `${name} +1`;
       case 'foreignAid': return `${name} +2`;
-      case 'coup': return `${name} (${localizeCoinCount(props.locale, 7)})`;
-      case 'tax': return `${name} +3 (${roleName(props.locale, 'duke')})`;
-      case 'assassinate': return `${name} (${localizeCoinCount(props.locale, 3)})`;
-      case 'steal': return `${name} (${roleName(props.locale, 'captain')})`;
-      case 'exchange': return `${name} (${roleName(props.locale, 'ambassador')})`;
+      case 'coup': return `${name} (${localizeCoinCount(props.locale, COUP_COST)})`;
+      case 'assassinate': return `${name} (${localizeCoinCount(props.locale, ASSASSINATE_COST)})`;
+      case 'tax': return `${name} +3 (${roleName(props.locale, claim!)})`;
+      default: return `${name} (${roleName(props.locale, claim!)})`;
     }
   };
   // 选目标时替换整个行动网格，只留目标与取消可点
@@ -2221,9 +2216,9 @@ function Actions(props: {
       {ACTIONS.map((a) => {
         const disabled =
           a.type === 'coup'
-            ? props.coins < 7
+            ? props.coins < COUP_COST
             : a.type === 'assassinate'
-              ? props.coins < 3 || mustCoup
+              ? props.coins < ASSASSINATE_COST || mustCoup
               : mustCoup;
         return (
           <span key={a.type} className="action-tip-anchor">
