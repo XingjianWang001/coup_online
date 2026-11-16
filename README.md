@@ -31,7 +31,7 @@ Coup Online 是可在浏览器中游玩的线上版政变（Coup）桌游。服�
 
 ### 快速开始
 
-需要 Node.js 20+、pnpm 9，以及可选的 `cloudflared`（仅公网隧道需要）。
+需要 Node.js 22+、pnpm 9，以及可选的 `cloudflared`（仅公网隧道需要）。
 
 ```bash
 pnpm install
@@ -100,7 +100,7 @@ See [`CONTEXT.md`](CONTEXT.md) and [`docs/adr/`](docs/adr/) for the detailed des
 
 ### Quick start
 
-You need Node.js 20+, pnpm 9, and optionally `cloudflared` for a public tunnel.
+You need Node.js 22+, pnpm 9, and optionally `cloudflared` for a public tunnel.
 
 ```bash
 pnpm install
