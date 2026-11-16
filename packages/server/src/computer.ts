@@ -55,8 +55,11 @@ const STORY_ROLES = 3;
 const RECKLESS_BLUFF = 0.9;
 // 金币够政变（COUP_COST）但还没到规则强制政变的数目（FORCED_COUP_COINS）时，政变的概率
 const COUP_EAGERNESS = 0.85;
-// 能偷、能暗杀的人都仍作数地声称过能挡它的角色时，这个行动的权重乘这么多：他多半会挡，但可能是装的，偶尔还试
+// 能偷、能暗杀的人都仍作数地声称过能挡它的角色、或有人仍作数地声称过公爵时外援，这个行动的权重乘这么多：他多半会挡，但可能是装的，偶尔还试
 const GUARDED = 0.2;
+// 手里有公爵、还没仍作数地声称过它时，有这么大的概率藏着不挡外援，留着以后收税或设套。挡过一次就一直挡。
+// 偷窃、暗杀冲着自己来，不挡太疼，照旧必挡
+const SLOWPLAY = 0.2;
 // 对方的声称自相矛盾时，质疑概率乘这么多：更想质疑，不是必然质疑。矛盾时诈唬的多半超过一半，质疑才划算，所以给得重
 const CONTRADICTION = 5;
 // 对方的声称被证明为真过，质疑概率最多降到这个比例：CONTRADICTION 乘它仍大于 1，眼前的矛盾盖得过旧信用
@@ -84,7 +87,7 @@ interface Memory {
   caught: Map<string, number>; // 被抓到诈唬的次数
   proven: Map<string, number>; // 声称被对质证明为真的次数
   // 看起来没有的角色，换过牌（交换、对质证明后补牌）就不再算。一种是当众没挡的：外援、偷窃、暗杀照常生效了，有资格阻挡的人
-  // 就像是没有能挡它的牌；电脑有真牌必挡，对自己这是确定的，真人可能有牌不挡，对别人只是像。
+  // 就像是没有能挡它的牌；有牌也可能不挡（电脑偶尔藏着公爵不挡外援，SLOWPLAY），所以只是像。记在自己身上无妨：只在手里没有时才看它。
   // 另一种是自己丢掉的：失去哪张牌是自己选的，丢了它、留下另一张，剩下的多半不是它。
   // ponytail: 手里两张同角色、丢一张的也算进来，只是更想质疑，不是必然质疑；超时代选的随机一张也当作自己选的
   lacking: Map<string, Set<Role>>;
@@ -261,7 +264,7 @@ export function decideComputerIntent(
     const action = pickAction(
       [
         ['income', 1],
-        ['foreignAid', dukeAbout ? 1 : 3],
+        ['foreignAid', 3 * (dukeAbout ? GUARDED : 1)],
         ['tax', 5 * claimWeight('duke')],
         ['steal', victims.length ? (2 + 2 * temperament.aggression) * claimWeight('captain') * (stealStalls ? struggle : 1) * stealAim.weight : 0],
         ['assassinate', self.coins >= ASSASSINATE_COST ? (3 + 4 * temperament.aggression) * claimWeight('assassin') * struggle * assassinateAim.weight : 0],
@@ -334,7 +337,10 @@ export function decideComputerIntent(
       if (!eligible || state.passed.includes(me)) return null;
       const roles = BLOCK_ROLES[pending!.action];
       const real = roles.find((r) => held.has(r));
-      if (real) return { type: 'block', role: real };
+      if (real) {
+        const slowplay = pending!.action === 'foreignAid' && !stillClaims(me, real) && random() < SLOWPLAY;
+        return slowplay ? { type: 'passBlock' } : { type: 'block', role: real };
+      }
       // 3 张都亮在桌上的角色没人会信，看起来没有的角色也不装（还有别的可装就装别的）；除非不阻挡就出局
       const fakes = dying ? roles : roles.filter((r) => !allSeen(r) && !lacks(me, r));
       if (fakes.length === 0) return { type: 'passBlock' };

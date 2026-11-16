@@ -727,17 +727,42 @@ describe('decideComputerIntent', () => {
     expect(duel('assassinate', true)).toBeLessThan(duel('assassinate', false) * 0.4);
   });
 
-  it('外援：有公爵的阻挡，没有的放弃', () => {
+  it('外援：有公爵的大多阻挡、偶尔藏着不挡，没有的放弃', () => {
     const g = game({ b: ['duke', 'captain'], c: ['contessa', 'captain'] });
     chooseAction(g, 'a', 'foreignAid');
     expect(decide(g, 'a')).toBeNull();
     const c = decide(g, 'c');
     expect(c).toEqual({ type: 'passBlock' });
     apply(g, 'c', c!);
-    const b = decide(g, 'b');
-    expect(b).toEqual({ type: 'block', role: 'duke' });
-    apply(g, 'b', b!);
+    const { block: blocks, passBlock: passes } = tally(1000, byType, g, 'b');
+    expect(blocks).toBeGreaterThan(700);
+    expect(passes).toBeGreaterThan(100);
+    apply(g, 'b', { type: 'block', role: 'duke' });
     expect(g.phase).toBe('awaitingChallenge');
+  });
+
+  it('外援：仍作数地声称过公爵的，手里有公爵就必挡', () => {
+    const t = table({ b: ['duke', 'captain'] });
+    t.income('a');
+    t.unopposed('b', 'tax');
+    t.income('c');
+    t.did(chooseAction(t.g, 'a', 'foreignAid'));
+    expect(tally(1000, byType, t.g, 'b', { events: t.events })).toEqual({ block: 1000 });
+  });
+
+  it('有人仍作数地声称过公爵时少做外援：比收入还少；没人声称时比收入多', () => {
+    const hands = { a: ['contessa', 'ambassador'] as Role[] };
+    const quiet = table(hands);
+    quiet.income('a', 'b', 'c');
+    const duke = table(hands);
+    duke.income('a');
+    duke.unopposed('b', 'tax');
+    duke.income('c');
+    const calm = tally(1000, byAction, quiet.g, 'a', { events: quiet.events, temperament: CALM });
+    const wary = tally(1000, byAction, duke.g, 'a', { events: duke.events, temperament: CALM });
+    expect(calm.foreignAid).toBeGreaterThan(calm.income);
+    expect(wary.foreignAid).toBeLessThan(wary.income * 0.8);
+    expect(wary.foreignAid).toBeGreaterThan(0);
   });
 
   it('偷窃：只有目标表态，用手里的大使阻挡', () => {
