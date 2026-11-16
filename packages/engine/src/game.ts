@@ -23,9 +23,10 @@ const DECK: Role[] = ROLE_ORDER.flatMap((r) => Array<Role>(ROLE_COPIES).fill(r))
 const START_COINS = 2;
 const START_CARDS = 2;
 export const COUP_COST = 7;
+export const FORCED_COUP_COINS = 10; // 金币到这个数，该回合只能政变
 export const ASSASSINATE_COST = 3;
 export const MAX_PLAYERS = 6;
-const STEAL_AMOUNT = 2;
+export const STEAL_AMOUNT = 2;
 const EXCHANGE_DRAW = 2;
 
 // 行动声称的角色（null = 不声称角色）
@@ -272,8 +273,8 @@ export function chooseAction(
 
   if (!Object.hasOwn(ACTION_CLAIM, action)) throw new GameRuleError(`unknown action ${String(action)}`);
 
-  if (actor.coins >= 10 && action !== 'coup') {
-    throw new GameRuleError('持有 10 枚以上金币必须发动政变');
+  if (actor.coins >= FORCED_COUP_COINS && action !== 'coup') {
+    throw new GameRuleError(`持有 ${FORCED_COUP_COINS} 枚以上金币必须发动政变`);
   }
 
   if (needsTarget(action) && !targetId) throw new GameRuleError(`${action} 需要目标`);

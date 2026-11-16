@@ -877,7 +877,7 @@ describe('Room 电脑出手', () => {
     const start = () => {
       room.startGame(alice.id, 'sock1');
       coins(alice.id, 5);
-      coins(computerId, 9);
+      coins(computerId, 12); // 被偷走 2 枚仍有 10 枚：轮到它必政变
     };
 
     start();
