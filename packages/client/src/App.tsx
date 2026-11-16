@@ -854,7 +854,8 @@ interface RoomViewProps {
 
 function RoomView(props: RoomViewProps) {
   const { publicState, me } = props;
-  const isLocal = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+  // 与服务器 canStartTunnel 认的本机页面一致（server/src/tunnel.ts）
+  const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
   if (!publicState) {
     return (
       <div className="room">
