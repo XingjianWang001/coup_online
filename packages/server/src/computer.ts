@@ -74,34 +74,62 @@ interface Memory {
   story: Set<Role>; // 自己的故事：最近一次实际交换以来声称过的全部角色，作数不作数都算
   caught: Map<string, number>; // 被抓到诈唬的次数
   proven: Map<string, number>; // 声称被对质证明为真的次数
+  // 当众没挡的角色：外援、偷窃、暗杀照常生效了，有资格阻挡的人就像是没有能挡它的牌。换过牌（交换、对质证明后补牌）就不再算。
+  // 电脑有真牌必挡，对自己这是确定的；真人可能有牌不挡，对别人只是像
+  unblocked: Map<string, Set<Role>>;
   attacker?: string; // 最近打过自己的玩家
 }
 
 // ponytail: 每次决定都把本局的事件（Room.gameEvents，一局内只增不减）从头数一遍。一局几百条事件、一次决定几微秒；
 // 事件多到要紧时改成随事件增量更新
-function recall(events: readonly GameEvent[], me: string): Memory {
-  const memory: Memory = { standing: new Map(), story: new Set(), caught: new Map(), proven: new Map() };
+function recall(events: readonly GameEvent[], me: string, ids: readonly string[]): Memory {
+  const memory: Memory = { standing: new Map(), story: new Set(), caught: new Map(), proven: new Map(), unblocked: new Map() };
   let underChallenge: Role | undefined; // 最近一次声称的角色：对质检验的就是它
   const note = (id: string, role: Role) => {
     underChallenge = role;
     if (id === me) memory.story.add(role);
     memory.standing.set(id, (memory.standing.get(id) ?? new Set()).add(role));
   };
+  // 本回合的行动：它生效了而没人阻挡，有资格阻挡的人都算没挡。事件里没有「放弃阻挡」，只能从效果认出来
+  let turn: { action: ActionType; actorId: string; targetId?: string } | undefined;
+  let owing: string | undefined; // 对质输了、接下来那次失去影响力是在付这笔账的人：那次不是暗杀生效
+  const wave = () => {
+    const { action, actorId, targetId } = turn!;
+    turn = undefined;
+    for (const id of action === 'foreignAid' ? ids.filter((id) => id !== actorId) : [targetId!]) {
+      const roles = memory.unblocked.get(id) ?? new Set();
+      for (const r of BLOCK_ROLES[action]) {
+        roles.add(r);
+        memory.standing.get(id)?.delete(r); // 声称过也不再作数
+      }
+      memory.unblocked.set(id, roles);
+    }
+  };
   for (const e of events) {
     if (e.type === 'actionChosen') {
+      turn = BLOCK_ROLES[e.action].length ? { action: e.action, actorId: e.actorId, targetId: e.targetId } : undefined;
       if (e.claimedRole) note(e.actorId, e.claimedRole);
       if (e.targetId === me) memory.attacker = e.actorId;
     } else if (e.type === 'blocked') {
+      turn = undefined;
       note(e.blockerId, e.role);
+    } else if (e.type === 'coinsChanged') {
+      // 外援、偷窃的行动者金币变了就是生效了（偷窃先记目标、再记行动者）。暗杀的金币在宣布时付、被抓时退，不算
+      if (turn && turn.action !== 'assassinate' && e.playerId === turn.actorId) wave();
     } else if (e.type === 'challengeResolved') {
       // 证明为真则那张牌已换走，被抓则本来就没有：这个声称都不再作数
       if (underChallenge) memory.standing.get(e.claimantId)?.delete(underChallenge);
       const count = e.truth ? memory.proven : memory.caught;
       count.set(e.claimantId, (count.get(e.claimantId) ?? 0) + 1);
+      if (e.truth) memory.unblocked.delete(e.claimantId); // 补了一张新牌
+      owing = e.loserId;
     } else if (e.type === 'influenceLost') {
       memory.standing.get(e.playerId)?.delete(e.role);
+      if (owing === e.playerId) owing = undefined;
+      else if (turn?.action === 'assassinate' && e.playerId === turn.targetId) wave();
     } else if (e.type === 'exchangeDrew') {
       memory.standing.delete(e.playerId); // 交换之后手里是什么牌没人知道
+      memory.unblocked.delete(e.playerId);
       if (e.playerId === me) memory.story.clear(); // 自己换了牌可以改口：故事从头讲。只宣布、被抓到没换成的没有这个事件
     }
   }
@@ -123,8 +151,9 @@ export function decideComputerIntent(
   const { hand } = own;
   const held = new Set(hand.map((c) => c.role));
   const rivals = state.players.filter((p) => p.alive && p.id !== me);
-  const memory = recall(events, me);
+  const memory = recall(events, me, state.players.map((p) => p.id));
   const stillClaims = (id: string, role: Role) => memory.standing.get(id)?.has(role) ?? false;
+  const letThrough = (id: string, role: Role) => memory.unblocked.get(id)?.has(role) ?? false;
   const storyCap = temperament.bluff >= RECKLESS_BLUFF ? STORY_ROLES + 1 : STORY_ROLES;
   const lastCard = self.handCount === 1;
   // striker 政变 victim 结束这局的把握（0 到 1）：只剩两人对峙、victim 只剩 1 点影响力时才算。striker 金币够政变，
@@ -171,7 +200,9 @@ export function decideComputerIntent(
 
   // 手里没有某角色时声称它的意愿（0 到 1），全看诈唬倾向。声称过、还作数的角色接着演，意愿高得多；
   // 其余的要起一个新的诈唬（意愿再乘 fresh），而且只在故事里的加手里有的还不满 storyCap 个角色时才起
+  // 当众没挡过的角色不装：谁都看得出是假的
   const bluffWillingness = (role: Role, fresh: number) => {
+    if (letThrough(me, role)) return 0;
     if (stillClaims(me, role)) return Math.min(1, REPEAT_BLUFF * temperament.bluff) * calm;
     return new Set([...memory.story, ...held]).size < storyCap ? fresh * temperament.bluff * caution * calm : 0;
   };
@@ -213,9 +244,10 @@ export function decideComputerIntent(
   const challengeChance = (claimantId: string, role: Role, onAction: boolean) => {
     if (allSeen(role)) return 1;
     const { action } = pending!;
-    // 自相矛盾：对方仍作数的声称角色（含眼前这个）比暗牌多，没有换牌能解释。同一角色声称几次只算一个，声称一致也不算证明
+    // 自相矛盾：对方仍作数的声称角色（含眼前这个）比暗牌多，或声称的是换牌以来当众没挡过的角色，没有换牌能解释。
+    // 同一角色声称几次只算一个，声称一致也不算证明
     const claimant = state.players.find((p) => p.id === claimantId)!;
-    const contradicts = (memory.standing.get(claimantId)?.size ?? 0) > claimant.handCount;
+    const contradicts = (memory.standing.get(claimantId)?.size ?? 0) > claimant.handCount || letThrough(claimantId, role);
     // 被证明为真的信用：每次把质疑概率打七五折，最低到 PROVEN_FLOOR。证明用的那张牌已洗回牌堆，说明不了对方现在拿着什么
     const credit = Math.max(PROVEN_FLOOR, 0.75 ** (memory.proven.get(claimantId) ?? 0));
     // 多疑程度定基调；看得见的同角色牌越多、对方本局被抓过、声称自相矛盾越可疑，被证明过略可信。

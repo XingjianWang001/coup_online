@@ -379,6 +379,65 @@ describe('decideComputerIntent', () => {
     expect(tally(300, byType, g, 'b', { events, temperament: BOLD })).toEqual({ passBlock: 300 });
   });
 
+  it('当众没挡过偷窃的不再装队长、大使：不诈称偷窃和交换，也不假装阻挡；换过牌就又会装', () => {
+    const { g, events, did, unopposed, income } = table({ a: ['captain', 'duke'], b: ['duke', 'contessa'] });
+    unopposed('a', 'steal', 'b');
+    const actions = () => Object.keys(tally(1000, byAction, g, 'b', { events, temperament: BOLD }));
+    expect(actions()).not.toContain('steal');
+    expect(actions()).not.toContain('exchange');
+    income('b', 'c');
+    did(chooseAction(g, 'a', 'steal', 'b'));
+    did(passChallenge(g, 'b'));
+    did(passChallenge(g, 'c'));
+    expect(tally(300, byType, g, 'b', { events, temperament: BOLD })).toEqual({ passBlock: 300 });
+    did(passBlock(g, 'b'));
+    unopposed('b', 'exchange');
+    did(resolveExchange(g, 'b', seat(g, 'b').hand.slice(0, 2).map((card) => card.id)));
+    income('c', 'a');
+    expect(actions()).toContain('steal');
+  });
+
+  it('质疑看对方当众没挡过的角色：没挡外援再收税、没挡偷窃再偷，都更想质疑；对质输了付的影响力不算没挡暗杀', () => {
+    // a 先走一手，b 收入，c 再声称：数 b 质疑 c 的次数
+    const challengesOfC = (aFirst: (t: Table) => void, cAction: ActionType) => {
+      const t = table({ a: ['assassin', 'assassin'], b: ['contessa', 'contessa'], c: ['ambassador', 'ambassador'] });
+      aFirst(t);
+      t.income('b');
+      t.did(chooseAction(t.g, 'c', cAction, cAction === 'steal' ? 'a' : undefined));
+      return tally(4000, byType, t.g, 'b', { events: t.events }).challenge;
+    };
+    const quiet = (t: Table) => t.income('a');
+    const foreignAid = ({ g, did }: Table) => {
+      did(chooseAction(g, 'a', 'foreignAid'));
+      did(passBlock(g, 'b'));
+      did(passBlock(g, 'c'));
+    };
+    expect(challengesOfC(foreignAid, 'tax')).toBeGreaterThan(challengesOfC(quiet, 'tax') * 1.5);
+    expect(challengesOfC((t) => t.unopposed('a', 'steal', 'c'), 'steal')).toBeGreaterThan(challengesOfC(quiet, 'steal') * 1.5);
+
+    // c 先失去 1 点影响力（被政变，或质疑 a 的暗杀输了），再挡 a 的暗杀：b 质疑这个女伯爵的次数一样
+    const challengesOfContessa = (lostChallenge: boolean) => {
+      const { g, events, did, coup, income } = table({ a: ['assassin', 'duke'], b: ['captain', 'captain'], c: ['ambassador', 'duke'] });
+      if (!lostChallenge) {
+        coup('a', 'c', 'ambassador');
+        income('b', 'c');
+      }
+      seat(g, 'a').coins = 3;
+      did(chooseAction(g, 'a', 'assassinate', 'c'));
+      if (lostChallenge) {
+        did(challenge(g, 'c'));
+        did(revealShowdownCard(g, 'a', cardOf(g, 'a', 'assassin')));
+        did(resolveLoss(g, 'c', cardOf(g, 'c', 'ambassador')));
+      } else {
+        did(passChallenge(g, 'b'));
+        did(passChallenge(g, 'c'));
+      }
+      did(block(g, 'c', 'contessa'));
+      return tally(4000, byType, g, 'b', { events }).challenge;
+    };
+    expect(challengesOfContessa(true)).toBe(challengesOfContessa(false));
+  });
+
   it('本局声称过的角色被优先再次声称，越爱诈唬越常接着演，从不诈唬的不演', () => {
     const { g, events, unopposed, income } = table({ a: ['contessa', 'contessa'] });
     unopposed('a', 'tax');
