@@ -37,6 +37,13 @@ const WORTH: Record<Role, number> = { duke: 5, captain: 4, assassin: 3, contessa
 const THREAT = 1.5;
 // 冲着自己来的行动（或拦下自己行动的阻挡）有多疼：越疼越想质疑
 const HARM: Partial<Record<ActionType, number>> = { foreignAid: 0.5, steal: 1, assassinate: 1.5 };
+// 声称对自己没有切身代价时，质疑只做这么多比例：替别人出头的输赢都便宜了旁观的人
+const BYSTANDER = 0.5;
+// 好感（结盟）：每点好感让冲着他来的声称多一份质疑的代价 GRATITUDE（像是冲着自己来的，只是轻些），选目标时少 ALLY 分
+const GRATITUDE = 0.5;
+const ALLY = 2;
+// 好感是相互的：对方对自己的好感每变 1 点（自己替他出头、自己对他发起行动），自己对他的好感跟着变这么多
+const RECIPROCITY = 0.5;
 // 诈唬的意愿都要乘诈唬倾向。起一个新的诈唬：声称角色行动用 NEW_BLUFF，假装阻挡按被阻挡的行动用 FAKE_BLOCK；
 // 接着演声称过的角色用 REPEAT_BLUFF（乘完封顶为 1，即和手里真有一样）
 const NEW_BLUFF = 0.5;
@@ -78,13 +85,20 @@ interface Memory {
   // 电脑有真牌必挡，对自己这是确定的；真人可能有牌不挡，对别人只是像
   unblocked: Map<string, Set<Role>>;
   attacker?: string; // 最近打过自己的玩家
+  // 好感：替自己出过头（质疑过冲着自己来的声称，成败都算）一次加 1，对自己发起行动（以自己为目标）一次减 1，最低到 0。
+  // 反过来自己替他出头、对他发起行动，各按 RECIPROCITY 加减
+  favor: Map<string, number>;
 }
 
 // ponytail: 每次决定都把本局的事件（Room.gameEvents，一局内只增不减）从头数一遍。一局几百条事件、一次决定几微秒；
 // 事件多到要紧时改成随事件增量更新
 function recall(events: readonly GameEvent[], me: string, ids: readonly string[]): Memory {
-  const memory: Memory = { standing: new Map(), story: new Set(), caught: new Map(), proven: new Map(), unblocked: new Map() };
+  const memory: Memory = { standing: new Map(), story: new Set(), caught: new Map(), proven: new Map(), unblocked: new Map(), favor: new Map() };
+  const befriend = (id: string, by: number) => memory.favor.set(id, Math.max(0, (memory.favor.get(id) ?? 0) + by));
   let underChallenge: Role | undefined; // 最近一次声称的角色：对质检验的就是它
+  // 最近一次声称冲着谁来：行动的目标，阻挡则是被拦下的行动者
+  let actor: string | undefined;
+  let aimedAt: string | undefined;
   const note = (id: string, role: Role) => {
     underChallenge = role;
     if (id === me) memory.story.add(role);
@@ -109,10 +123,20 @@ function recall(events: readonly GameEvent[], me: string, ids: readonly string[]
     if (e.type === 'actionChosen') {
       turn = BLOCK_ROLES[e.action].length ? { action: e.action, actorId: e.actorId, targetId: e.targetId } : undefined;
       if (e.claimedRole) note(e.actorId, e.claimedRole);
-      if (e.targetId === me) memory.attacker = e.actorId;
+      if (e.targetId === me) {
+        memory.attacker = e.actorId;
+        befriend(e.actorId, -1);
+      }
+      if (e.actorId === me && e.targetId) befriend(e.targetId, -RECIPROCITY);
+      actor = e.actorId;
+      aimedAt = e.targetId;
     } else if (e.type === 'blocked') {
       turn = undefined;
       note(e.blockerId, e.role);
+      aimedAt = actor;
+    } else if (e.type === 'challenged') {
+      if (aimedAt === me && e.challengerId !== me) befriend(e.challengerId, 1);
+      if (e.challengerId === me && aimedAt && aimedAt !== me) befriend(aimedAt, RECIPROCITY);
     } else if (e.type === 'coinsChanged') {
       // 外援、偷窃的行动者金币变了就是生效了（偷窃先记目标、再记行动者）。暗杀的金币在宣布时付、被抓时退，不算
       if (turn && turn.action !== 'assassinate' && e.playerId === turn.actorId) wave();
@@ -187,12 +211,13 @@ export function decideComputerIntent(
     ((assassinationThreat && BLOCK_ROLES.assassinate.includes(role)) || (stealThreat && BLOCK_ROLES.steal.includes(role)) ? THREAT : 0);
   const leastUseful = () => hand.reduce((a, b) => (worth(b.role) < worth(a.role) ? b : a));
 
-  // 领先者优先（影响力多、金币多），最近打过自己的加分，再带一点随机。wary：对方声称过这些角色就多半会阻挡
+  // 领先者优先（影响力多、金币多），最近打过自己的加分，有好感的减分，再带一点随机。wary：对方声称过这些角色就多半会阻挡
   const pickTarget = (candidates: PublicPlayerView[], wary: Role[] = []) => {
     const score = (p: PublicPlayerView) =>
       p.handCount * 3 +
       p.coins / 2 +
       (p.id === memory.attacker ? 1 + 2 * temperament.aggression : 0) -
+      ALLY * (memory.favor.get(p.id) ?? 0) -
       (wary.some((r) => stillClaims(p.id, r)) ? 3 : 0) +
       random() * 3;
     return candidates.map((p) => [p.id, score(p)] as const).reduce((a, b) => (b[1] > a[1] ? b : a))[0];
@@ -265,11 +290,16 @@ export function decideComputerIntent(
     }
     // 冲着自己来才有额外的代价；能照实阻挡、或对方偷不走什么，就不必为此冒险。
     // 有挨政变出局的风险时，声称的人就是要政变自己的那个，抓到他诈唬能先去掉他一点影响力：这份风险也算代价。
-    // 快要政变赢了时只为代价质疑，没有代价的那份少做
-    const aimedAtMe = onAction ? pending!.targetId === me : pending!.actorId === me;
+    // 冲着有好感的人来，每点好感也算一份代价（GRATITUDE）。
+    // 快要政变赢了时只为代价质疑，没有代价的那份少做；完全没有代价时那份也少做（BYSTANDER）
+    const aimedAt = onAction ? pending!.targetId : pending!.actorId;
+    const aimedAtMe = aimedAt === me;
     const canBlock = onAction && BLOCK_ROLES[action].some((r) => held.has(r));
-    const stake = (aimedAtMe && !canBlock && !nothingToSteal ? (HARM[action] ?? 0) : 0) + COUP_HARM * coupRisk;
-    return (perSeat(p) * calm + p * stake) * caution;
+    const stake =
+      (aimedAtMe && !canBlock && !nothingToSteal ? (HARM[action] ?? 0) : 0) +
+      GRATITUDE * (aimedAt ? (memory.favor.get(aimedAt) ?? 0) : 0) +
+      COUP_HARM * coupRisk;
+    return (perSeat(p) * calm * (stake ? 1 : BYSTANDER) + p * stake) * caution;
   };
 
   // 手里没有能阻挡的角色时，假装有 role 来阻挡的概率

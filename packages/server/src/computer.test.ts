@@ -231,7 +231,7 @@ describe('decideComputerIntent', () => {
     };
     const two = rate(2);
     const six = rate(6);
-    expect(two).toBeGreaterThan(0.04);
+    expect(two).toBeGreaterThan(0.02);
     expect(Math.abs(two - six)).toBeLessThan(0.015);
   });
 
@@ -345,7 +345,8 @@ describe('decideComputerIntent', () => {
     };
     const bystander = challengesOfSteal('c');
     const victim = challengesOfSteal('b');
-    expect(victim).toBeGreaterThan(bystander * 1.5);
+    // 被偷的人有代价，旁观的人那份没有依据的质疑还要再打折（BYSTANDER）：不打折时只差 3 倍左右
+    expect(victim).toBeGreaterThan(bystander * 4);
     const lastCard = challengesOfSteal('b', ({ coup, income }) => {
       coup('a', 'b', 'contessa');
       income('b', 'c');
@@ -353,6 +354,68 @@ describe('decideComputerIntent', () => {
     expect(lastCard).toBeLessThan(victim * 0.8);
     const broke = challengesOfSteal('b', ({ g }) => (seat(g, 'b').coins = 0));
     expect(broke).toBeLessThan(bystander * 1.3);
+  });
+
+  describe('结盟：c 替 b 质疑过冲着 b 来的偷窃，b 对 c 有了好感', () => {
+    // a 没有队长却偷 b，challenger 质疑抓到它。b 自己质疑的那局是对照：只差替 b 出头的是不是 c
+    const after = (challenger: string) => {
+      const t = table({ a: ['duke', 'assassin'], b: ['duke', 'contessa'], c: ['ambassador', 'contessa'] });
+      t.did(chooseAction(t.g, 'a', 'steal', 'b'));
+      t.did(challenge(t.g, challenger));
+      t.did(revealShowdownCard(t.g, 'a', cardOf(t.g, 'a', 'duke')));
+      return t;
+    };
+    // 轮到 a 时它偷 c：b 质疑了多少次
+    const challengesOfStealOnC = (t: Table) => {
+      t.did(chooseAction(t.g, 'a', 'steal', 'c'));
+      return tally(4000, byType, t.g, 'b', { events: t.events }).challenge;
+    };
+    const ally = after('c');
+    ally.income('b', 'c');
+    const none = after('b');
+    none.income('b', 'c');
+    const helped = challengesOfStealOnC(ally);
+    const baseline = challengesOfStealOnC(none);
+
+    it('冲着 c 来的偷窃，b 更想质疑', () => {
+      expect(helped).toBeGreaterThan(baseline * 2);
+    });
+
+    it('b 政变时少打 c', () => {
+      const coupsOnC = (t: Table) => {
+        seat(t.g, 'b').coins = 10;
+        return tally(4000, byTarget, t.g, 'b', { events: t.events }).c;
+      };
+      expect(coupsOnC(after('c'))).toBeLessThan(coupsOnC(after('b')) * 0.8);
+    });
+
+    it('c 之后偷了 b，好感就没了', () => {
+      const t = after('c');
+      t.income('b');
+      t.unopposed('c', 'steal', 'b');
+      expect(challengesOfStealOnC(t)).toBe(baseline);
+    });
+
+    // 好感是相互的：c 料到 b 对它有好感，自己对 b 也有一点。stealFirst：c 先偷 b 一次，两局都偷，只差 c 出没出过头
+    const coupsByCOnB = (challenger: string, stealFirst = false) => {
+      const t = after(challenger);
+      t.income('b');
+      if (stealFirst) {
+        t.unopposed('c', 'steal', 'b');
+        t.income('a', 'b');
+      }
+      seat(t.g, 'c').coins = 10;
+      seat(t.g, 'a').coins = 9; // a 少 1 点影响力，用金币补上，两个目标才不相上下
+      return tally(4000, byTarget, t.g, 'c', { events: t.events }).b;
+    };
+
+    it('c 政变时也少打 b，只是没有 b 少打 c 那么多', () => {
+      expect(coupsByCOnB('c')).toBeLessThan(coupsByCOnB('b') * 0.9);
+    });
+
+    it('c 之后偷了 b，c 对 b 的好感也没了', () => {
+      expect(coupsByCOnB('c', true)).toBe(coupsByCOnB('b', true));
+    });
   });
 
   it('没有对应角色时按诈唬倾向决定是否假装阻挡', () => {
@@ -1024,9 +1087,10 @@ describe('电脑玩家自对弈', () => {
     expect(overStory, `seed ${SEED}`).toBe(0);
     if (count !== 4) return;
     // 4 人局里以质疑收场的问询窗口占 10% 到 25%。每个声称开一个质疑窗口，问询窗口还包括阻挡窗口：只数质疑窗口或两种都数，比例都要落在区间里。
-    // 区间管的是质疑的总量：没有依据的质疑（基调）和冲着证据去的质疑（矛盾、被抓到过诈唬）合在一起算，一头调高另一头就得让
+    // 区间管的是质疑的总量：没有依据的质疑（基调）和冲着证据去的质疑（矛盾、被抓到过诈唬）合在一起算，一头调高另一头就得让。
+    // 两种都数时下限放到 8%：电脑之间每次对质都有一方掉影响力，总量压不下来，从不质疑的人就坐收渔利（BYSTANDER）
     within(challenges / claims, 0.1, 0.25);
-    within(challenges / (claims + blockWindows), 0.1, 0.25);
+    within(challenges / (claims + blockWindows), 0.08, 0.25);
     // 质疑要准：抓到诈唬的占四成以上。只管总量时，靠没有依据的质疑就能凑够，成功率曾低到三成六，老实又从不质疑的人因此占了大便宜
     within(caught / challenges, 0.38, 1);
   });
