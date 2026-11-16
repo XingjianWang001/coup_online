@@ -35,32 +35,39 @@ export interface Identity {
   secret: string;
 }
 
-export function loadIdentity(): Identity | null {
+// 浏览器可能禁用存储（隐私设置、内嵌页面），连访问 localStorage 都会抛错：读不到按没有处理，写不进就只是这次不记住，页面照常可用
+function storage<T>(use: (store: Storage) => T): T | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as Identity) : null;
+    return use(localStorage);
   } catch {
     return null;
   }
 }
 
+export function loadIdentity(): Identity | null {
+  return storage((store) => {
+    const raw = store.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as Identity) : null;
+  });
+}
+
 export function saveIdentity(id: Identity): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(id));
+  storage((store) => store.setItem(STORAGE_KEY, JSON.stringify(id)));
 }
 
 export function loadRoomCode(): string | null {
-  return localStorage.getItem(ROOM_KEY);
+  return storage((store) => store.getItem(ROOM_KEY));
 }
 
 export function saveRoomCode(code: string): void {
-  localStorage.setItem(ROOM_KEY, code);
+  storage((store) => store.setItem(ROOM_KEY, code));
 }
 
 export function clearRoomCode(): void {
-  localStorage.removeItem(ROOM_KEY);
+  storage((store) => store.removeItem(ROOM_KEY));
 }
 
 export function clearIdentity(): void {
-  localStorage.removeItem(STORAGE_KEY);
+  storage((store) => store.removeItem(STORAGE_KEY));
 }
 
