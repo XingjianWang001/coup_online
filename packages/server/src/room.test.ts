@@ -239,7 +239,7 @@ describe('Room 加入守卫', () => {
     expect(re.id).toBe(p.id);
   });
 
-  it('getPrivateState 对局外玩家返回 null 而非抛错', () => {
+  it('getPrivateState 牌局外玩家返回 null 而非抛错', () => {
     const { room } = makeRoom();
     room.game = { phase: 'choosingAction', players: [] } as unknown as GameState;
     expect(room.getPrivateState('ghost')).toBeNull();

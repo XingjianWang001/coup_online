@@ -255,7 +255,7 @@ export class Room {
     this.events.onBroadcast(this, []);
     const t = setTimeout(() => {
       if (this.players.get(id) !== p || p.connected || p.socketId !== socketId) return;
-      // 游戏结束后（gameOver）断连：对局已定胜负，forfeit 无意义，直接移除玩家让房间能排空回收。
+      // 游戏结束后（gameOver）断连：牌局已定胜负，forfeit 无意义，直接移除玩家让房间能排空回收。
       if (!this.game || this.game.phase === 'gameOver') {
         this.removePlayer(id);
         this.events.onBroadcast(this, []);
@@ -554,7 +554,7 @@ export class Room {
 
   getPrivateState(playerId: string) {
     if (!this.game) return null;
-    // 防御：玩家不在对局中时返回 null 而非抛错，避免 broadcast 因脏数据拖垮服务器。
+    // 防御：玩家不在牌局中时返回 null 而非抛错，避免 broadcast 因脏数据拖垮服务器。
     if (!this.game.players.some((p) => p.id === playerId)) return null;
     return privateState(this.game, playerId);
   }
