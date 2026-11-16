@@ -26,7 +26,7 @@ export const COUP_COST = 7;
 export const FORCED_COUP_COINS = 10; // 金币到这个数，该回合只能政变
 export const ASSASSINATE_COST = 3;
 export const MAX_PLAYERS = 6;
-const STEAL_AMOUNT = 2;
+export const STEAL_AMOUNT = 2;
 const EXCHANGE_DRAW = 2;
 
 // 行动声称的角色（null = 不声称角色）

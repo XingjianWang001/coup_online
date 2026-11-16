@@ -22,6 +22,7 @@ export {
   MAX_PLAYERS,
   GameRuleError,
   ROLE_COPIES,
+  STEAL_AMOUNT,
   ROLE_ORDER,
   needsTarget,
   block,
