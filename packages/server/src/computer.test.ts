@@ -856,11 +856,10 @@ describe('decideComputerIntent', () => {
 
     it('对手金币够政变：更常暗杀和偷窃，手里没有也更常装；对手 9 金币时偷了也拦不住政变，不为此多偷', () => {
       const level = 3; // 金币一样多：没有风险
-      expect(actions(withAssassin(), 7).assassinate).toBeGreaterThan(actions(withAssassin(), level).assassinate * 1.3);
+      expect(actions(withAssassin(), 9).assassinate).toBeGreaterThan(actions(withAssassin(), level).assassinate * 1.3);
       const calm = actions(withCaptain(), level);
       const cornered = actions(withCaptain(), 7);
-      expect(cornered.steal).toBeGreaterThan(calm.steal * 1.2);
-      expect(cornered.assassinate).toBeGreaterThan(calm.assassinate * 1.5); // 手里没有刺客：装的
+      expect(cornered.steal).toBe(2000); // a 还有 2 点影响力：暗杀拦不住政变，偷完他不够政变才拦得住
       const tooRich = actions(withCaptain(), 9);
       expect(tooRich.steal).toBeLessThan(calm.steal);
       expect(tooRich.assassinate).toBeGreaterThan(calm.assassinate * 1.5);
@@ -905,6 +904,34 @@ describe('decideComputerIntent', () => {
         return tally(4000, byType, t.g, 'b', { events: t.events }).challenge;
       };
       expect(challengesOfTax(6)).toBeGreaterThan(challengesOfTax(3) * 1.5);
+    });
+
+    it('走投无路时只做拦得住政变的事：a 还有 2 点影响力时政变、暗杀都拦不住，只偷；3 张队长都亮在桌上就偷不成', () => {
+      const t = withAssassin();
+      coins(t, 7, 8);
+      expect(tally(2000, byAction, t.g, 'b', { events: t.events })).toEqual({ steal: 2000 });
+      // c 和 b 被政变时亮出了 3 张队长：装队长必被质疑，没有拦得住的事，照常行动
+      const shown = table({ b: ['assassin', 'captain'], c: ['captain', 'captain'] });
+      shown.coup('a', 'c', 'captain');
+      shown.income('b', 'c');
+      shown.coup('a', 'c', 'captain');
+      shown.income('b');
+      shown.coup('a', 'b', 'captain');
+      coins(shown, 7, 8);
+      const counts = tally(2000, byAction, shown.g, 'b', { events: shown.events });
+      expect(counts.steal).toBeUndefined();
+      expect(counts.coup).toBeGreaterThan(1500);
+    });
+
+    it('放过就必输：a 外援后够政变、b 的回合拦不住时，b 有公爵不藏着，没有就装', () => {
+      const blocks = (t: Table) => {
+        t.income('b');
+        coins(t, 7, 2);
+        t.did(chooseAction(t.g, 'a', 'foreignAid'));
+        return tally(2000, byType, t.g, 'b', { events: t.events });
+      };
+      expect(blocks(duel(['duke', 'contessa'], 'contessa'))).toEqual({ block: 2000 });
+      expect(blocks(withCaptain())).toEqual({ block: 2000 });
     });
   });
 
@@ -970,6 +997,15 @@ describe('decideComputerIntent', () => {
       expect(challenges(7, 'tax')).toBeLessThan(challenges(3, 'tax') * 0.4);
       expect(challenges(7, 'steal')).toBeGreaterThan(challenges(3, 'steal') * 0.5);
       expect(challenges(7, 'tax', false)).toBe(challenges(3, 'tax', false));
+    });
+
+    it('放过就必赢时不质疑、不假装阻挡：a 偷完 b 仍够政变', () => {
+      const t = endgame();
+      coins(t, 3, 9);
+      t.did(chooseAction(t.g, 'a', 'steal', 'b'));
+      expect(tally(2000, byType, t.g, 'b', { events: t.events, temperament: KEEN })).toEqual({ passChallenge: 2000 });
+      t.did(passChallenge(t.g, 'b'));
+      expect(tally(2000, byType, t.g, 'b', { events: t.events, temperament: KEEN })).toEqual({ passBlock: 2000 });
     });
   });
 
@@ -1059,6 +1095,7 @@ describe('decideComputerIntent', () => {
       };
       // 接下来是阻挡窗口：留着女伯爵就能照实阻挡
       expect(lost('assassinate', ['contessa', 'captain'], 'b')).toBe('captain');
+      expect(lost('assassinate', ['contessa', 'duke'], 'b')).toBe('duke'); // 公爵更值钱也丢它：这时不是倾向是规则
       // 质疑失败的是 c，b 没有阻挡：这张牌就是暗杀要走的，行动到此结算完，不再是威胁
       expect(lost('assassinate', ['contessa', 'captain'], 'c')).toBe('contessa');
       expect(lost('steal', ['ambassador', 'assassin'], 'b')).toBe('assassin');
@@ -1149,7 +1186,11 @@ describe('电脑玩家自对弈', () => {
           const i = ids.indexOf(id);
           const roles = claimed[i];
           // 不得不声称的不算自愿：手里真有的阻挡，以及不阻挡就出局时的假阻挡
-          const forced = intent.type === 'block' && (!bluff || (g.pending!.type === 'assassinate' && hand.length === 1));
+          // 走投无路时（两人对峙、只剩 1 点影响力、对手已够政变）拿来拦政变的暗杀、偷窃，以及放过就让对手够政变的假阻挡也是。
+          // ponytail: 外援和偷窃都按对手多 2 金币算，偷窃偷不满 2 枚的也放过了
+          const foes = g.players.filter((p) => p.alive && p.id !== id);
+          const cornered = foes.length === 1 && hand.length === 1 && foes[0].coins + (intent.type === 'block' ? 2 : 0) >= COUP_COST;
+          const forced = cornered || (intent.type === 'block' && (!bluff || (g.pending!.type === 'assassinate' && hand.length === 1)));
           stats.claims++;
           if (bluff) stats.bluffs++;
           if (!forced && !roles.has(role) && roles.size >= (temperaments[i].bluff >= 0.9 ? 4 : 3)) stats.overStory++;
