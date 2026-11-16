@@ -48,8 +48,8 @@ const STORY_ROLES = 3;
 const RECKLESS_BLUFF = 0.9;
 // 金币够政变（COUP_COST）但还没到规则强制政变的数目（FORCED_COUP_COINS）时，政变的概率
 const COUP_EAGERNESS = 0.85;
-// 对方的声称自相矛盾时，质疑概率乘这么多：更想质疑，不是必然质疑
-const CONTRADICTION = 2.5;
+// 对方的声称自相矛盾时，质疑概率乘这么多：更想质疑，不是必然质疑。矛盾时诈唬的多半超过一半，质疑才划算，所以给得重
+const CONTRADICTION = 5;
 // 对方的声称被证明为真过，质疑概率最多降到这个比例：CONTRADICTION 乘它仍大于 1，眼前的矛盾盖得过旧信用
 const PROVEN_FLOOR = 0.6;
 // 两人对峙、自己只剩 1 点影响力、对手快要政变时会挣扎：暗杀和偷窃的权重最多乘到 1 + STRUGGLE；
@@ -251,10 +251,11 @@ export function decideComputerIntent(
     // 被证明为真的信用：每次把质疑概率打七五折，最低到 PROVEN_FLOOR。证明用的那张牌已洗回牌堆，说明不了对方现在拿着什么
     const credit = Math.max(PROVEN_FLOOR, 0.75 ** (memory.proven.get(claimantId) ?? 0));
     // 多疑程度定基调；看得见的同角色牌越多、对方本局被抓过、声称自相矛盾越可疑，被证明过略可信。
-    // 基调定得低，给证据的加成留出余量：没有依据时很少质疑，加成叠上来之后质疑的总量才落在自对弈检查的区间里
+    // 基调定得低，给证据的加成留出余量：没有依据时很少质疑，加成叠上来之后质疑的总量才落在自对弈检查的区间里。
+    // 没有依据的质疑多半落空（声称里诈唬的不到三成），对质又是一换一、让旁观者得利：基调再高，从不质疑的人就占了便宜
     const p = Math.min(
       0.9,
-      (0.04 + 0.13 * temperament.suspicion) * (1 + seen(role)) * (1 + (memory.caught.get(claimantId) ?? 0)) * (contradicts ? CONTRADICTION : 1) * credit,
+      (0.02 + 0.065 * temperament.suspicion) * (1 + seen(role)) * (1 + (memory.caught.get(claimantId) ?? 0)) * (contradicts ? CONTRADICTION : 1) * credit,
     );
     if (dying && !held.has('contessa')) {
       // 放弃等于认输：不质疑就留到阻挡窗口假装女伯爵。多疑的倾向质疑，爱诈唬的倾向假装；女伯爵 3 张都亮了就没人会信，只能质疑

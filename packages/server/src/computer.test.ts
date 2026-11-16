@@ -231,8 +231,8 @@ describe('decideComputerIntent', () => {
     };
     const two = rate(2);
     const six = rate(6);
-    expect(two).toBeGreaterThan(0.08);
-    expect(Math.abs(two - six)).toBeLessThan(0.03);
+    expect(two).toBeGreaterThan(0.04);
+    expect(Math.abs(two - six)).toBeLessThan(0.015);
   });
 
   it('质疑看证据：对方本局被抓过诈唬则更怀疑，声称被证明过则更相信', () => {
@@ -959,7 +959,7 @@ describe('电脑玩家自对弈', () => {
     const random = seeded(SEED + seats.length);
     vi.spyOn(Math, 'random').mockImplementation(random); // 引擎洗牌也跟着种子走
     const ids = seats.map((_, i) => `p${i}`);
-    const stats = { wins: seats.map(() => 0), claims: 0, bluffs: 0, challenges: 0, blockWindows: 0, overStory: 0 };
+    const stats = { wins: seats.map(() => 0), claims: 0, bluffs: 0, challenges: 0, caught: 0, blockWindows: 0, overStory: 0 };
     for (let n = 0; n < games; n++) {
       const where = `seed ${SEED}, ${seats.length} players, game ${n}`;
       const g = createGame(ids.map((id) => ({ id, name: id })), { startingPlayerId: ids[Math.floor(random() * ids.length)] });
@@ -991,6 +991,7 @@ describe('电脑玩家自对弈', () => {
         const wasBlockWindow = g.phase === 'awaitingBlock';
         const produced = apply(g, id, intent);
         events.push(...produced);
+        stats.caught += produced.filter((e) => e.type === 'challengeResolved' && !e.truth).length;
         // 实际换了牌的座位故事重新计数
         for (const e of produced) if (e.type === 'exchangeDrew') claimed[ids.indexOf(e.playerId)].clear();
         if (!wasBlockWindow && g.phase === 'awaitingBlock') stats.blockWindows++;
@@ -1017,7 +1018,7 @@ describe('电脑玩家自对弈', () => {
     [5, 250],
     [6, 250],
   ])('%i 人局：每局都在回合数上限内分出胜负，诈唬占全部角色声称的 20% 到 40%，换牌以来没有人自愿声称第 4 个角色（极爱诈唬的是第 5 个）', (count, games) => {
-    const { wins, claims, bluffs, challenges, blockWindows, overStory } = play(games, Array<Seat>(count).fill(computer));
+    const { wins, claims, bluffs, challenges, caught, blockWindows, overStory } = play(games, Array<Seat>(count).fill(computer));
     expect(wins.reduce((a, b) => a + b)).toBe(games);
     within(bluffs / claims, 0.2, 0.4);
     expect(overStory, `seed ${SEED}`).toBe(0);
@@ -1026,6 +1027,8 @@ describe('电脑玩家自对弈', () => {
     // 区间管的是质疑的总量：没有依据的质疑（基调）和冲着证据去的质疑（矛盾、被抓到过诈唬）合在一起算，一头调高另一头就得让
     within(challenges / claims, 0.1, 0.25);
     within(challenges / (claims + blockWindows), 0.1, 0.25);
+    // 质疑要准：抓到诈唬的占四成以上。只管总量时，靠没有依据的质疑就能凑够，成功率曾低到三成六，老实又从不质疑的人因此占了大便宜
+    within(caught / challenges, 0.38, 1);
   });
 
   it('1 个电脑对 3 个只会收入和政变的对手：胜率高于 40%', () => {
