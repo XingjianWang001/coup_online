@@ -1,6 +1,6 @@
 // ui-check 场景：表态。机器人对真人发一条行动预告，真人从表态面板发一条短语。
-// 断言：对手铭牌亮起、只有行动名上角色色、目标是真人昵称；真人自己的铭牌经服务器转发后亮起，座位尺寸不变。
-// 用法：pnpm ui-check scripts/ui-check-reaction.mjs [截图目录]；手机布局加 MOBILE=1 W=390 H=844
+// 断言：对手铭牌亮起、只有行动名上角色色、目标是真人昵称；短语页是当前语言的 7 句、每行排满、不溢出；真人自己的铭牌经服务器转发后亮起，座位尺寸不变。
+// 用法：pnpm ui-check scripts/ui-check-reaction.mjs [截图目录]；手机布局加 MOBILE=1 W=390 H=844；中英文各跑一遍加 LOCALE=zh-CN / LOCALE=en
 export default async function reactionScenario(ui) {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
   const host = ui.bot();
@@ -38,6 +38,31 @@ export default async function reactionScenario(ui) {
   const seatBox = `JSON.stringify((({ width, height }) => ({ width, height }))(document.querySelector('.seat.self').getBoundingClientRect()))`;
   const before = await ui.evaluate(seatBox);
   await ui.evaluate(`document.querySelector('.reaction-toggle').click()`);
+
+  // 短语页：当前语言的 7 句，每行排满到右边缘（没有空洞），文字不溢出
+  await ui.evaluate(`Promise.all(document.querySelector('.reaction-collapse').getAnimations().map((a) => a.finished))`);
+  const page = await ui.evaluate(`(() => {
+    const grid = document.querySelector('.reaction-grid');
+    const buttons = [...grid.querySelectorAll('button')];
+    const right = grid.getBoundingClientRect().right;
+    const rowEnds = new Map(buttons.map((b) => [b.offsetTop, b.getBoundingClientRect().right]));
+    return {
+      texts: buttons.map((b) => b.textContent),
+      holes: [...rowEnds.values()].filter((end) => Math.abs(end - right) > 1).length,
+      overflow: grid.scrollWidth > grid.clientWidth || buttons.some((b) => b.scrollWidth > b.clientWidth),
+    };
+  })()`);
+  const expected = {
+    'zh-CN': ['我信你个鬼', '你确定？', '来质疑我啊', '我是老实人', '手下留情', '好险', '佩服'],
+    en: ['Yeah, right.', 'You sure?', 'Go on, challenge me.', "I'm an honest player.", 'Have mercy.', 'That was close.', 'Well played.'],
+  };
+  await ui.evaluate(`document.querySelector('.reaction-tray').scrollIntoView({ block: 'center' })`);
+  await ui.shot('reaction-phrases');
+  const locales = process.env.LOCALE ? [process.env.LOCALE] : Object.keys(expected);
+  assert(locales.some((l) => JSON.stringify(expected[l]) === JSON.stringify(page.texts)), `短语页应是 7 句预设，实际 ${JSON.stringify(page.texts)}`);
+  assert(page.holes === 0, `短语页有 ${page.holes} 行没排满`);
+  assert(!page.overflow, '短语页有文字溢出');
+
   await ui.evaluate(`[...document.querySelectorAll('.reaction-grid button')].find((b) => /你确定|You sure/.test(b.textContent)).click()`);
   await ui.waitFor('.seat.self .nameplate.speaking');
   const after = await ui.evaluate(seatBox);

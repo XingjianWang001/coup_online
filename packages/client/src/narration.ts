@@ -190,7 +190,7 @@ export type ReactionSegment = string | { text: string; role?: Role; target?: tru
 
 const PHRASE_MESSAGES: Record<Phrase, MessageKey> = {
   doubt: 'phraseDoubt', sure: 'phraseSure', dare: 'phraseDare', honest: 'phraseHonest',
-  framed: 'phraseFramed', mercy: 'phraseMercy', close: 'phraseClose', respect: 'phraseRespect',
+  mercy: 'phraseMercy', close: 'phraseClose', respect: 'phraseRespect',
 };
 const ANNOUNCEMENT_MESSAGES: Record<ActionType, MessageKey> = {
   income: 'announcementTake', foreignAid: 'announcementTake', tax: 'announcementPlain', exchange: 'announcementPlain',
