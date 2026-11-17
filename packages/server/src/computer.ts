@@ -33,7 +33,8 @@ export const drawTemperament = (random: () => number): Temperament => ({ bluff: 
 // 它们由自对弈检查（computer.test.ts）的区间和人工验收一起约束，调任何一个都要重跑自对弈检查
 // 一张牌对自己有多大用：失去影响力、对质翻牌、交换选牌时留下大的
 const WORTH: Record<Role, number> = { duke: 5, captain: 4, assassin: 3, contessa: 3, ambassador: 2 };
-// 眼前有暗杀或偷窃的威胁时，能挡住它的牌多值这么多。是倾向不是规则：别的牌更值钱时仍不留
+// 眼前有暗杀或偷窃的威胁时，能挡住它的牌多值这么多。是倾向不是规则：别的牌更值钱时仍不留。
+// 例外是质疑冲着自己来的暗杀失败后丢牌：必留女伯爵（见 choosingLoss）
 const THREAT = 1.5;
 // 冲着自己来的行动（或拦下自己行动的阻挡）有多疼：越疼越想质疑
 const HARM: Partial<Record<ActionType, number>> = { foreignAid: 0.5, steal: 1, assassinate: 1.5 };
@@ -200,6 +201,32 @@ export function decideComputerIntent(
   // 自己看得见的某角色张数：自己的暗牌加全场明牌。allSeen：凑齐了，别人不可能有它
   const seen = (role: Role) => hand.filter((c) => c.role === role).length + state.players.reduce((n, p) => n + p.revealed.filter((r) => r === role).length, 0);
   const allSeen = (role: Role) => seen(role) >= ROLE_COPIES;
+
+  // 两人对峙的残局，轮到自己时对手有 foeCoins、自己有 myCoins 金币：能把对手打出局或拦住他下回合政变的行动。
+  // 他只剩 1 点影响力时政变、暗杀能先打倒他；偷完他就不够政变也拦得住，政变、暗杀他 2 点影响力中的 1 点拦不住。
+  // 3 张都亮在桌上、手里又没有的角色不拿来声称：谁都会质疑
+  const rescue = (foeCoins: number, myCoins: number): ActionType | undefined => {
+    const claimable = (role: Role) => held.has(role) || !allSeen(role);
+    if (foe.handCount === 1 && myCoins >= COUP_COST) return 'coup';
+    if (foe.handCount === 1 && myCoins >= ASSASSINATE_COST && claimable('assassin')) return 'assassinate';
+    if (foeCoins < COUP_COST + STEAL_AMOUNT && claimable('captain')) return 'steal';
+    return undefined;
+  };
+  // 轮到自己时的结局：对手只剩 1 点影响力而自己够政变是必赢（政变挡不了）；
+  // 自己只剩 1 点影响力、对手够政变而自己拦不住是必输。只看两人对峙，其余为 undefined
+  const outlook = (foeCoins: number, myCoins: number) => {
+    if (rivals.length !== 1) return undefined;
+    if (foe.handCount === 1 && myCoins >= COUP_COST) return 'won';
+    return lastCard && foeCoins >= COUP_COST && !rescue(foeCoins, myCoins) ? 'lost' : undefined;
+  };
+  // 对手眼前这个行动（及它的声称、阻挡）放过不管、轮到自己时的结局。自己能照实阻挡冲着自己来的偷窃，就当它偷不走
+  const afterPass = () => {
+    if (rivals.length !== 1) return undefined;
+    const { action, targetId } = pending!;
+    const taken = action === 'steal' && targetId === me && !BLOCK_ROLES.steal.some((r) => held.has(r)) ? Math.min(STEAL_AMOUNT, self.coins) : 0;
+    const gain = action === 'tax' ? 3 : action === 'foreignAid' ? 2 : taken;
+    return outlook(foe.coins + gain, self.coins - taken);
+  };
   // 把「这件事总共有 p 的概率被某人做」折算成自己这一份：有资格的人越多，每人越少出手
   const perSeat = (p: number) => 1 - (1 - p) ** (1 / rivals.length);
   // 眼前的威胁，能挡住它的牌更值得留。一种是对手仍作数的声称：声称刺客且金币够暗杀，或声称队长而自己有金币可偷。
@@ -245,6 +272,10 @@ export function decideComputerIntent(
   };
 
   const chooseAction = (): ComputerIntent => {
+    // 走投无路（两人对峙、自己只剩 1 点影响力、对手已够政变）：只有 rescue 不是必输，诈唬的顾虑（故事上限、看起来没有的角色）都不管了。
+    // 满 FORCED_COUP_COINS 时规则只许政变
+    const way = coupRisk === 1 && self.coins < FORCED_COUP_COINS ? rescue(foe.coins, self.coins) : undefined;
+    if (way) return { type: 'chooseAction', action: way, targetId: foe.id };
     // 够政变就多半政变，偶尔先做别的；政变就能赢、或到了 FORCED_COUP_COINS（规则只许政变）时必政变
     if (self.coins >= FORCED_COUP_COINS || (self.coins >= COUP_COST && (calm < 1 || random() < COUP_EAGERNESS))) {
       return { type: 'chooseAction', action: 'coup', targetId: pickTarget(rivals) };
@@ -280,6 +311,11 @@ export function decideComputerIntent(
   // 质疑的概率：看证据和代价
   const challengeChance = (claimantId: string, role: Role, onAction: boolean) => {
     if (allSeen(role)) return 1;
+    // 放过就必输时质疑没有损失；放过就必赢时质疑只会节外生枝（这次暗杀成了自己就出局的不算必赢）。
+    // 拦下自己行动的阻挡成立，回合就结束了、轮到对手：他够政变而自己只剩 1 点影响力就必输
+    const outcome = onAction ? afterPass() : coupRisk === 1 ? 'lost' : undefined;
+    if (outcome === 'lost') return 1;
+    if (outcome === 'won' && !dying) return 0;
     const { action } = pending!;
     // 自相矛盾：对方仍作数的声称角色（含眼前这个）比暗牌多，或声称的是换牌以来看起来没有的角色（当众没挡过、自己丢掉的），没有换牌能解释。
     // 同一角色声称几次只算一个，声称一致也不算证明
@@ -314,9 +350,10 @@ export function decideComputerIntent(
     return (perSeat(p) * calm * (stake ? 1 : BYSTANDER) + p * stake) * caution;
   };
 
-  // 手里没有能阻挡的角色时，假装有 role 来阻挡的概率
-  const fakeBlockChance = (role: Role) => {
-    if (dying) return 1; // 不阻挡就出局
+  // 手里没有能阻挡的角色时，假装有 role 来阻挡的概率。desperate：不阻挡就出局或必输；won：不阻挡就必赢
+  const fakeBlockChance = (role: Role, desperate: boolean, won: boolean) => {
+    if (desperate) return 1;
+    if (won) return 0;
     if (nothingToSteal) return 0;
     const fresh = FAKE_BLOCK[pending!.action] ?? 0;
     return bluffWillingness(role, pending!.action === 'foreignAid' ? perSeat(fresh) : fresh);
@@ -337,23 +374,31 @@ export function decideComputerIntent(
       if (!eligible || state.passed.includes(me)) return null;
       const roles = BLOCK_ROLES[pending!.action];
       const real = roles.find((r) => held.has(r));
+      // 这次暗杀成了自己就出局时，放过之后的回合也轮不到自己，结局不按 afterPass 算
+      const outcome = dying ? undefined : afterPass();
+      const desperate = dying || outcome === 'lost';
       if (real) {
-        const slowplay = pending!.action === 'foreignAid' && !stillClaims(me, real) && random() < SLOWPLAY;
+        // 放过就必输时不藏牌
+        const slowplay = pending!.action === 'foreignAid' && !stillClaims(me, real) && !desperate && random() < SLOWPLAY;
         return slowplay ? { type: 'passBlock' } : { type: 'block', role: real };
       }
-      // 3 张都亮在桌上的角色没人会信，看起来没有的角色也不装（还有别的可装就装别的）；除非不阻挡就出局
-      const fakes = dying ? roles : roles.filter((r) => !allSeen(r) && !lacks(me, r));
+      // 3 张都亮在桌上的角色没人会信，看起来没有的角色也不装（还有别的可装就装别的）；除非不阻挡就出局或必输
+      const fakes = desperate ? roles : roles.filter((r) => !allSeen(r) && !lacks(me, r));
       if (fakes.length === 0) return { type: 'passBlock' };
       const fake = fakes.find((r) => stillClaims(me, r)) ?? fakes[Math.floor(random() * fakes.length)];
-      return random() < fakeBlockChance(fake) ? { type: 'block', role: fake } : { type: 'passBlock' };
+      return random() < fakeBlockChance(fake, desperate, outcome === 'won') ? { type: 'block', role: fake } : { type: 'passBlock' };
     }
     case 'showdown': {
       if (state.showdown!.claimantId !== me) return null;
       const card = hand.find((c) => c.role === state.showdown!.role) ?? leastUseful();
       return { type: 'revealShowdownCard', cardId: card.id };
     }
-    case 'choosingLoss':
-      return state.lossPlayerId === me ? { type: 'resolveLoss', cardId: leastUseful().id } : null;
+    case 'choosingLoss': {
+      if (state.lossPlayerId !== me) return null;
+      // 质疑冲着自己来的暗杀失败、接下来还要挡它：留下女伯爵就能照实挡住，丢了它只能装、还是刚当众丢掉的角色
+      const spare = incoming === 'assassinate' && held.has('contessa') ? hand.find((c) => c.role !== 'contessa') : undefined;
+      return { type: 'resolveLoss', cardId: (spare ?? leastUseful()).id };
+    }
     case 'choosingExchange': {
       if (pending!.actorId !== me) return null;
       const pool = hand.slice();
