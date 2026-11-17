@@ -21,7 +21,7 @@ import {
   type GameState,
   type Role,
 } from '@coup/engine';
-import { decideComputerIntent, drawTemperament, type ComputerIntent, type Temperament } from './computer.ts';
+import { STANDARD, STRONG, decideComputerIntent, drawTemperament, type ComputerIntent, type Returned, type Temperament } from './computer.ts';
 
 // 可复现的随机源（mulberry32）
 function seeded(seed: number): () => number {
@@ -80,6 +80,7 @@ interface Mind {
   events: GameEvent[];
   temperament: Temperament;
   random: () => number;
+  returned?: Returned[]; // 自己交换时放回牌堆的牌（牌堆记忆，只有强电脑用）
 }
 const decide = (g: GameState, id: string, { events = [], temperament = CALM, random = seeded(1) }: Partial<Mind> = {}) =>
   decideComputerIntent(publicState(g), privateState(g, id), events, temperament, random);
@@ -1009,6 +1010,52 @@ describe('decideComputerIntent', () => {
     });
   });
 
+  describe('强电脑的牌堆记忆', () => {
+    // a 手里两张公爵，c 挨政变亮出第三张；a 交换时留下摸到的两张、把两张公爵放回牌堆。之后 b 声称公爵收税
+    function scene(drawBefore: boolean) {
+      const t = table({ a: ['duke', 'duke'], b: ['captain', 'contessa'], c: ['duke', 'assassin'] });
+      t.coup('a', 'c', 'duke');
+      t.income('b', 'c');
+      t.unopposed('a', 'exchange');
+      const at = t.events.findIndex((e) => e.type === 'exchangeDrew');
+      t.did(resolveExchange(t.g, 'a', seat(t.g, 'a').hand.slice(2).map((c) => c.id)));
+      const returned = [{ at, roles: ['duke', 'duke'] as Role[] }];
+      if (drawBefore) {
+        // c 交换：从牌堆摸了 2 张，放回的两张公爵可能被摸走了
+        t.income('b');
+        t.unopposed('c', 'exchange');
+        t.did(resolveExchange(t.g, 'c', seat(t.g, 'c').hand.slice(0, 1).map((c) => c.id)));
+        t.income('a');
+      }
+      t.did(chooseAction(t.g, 'b', 'tax'));
+      const challenges = (tuning: typeof STRONG, notes = returned) => {
+        const random = seeded(5);
+        let n = 0;
+        for (let i = 0; i < 400; i++) {
+          if (decideComputerIntent(publicState(t.g), privateState(t.g, 'a'), t.events, EVEN, random, tuning, notes)?.type === 'challenge') n++;
+        }
+        return n;
+      };
+      return challenges;
+    }
+
+    it('放回牌堆、还没人摸过牌：三张公爵都确知在哪，别人声称公爵必质疑；普通电脑不记', () => {
+      const challenges = scene(false);
+      expect(challenges(STRONG)).toBe(400);
+      expect(challenges(STRONG, [])).toBeLessThan(400);
+      expect(challenges(STANDARD)).toBeLessThan(400);
+    });
+
+    it('有人从牌堆摸过牌：只是多半还在，不再必质疑，但比不记时更想质疑', () => {
+      const challenges = scene(true);
+      expect(challenges(STRONG)).toBeLessThan(400);
+      // 强电脑几乎不替别人质疑，看不出差别；拿普通电脑的参数开着记忆来比
+      const remembering = { ...STANDARD, DECK_MEMORY: 1 };
+      expect(challenges(remembering)).toBeLessThan(400);
+      expect(challenges(remembering)).toBeGreaterThan(challenges(remembering, []));
+    });
+  });
+
   describe('保牌看眼前的威胁', () => {
     // 决定留牌的是 b，可能威胁它的是 c。c 手里是两张公爵：声称刺客或队长都是诈唬，被质疑就被抓到诈唬。
     // 下面每个函数是 c 的一手（连同 a、b 各收入一次），走完轮到 a
@@ -1172,10 +1219,11 @@ describe('电脑玩家自对弈', { timeout: 30_000 }, () => {
       const temperaments = ids.map(() => drawTemperament(random));
       const claimed = ids.map(() => new Set<Role>());
       const events: GameEvent[] = [];
+      const returned = ids.map((): Returned[] => []);
       let turns = 0;
       while (g.phase !== 'gameOver') {
         const deciders = ids.flatMap((id, i) => {
-          const intent = seats[i](g, id, { events, temperament: temperaments[i], random });
+          const intent = seats[i](g, id, { events, temperament: temperaments[i], random, returned: returned[i] });
           return intent ? [{ id, intent }] : [];
         });
         if (deciders.length === 0) throw new Error(`nobody has anything to decide in ${g.phase} (${where})`);
@@ -1198,6 +1246,11 @@ describe('电脑玩家自对弈', { timeout: 30_000 }, () => {
           roles.add(role);
         }
         if (intent.type === 'challenge') stats.challenges++;
+        // 和 Room 一样记下交换时放回牌堆的牌
+        if (intent.type === 'resolveExchange') {
+          const roles = privateState(g, id).hand.filter((c) => !intent.keepIds.includes(c.id)).map((c) => c.role);
+          returned[ids.indexOf(id)].push({ at: events.length - 1, roles }); // 自对弈里没人弃权，交换选牌时最后一条事件就是这次 exchangeDrew
+        }
         const wasBlockWindow = g.phase === 'awaitingBlock';
         const produced = apply(g, id, intent);
         events.push(...produced);
@@ -1246,4 +1299,18 @@ describe('电脑玩家自对弈', { timeout: 30_000 }, () => {
     const { wins } = play(1000, [computer, plain, plain, plain]);
     expect(wins[0] / 1000, `seed ${SEED}`).toBeGreaterThan(0.4);
   });
+
+  // 强电脑（ADR 0014）：play 按普通电脑抽性格（各项 0 到 1 均匀），这里线性映射进 STRONG 的区间，和按 STRONG 抽是同一个分布
+  const strong: Seat = (g, id, { events, temperament, random, returned }) => {
+    const scale = (k: keyof Temperament) => STRONG.TEMPERAMENT[k][0] + temperament[k] * (STRONG.TEMPERAMENT[k][1] - STRONG.TEMPERAMENT[k][0]);
+    const own = { bluff: scale('bluff'), suspicion: scale('suspicion'), aggression: scale('aggression') };
+    return decideComputerIntent(publicState(g), privateState(g, id), events, own, random, STRONG, returned);
+  };
+  // 调参时约 40% 和 60%；下限留出几个百分点的余量给随机波动
+  it('强电脑对普通电脑：4 人局 1 对 3 胜率高于 33%，2 人局高于 55%', () => {
+    const four = play(1500, [strong, computer, computer, computer]);
+    expect(four.wins[0] / 1500, `seed ${SEED}`).toBeGreaterThan(0.33);
+    const two = play(1500, [strong, computer]);
+    expect(two.wins[0] / 1500, `seed ${SEED}`).toBeGreaterThan(0.55);
+  }, 60_000);
 });

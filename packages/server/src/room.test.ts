@@ -697,6 +697,23 @@ describe('Room 电脑玩家', () => {
     expect(room.playerList.filter((p) => !p.isComputer).map((p) => p.name)).toEqual(['Alice', 'Bob']);
   });
 
+  it('新加的电脑玩家一律普通，房主在大厅阶段逐个改强度，名单上人人看得到；非房主、牌局中、目标不是电脑或不认识的强度被拒绝', () => {
+    const { room, events, alice, bob } = lobby();
+    room.addComputer(alice.id, 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    const [first, second] = computers(room);
+    room.setComputerStrength(alice.id, 'sock1', second.id, 'strong');
+    expect(events.onBroadcast).toHaveBeenLastCalledWith(room, []);
+    expect(computers(room).map((p) => [p.name, p.strength])).toEqual([[first.name, 'standard'], [second.name, 'strong']]);
+    expect(room.playerList.filter((p) => !p.isComputer).some((p) => 'strength' in p)).toBe(false);
+    expect(() => room.setComputerStrength(bob.id, 'sock2', first.id, 'strong')).toThrow('hostOnly');
+    expect(() => room.setComputerStrength(alice.id, 'sock1', bob.id, 'strong')).toThrow('illegalIntent');
+    expect(() => room.setComputerStrength(alice.id, 'sock1', first.id, 'godlike')).toThrow('illegalIntent');
+    room.startGame(alice.id, 'sock1');
+    expect(() => room.setComputerStrength(alice.id, 'sock1', first.id, 'strong')).toThrow('illegalIntent');
+    expect(computers(room).map((p) => p.strength)).toEqual(['standard', 'strong']);
+  });
+
   it('非房主、牌局中或满 6 座时添加被拒绝', () => {
     const { room, alice, bob } = lobby();
     expect(() => room.addComputer(bob.id, 'sock2')).toThrow('hostOnly');

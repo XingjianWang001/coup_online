@@ -4,6 +4,10 @@ import type { ActionType, GameEvent, PublicState, PrivateState, Role, Card } fro
 export const PHRASES = ['doubt', 'sure', 'dare', 'honest', 'framed', 'mercy', 'close', 'respect'] as const;
 export type Phrase = (typeof PHRASES)[number];
 
+// 电脑玩家的强度：新加的一律普通，房主在大厅阶段逐个改；所有人都看得到
+export const STRENGTHS = ['standard', 'strong'] as const;
+export type Strength = (typeof STRENGTHS)[number];
+
 export type Reaction =
   | { kind: 'phrase'; phrase: Phrase }
   | { kind: 'announcement'; action: ActionType; targetId?: string }
@@ -16,9 +20,10 @@ export type ClientIntent =
   | { type: 'startTunnel' }
   | { type: 'startGame' }
   | { type: 'rematch' }
-  // 大厅阶段房主添加 / 按玩家 ID 移除电脑玩家
+  // 大厅阶段房主添加电脑玩家（一律普通）/ 按玩家 ID 移除或改强度
   | { type: 'addComputer' }
   | { type: 'removeComputer'; playerId: string }
+  | { type: 'setComputerStrength'; playerId: string; strength: Strength }
   | { type: 'chooseAction'; action: ActionType; targetId?: string }
   | { type: 'challenge' }
   | { type: 'passChallenge' }
@@ -43,6 +48,7 @@ export interface LobbyPlayer {
   connected: boolean;
   isPreviousWinner: boolean;
   isComputer: boolean;
+  strength?: Strength; // 只有电脑玩家有
 }
 
 const SIMPLE_SERVER_ERROR_CODES = [

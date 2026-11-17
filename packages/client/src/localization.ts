@@ -54,8 +54,11 @@ const english = {
   startGame: 'Start game',
   startGameRequirement: 'Requires at least 2 players',
   computerPlayer: 'Computer player',
+  strongComputerPlayer: 'Advanced computer player',
   addComputer: 'Add computer player',
-  remove: 'Remove',
+  computerStrength: 'Strength of {name}',
+  standardStrength: 'Standard',
+  strongStrength: 'Advanced',
   removeComputer: 'Remove {name}',
   leftRoomNotice: 'You left the room.',
   replacedRoomNotice: 'Your seat was taken over by another tab or device.',
@@ -204,8 +207,11 @@ const simplifiedChinese = {
   startGame: '开始游戏',
   startGameRequirement: '需 ≥2 人',
   computerPlayer: '电脑玩家',
+  strongComputerPlayer: '进阶电脑玩家',
   addComputer: '添加电脑玩家',
-  remove: '移除',
+  computerStrength: '{name} 的强度',
+  standardStrength: '普通',
+  strongStrength: '进阶',
   removeComputer: '移除 {name}',
   leftRoomNotice: '你已离开房间。',
   replacedRoomNotice: '你的座位已在其他标签页或设备上接管。',
@@ -324,6 +330,7 @@ interface MessageValues {
   errorMinimumPlayers: { minimum: number };
   errorRoomFull: { maximum: number };
   removeComputer: { name: string };
+  computerStrength: { name: string };
   winner: { name: string };
   waitingForAction: { name: string };
   waitingForBlock: { name: string };
