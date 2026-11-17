@@ -1019,6 +1019,7 @@ describe('Room 表态', () => {
       null,
       'sure',
       { kind: 'phrase', phrase: '随便写点什么' },
+      { kind: 'phrase', phrase: 'framed' }, // 「冤枉啊」已从预设里删除
       { kind: 'phrase' },
       { kind: 'chat', text: 'hello' },
       { kind: 'announcement', action: 'nap' },
@@ -1059,7 +1060,7 @@ describe('Room 表态', () => {
     room.apply((g) => forfeit(g, carol.id));
     expect(room.react(carol.id, 'sock3', claim)).toBeNull();
     expect(room.react(carol.id, 'sock3', income)).toBeNull();
-    expect(room.react(carol.id, 'sock3', { kind: 'phrase', phrase: 'framed' })).not.toBeNull();
+    expect(room.react(carol.id, 'sock3', { kind: 'phrase', phrase: 'mercy' })).not.toBeNull();
 
     room.apply((g) => forfeit(g, alice.id));
     expect(room.game?.phase).toBe('gameOver');
