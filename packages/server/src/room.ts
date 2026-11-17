@@ -27,9 +27,9 @@ import {
   revealShowdownCard,
 } from '@coup/engine';
 import type { GameRepository } from './repository.ts';
-import { PHRASES, type LobbyPlayer, type Phrase, type Reaction } from '@coup/shared';
+import { PHRASES, STRENGTHS, type LobbyPlayer, type Phrase, type Reaction, type Strength } from '@coup/shared';
 import { ClientError } from './errors.ts';
-import { decideComputerIntent, drawTemperament, type ComputerIntent, type Temperament } from './computer.ts';
+import { TUNINGS, decideComputerIntent, drawTemperament, type ComputerIntent, type Returned, type Temperament } from './computer.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
@@ -117,6 +117,7 @@ export interface RoomPlayer {
   secret: string; // 重连凭证，只发给本人，不对外广播
   // 电脑玩家没有连接：connected 恒为 false，所以它不算在场、不能当房主、任何连接都冒充不了它
   isComputer: boolean;
+  strength?: Strength; // 只有电脑玩家有
 }
 
 export interface RoomEvents {
@@ -146,6 +147,8 @@ export class Room {
   // 电脑玩家本局的性格，和它的局内记忆所依据的本局公开事件：每次开局重抽、清空，不带到下一局
   private temperaments = new Map<string, Temperament>();
   private gameEvents: GameEvent[] = [];
+  // 电脑玩家本局交换时放回牌堆的牌：只有它自己看得到，和真人坐在这个座位上能记住的一样
+  private returned = new Map<string, Returned[]>();
   private lastFocusAt = 0;
   // ponytail: 离开房间的玩家不删条目；一个房间至多几位玩家、空房 5 分钟后整个回收，不值得在每条移除路径上清理
   private lastReactionAt = new Map<string, number>();
@@ -174,9 +177,11 @@ export class Room {
       connected: p.connected || p.isComputer, // 名单上的 connected 只用来标离线，电脑玩家从不离线
       isPreviousWinner: p.id === this.previousWinnerId,
       isComputer: p.isComputer,
+      ...(p.strength && { strength: p.strength }),
     }));
   }
 
+  // 新加的电脑玩家一律普通，强度由房主之后逐个改
   addComputer(playerId: string, socketId: string): void {
     this.requireLobbyHost(playerId, socketId);
     if (this.players.size >= MAX_PLAYERS) {
@@ -184,18 +189,29 @@ export class Room {
     }
     const taken = new Set([...this.players.values()].map((p) => p.name));
     const name = COMPUTER_NAMES.find((n) => !taken.has(n))!;
-    const p: RoomPlayer = { id: genId(), secret: genSecret(), name, socketId: '', connected: false, isComputer: true };
+    const p: RoomPlayer = { id: genId(), secret: genSecret(), name, socketId: '', connected: false, isComputer: true, strength: 'standard' };
     this.players.set(p.id, p);
     this.events.onBroadcast(this, []);
   }
 
   removeComputer(playerId: string, socketId: string, computerId: unknown): void {
     this.requireLobbyHost(playerId, socketId);
-    if (typeof computerId !== 'string' || !this.players.get(computerId)?.isComputer) {
-      throw new ClientError({ code: 'illegalIntent' });
-    }
-    this.removePlayer(computerId);
+    this.removePlayer(this.requireComputer(computerId).id);
     this.events.onBroadcast(this, []);
+  }
+
+  setComputerStrength(playerId: string, socketId: string, computerId: unknown, strength: unknown): void {
+    this.requireLobbyHost(playerId, socketId);
+    const computer = this.requireComputer(computerId);
+    if (!STRENGTHS.includes(strength as Strength)) throw new ClientError({ code: 'illegalIntent' });
+    computer.strength = strength as Strength;
+    this.events.onBroadcast(this, []);
+  }
+
+  private requireComputer(computerId: unknown): RoomPlayer {
+    const p = typeof computerId === 'string' ? this.players.get(computerId) : undefined;
+    if (!p?.isComputer) throw new ClientError({ code: 'illegalIntent' });
+    return p;
   }
 
   private requireLobbyHost(playerId: string, socketId: string): void {
@@ -344,8 +360,9 @@ export class Room {
       startingPlayerId,
     });
     this.gameNumber += 1;
-    this.temperaments = new Map(entries.filter((p) => p.isComputer).map((p) => [p.id, drawTemperament(this.computerRandom)]));
+    this.temperaments = new Map(entries.filter((p) => p.isComputer).map((p) => [p.id, drawTemperament(this.computerRandom, TUNINGS[p.strength!])]));
     this.gameEvents = [];
+    this.returned.clear();
     this.repo.save(this.code, this.game);
     this.startTimer(ACTION_TIMEOUT_MS);
     this.scheduleComputers(COMPUTER_FIRST_MOVE_MS);
@@ -426,7 +443,9 @@ export class Room {
 
   private decideComputer(id: string): ComputerIntent | null {
     const g = this.game;
-    return g ? decideComputerIntent(publicState(g), privateState(g, id), this.gameEvents, this.temperaments.get(id)!, this.computerRandom) : null;
+    return g
+      ? decideComputerIntent(publicState(g), privateState(g, id), this.gameEvents, this.temperaments.get(id)!, this.computerRandom, TUNINGS[this.players.get(id)!.strength!], this.returned.get(id))
+      : null;
   }
 
   // 到点再决定一次：这期间局面可能已变（窗口已关、已轮到别人），此刻无需它决定就什么也不做
@@ -434,11 +453,23 @@ export class Room {
     this.computerTimers.delete(id);
     const intent = this.decideComputer(id);
     if (!intent) return;
+    if (intent.type === 'resolveExchange') this.noteReturned(id, intent.keepIds);
     try {
       this.events.onBroadcast(this, this.applyIntent(id, intent));
     } catch (e) {
       console.error('computer move error', e);
     }
+  }
+
+  // 交换选牌时没留下的牌放回牌堆；记在自己那次 exchangeDrew 事件名下，牌堆记忆从那里开始算
+  private noteReturned(id: string, keepIds: readonly string[]): void {
+    let at = this.gameEvents.length - 1;
+    for (; at >= 0; at -= 1) {
+      const e = this.gameEvents[at];
+      if (e.type === 'exchangeDrew' && e.playerId === id) break;
+    }
+    const roles = privateState(this.game!, id).hand.filter((c) => !keepIds.includes(c.id)).map((c) => c.role);
+    this.returned.set(id, [...(this.returned.get(id) ?? []), { at, roles }]);
   }
 
   // 权威剩余时间（毫秒）供客户端渲染倒计时；无计时窗口时为 null。

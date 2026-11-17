@@ -82,9 +82,8 @@ describe('translate', () => {
     expect(translate('zh-CN', 'addComputer')).toBe('添加电脑玩家');
     expect(translate('en', 'removeComputer', { name: 'Ada' })).toBe('Remove Ada');
     expect(translate('zh-CN', 'removeComputer', { name: 'Ada' })).toBe('移除 Ada');
-    // 可见文字是可访问名称的前缀（label-in-name）
-    expect(translate('en', 'removeComputer', { name: 'Ada' }).startsWith(translate('en', 'remove'))).toBe(true);
-    expect(translate('zh-CN', 'removeComputer', { name: 'Ada' }).startsWith(translate('zh-CN', 'remove'))).toBe(true);
+    expect(translate('en', 'computerStrength', { name: 'Ada' })).toBe('Strength of Ada');
+    expect(translate('zh-CN', 'computerStrength', { name: 'Ada' })).toBe('Ada 的强度');
   });
 
   it('uses grammatical singular and plural coin displays', () => {

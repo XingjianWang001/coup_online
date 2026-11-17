@@ -12,8 +12,8 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { ACTION_CLAIM, ASSASSINATE_COST, BLOCK_ROLES, COUP_COST, FORCED_COUP_COINS, MAX_PLAYERS, parseServerError, PHRASES } from '@coup/shared';
-import type { ActionType, Card, LobbyPlayer, PublicState, Reaction, Role, ServerError } from '@coup/shared';
+import { ACTION_CLAIM, ASSASSINATE_COST, BLOCK_ROLES, COUP_COST, FORCED_COUP_COINS, MAX_PLAYERS, parseServerError, PHRASES, STRENGTHS } from '@coup/shared';
+import type { ActionType, Card, LobbyPlayer, PublicState, Reaction, Role, ServerError, Strength } from '@coup/shared';
 import {
   clearIdentity,
   clearRoomCode,
@@ -873,7 +873,21 @@ function RoomView(props: RoomViewProps) {
             locale={props.locale}
           />
         )}
-        <h3>{translate(props.locale, 'playersCount', { count: props.players.length })}</h3>
+        {/* 添加按钮钉在标题行右侧：人数变了它也不挪位置 */}
+        <div className="roster-head">
+          <h3>{translate(props.locale, 'playersCount', { count: props.players.length })}</h3>
+          {me === props.hostId && (
+            <button
+              className="ghost icon-button"
+              aria-label={translate(props.locale, 'addComputer')}
+              title={translate(props.locale, 'addComputer')}
+              onClick={() => send(props.socket, { type: 'addComputer' })}
+              disabled={props.players.length >= MAX_PLAYERS}
+            >
+              <AddComputerIcon />
+            </button>
+          )}
+        </div>
         <ul className="playerlist">
           {props.players.map((p) => (
             <li key={p.id} className={p.isHost ? 'host' : ''}>
@@ -883,32 +897,41 @@ function RoomView(props: RoomViewProps) {
                     <CrownIcon />{' '}
                   </span>
                 )}
-                {p.isComputer && <ComputerBadge locale={props.locale} />}
+                {p.strength && <ComputerBadge strength={p.strength} locale={props.locale} />}
                 {p.name}
                 {p.isHost && translate(props.locale, 'hostSuffix')}
                 {!p.connected && translate(props.locale, 'offlineSuffix')}
               </span>
-              {p.isComputer && me === props.hostId && (
-                <button
-                  className="ghost"
-                  aria-label={translate(props.locale, 'removeComputer', { name: p.name })}
-                  onClick={() => send(props.socket, { type: 'removeComputer', playerId: p.id })}
-                >
-                  {translate(props.locale, 'remove')}
-                </button>
+              {p.strength && me === props.hostId && (
+                <span className="computer-controls">
+                  <span className="segmented" role="group" aria-label={translate(props.locale, 'computerStrength', { name: p.name })}>
+                    {STRENGTHS.map((strength) => (
+                      <button
+                        key={strength}
+                        className={p.strength === strength ? 'selected' : ''}
+                        aria-pressed={p.strength === strength}
+                        onClick={() => p.strength !== strength && send(props.socket, { type: 'setComputerStrength', playerId: p.id, strength })}
+                      >
+                        {translate(props.locale, strength === 'strong' ? 'strongStrength' : 'standardStrength')}
+                      </button>
+                    ))}
+                  </span>
+                  <button
+                    className="ghost icon-button"
+                    aria-label={translate(props.locale, 'removeComputer', { name: p.name })}
+                    title={translate(props.locale, 'removeComputer', { name: p.name })}
+                    onClick={() => send(props.socket, { type: 'removeComputer', playerId: p.id })}
+                  >
+                    <Glyph size={18}>
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                    </Glyph>
+                  </button>
+                </span>
               )}
             </li>
           ))}
         </ul>
-        {me === props.hostId && (
-          <button
-            className="ghost add-computer"
-            onClick={() => send(props.socket, { type: 'addComputer' })}
-            disabled={props.players.length >= MAX_PLAYERS}
-          >
-            {translate(props.locale, 'addComputer')}
-          </button>
-        )}
         {me === props.hostId && (
           <button className="primary" onClick={props.onStart} disabled={props.players.length < 2}>
             {translate(props.locale, 'startGame')} ({translate(props.locale, 'startGameRequirement')})
@@ -924,7 +947,7 @@ function RoomView(props: RoomViewProps) {
       hand={props.hand}
       me={me}
       hostId={props.hostId}
-      computerIds={new Set(props.players.filter((p) => p.isComputer).map((p) => p.id))}
+      computers={new Map(props.players.flatMap((p) => (p.strength ? [[p.id, p.strength] as const] : [])))}
       notice={props.notice}
       reactions={props.reactions}
       latestReaction={props.latestReaction}
@@ -1635,11 +1658,11 @@ function CoinIcon() {
   );
 }
 
-// 电脑玩家的徽标，可访问名称随语言
-function ComputerBadge({ locale }: { locale: Locale }) {
-  const label = translate(locale, 'computerPlayer');
+// 电脑玩家的徽标：两档同一个图形，进阶电脑只换成淡金色；可访问名称随语言
+function ComputerBadge({ strength, locale }: { strength: Strength; locale: Locale }) {
+  const label = translate(locale, strength === 'strong' ? 'strongComputerPlayer' : 'computerPlayer');
   return (
-    <span className="computer-badge" role="img" aria-label={label} title={label}>
+    <span className={`computer-badge${strength === 'strong' ? ' advanced' : ''}`} role="img" aria-label={label} title={label}>
       <Glyph size={16} className="inline-icon">
         <line x1="12" y1="2.5" x2="12" y2="6" />
         <rect x="4" y="6" width="16" height="13" rx="3" />
@@ -1648,6 +1671,21 @@ function ComputerBadge({ locale }: { locale: Locale }) {
         <line x1="9" y1="16" x2="15" y2="16" />
       </Glyph>{' '}
     </span>
+  );
+}
+
+// 添加电脑玩家：缩小的普通徽标，右下角一个＋，两者不相交
+function AddComputerIcon() {
+  return (
+    <Glyph size={22} className="robot-glyph">
+      <line x1="8.5" y1="3" x2="8.5" y2="6" />
+      <rect x="2" y="6" width="13" height="11" rx="2.6" />
+      <circle className="f" cx="6.2" cy="11" r="1.3" />
+      <circle className="f" cx="10.8" cy="11" r="1.3" />
+      <line x1="6.5" y1="14.2" x2="10.5" y2="14.2" />
+      <line x1="19.5" y1="16" x2="19.5" y2="23" />
+      <line x1="16" y1="19.5" x2="23" y2="19.5" />
+    </Glyph>
   );
 }
 
@@ -1723,7 +1761,7 @@ function GameBoard(props: {
   me: string | undefined;
   hostId: string;
   // 牌局中按大厅名单认出电脑玩家：电脑只在大厅阶段增减
-  computerIds: ReadonlySet<string>;
+  computers: ReadonlyMap<string, Strength>;
   notice: TransientNoticeState | null;
   reactions: Record<string, ReactionBubble>;
   latestReaction: LatestReaction | null;
@@ -1821,7 +1859,7 @@ function GameBoard(props: {
       >
         <div className="seat-head">
           <span className="name">
-            {props.computerIds.has(p.id) && <ComputerBadge locale={props.locale} />}
+            {props.computers.has(p.id) && <ComputerBadge strength={props.computers.get(p.id)!} locale={props.locale} />}
             {p.name}
             {p.id === me && translate(props.locale, 'selfMarker')}
           </span>

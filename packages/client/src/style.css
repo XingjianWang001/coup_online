@@ -34,6 +34,7 @@
   --gold:       oklch(0.83 0.140 90);
   --gold-soft:  oklch(0.72 0.120 90);
   --gold-dim:   oklch(0.52 0.070 90);
+  --gold-pale:  oklch(0.86 0.110 90);  /* 进阶电脑玩家的徽标 */
 
   /* 角色色（领域约定，语义固定） */
   --duke:       oklch(0.74 0.090 70);
@@ -409,10 +410,42 @@ input:focus-visible {
   padding-block: var(--sp-1);
 }
 
-.add-computer {
-  display: block;
-  margin-bottom: var(--sp-4);
+/* 电脑玩家徽标：细线条；进阶电脑只变成淡金色，图形不变 */
+.computer-badge .glyph,
+.robot-glyph {
+  stroke-width: 1.5;
 }
+
+.computer-badge.advanced {
+  color: var(--gold-pale);
+}
+
+/* 名单标题行：添加电脑玩家的图标按钮钉在右侧 */
+.roster-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.roster-head h3 {
+  margin: 0;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+}
+
+.computer-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
 
 /* ---------- 牌局 ---------- */
 .board {
@@ -1299,7 +1332,8 @@ button.reaction-toggle:hover:not(:disabled) {
   margin-left: var(--sp-2);
 }
 
-.rules-level-switch {
+.rules-level-switch,
+.segmented {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-1);
@@ -1309,7 +1343,8 @@ button.reaction-toggle:hover:not(:disabled) {
   background: var(--panel);
 }
 
-.rules-level-switch button {
+.rules-level-switch button,
+.segmented button {
   min-height: 44px;
   margin: 0;
   border-color: transparent;
@@ -1317,20 +1352,34 @@ button.reaction-toggle:hover:not(:disabled) {
   color: var(--text-2);
 }
 
-.rules-level-switch button + button {
+.rules-level-switch button + button,
+.segmented button + button {
   margin-left: 0;
 }
 
-.rules-level-switch button:hover {
+.rules-level-switch button:hover,
+.segmented button:hover {
   border-color: var(--line);
   background: var(--panel-2);
   color: var(--text);
 }
 
-.rules-level-switch button.selected {
+.rules-level-switch button.selected,
+.segmented button.selected {
   border-color: var(--text-2);
   background: var(--panel-2);
   color: var(--text);
+}
+
+/* 名单行里的强度切换：比规则中心的紧凑，免得把行撑高 */
+.segmented {
+  display: inline-grid;
+  gap: 2px;
+  padding: 2px;
+}
+
+.segmented button {
+  padding-inline: var(--sp-3);
 }
 
 .rules-body {

@@ -227,6 +227,12 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       room.removeComputer(socket.data.playerId, socket.id, raw.playerId);
       break;
     }
+    case 'setComputerStrength': {
+      const room = rooms.get(socket.data.roomCode);
+      if (!room) throw new ClientError({ code: 'roomNotFound' });
+      room.setComputerStrength(socket.data.playerId, socket.id, raw.playerId, raw.strength);
+      break;
+    }
     case 'leaveRoom': {
       // 房间已被超时回收（或服务器重启）时，离开视为已完成，让客户端能清掉残留的房间状态。
       const room = rooms.get(socket.data.roomCode);
