@@ -70,6 +70,9 @@ const COMPUTER_DELAY_MS: Record<TimedPhase, [number, number]> = {
 const COMPUTER_FIRST_MOVE_MS = 3_000;
 // 房里的真人全被淘汰、只剩旁观时，电脑约 1 秒一步
 const COMPUTER_SPECTATED_MS = 1_000;
+// 出手延迟右偏：0～1 的均匀随机数取幂后再铺到区间上，多数时候偏快、偶尔长考，指数越大越快。
+// 问询窗口里，声称冲着自己来时想得久一些，不冲着自己来时更快。起始值，靠试玩校准
+const COMPUTER_DELAY_SKEW = { aimedAtSelf: 1.5, aimedElsewhere: 3, otherPhases: 2 };
 
 // 行动超时的默认行动：金币到了 FORCED_COUP_COINS 必须政变（随机目标），否则收入
 function autoAction(g: GameState): GameEvent[] {
@@ -434,9 +437,13 @@ export class Room {
     if (!isTimed(phase)) return;
     const humanAlive = [...this.players.values()].some((p) => !p.isComputer && g.players.find((gp) => gp.id === p.id)?.alive);
     const [min, max] = COMPUTER_DELAY_MS[phase];
+    const inquiry = phase === 'awaitingChallenge' || phase === 'awaitingBlock';
+    // 声称冲着谁来只看公开信息：行动的声称冲着它的目标，阻挡的声称冲着被拦的行动者
+    const aimedAt = g.challengeSubject === 'block' ? g.pending!.actorId : g.pending?.targetId;
     for (const p of this.players.values()) {
       if (!p.isComputer || this.computerTimers.has(p.id) || !this.decideComputer(p.id)) continue;
-      const delay = this.options.computerDelayMs?.(phase) ?? (humanAlive ? min + this.computerRandom() * (max - min) : COMPUTER_SPECTATED_MS);
+      const skew = COMPUTER_DELAY_SKEW[!inquiry ? 'otherPhases' : aimedAt === p.id ? 'aimedAtSelf' : 'aimedElsewhere'];
+      const delay = this.options.computerDelayMs?.(phase) ?? (humanAlive ? min + this.computerRandom() ** skew * (max - min) : COMPUTER_SPECTATED_MS);
       this.computerTimers.set(p.id, setTimeout(() => this.computerMove(p.id), delay + extraMs));
     }
   }
