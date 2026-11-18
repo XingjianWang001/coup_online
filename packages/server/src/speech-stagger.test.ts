@@ -52,7 +52,8 @@ describe('Room 电脑表态错峰', () => {
     allow(c1);
     tax(c2); // c2 的表态原定在 1.0 秒，离 c1 只有 0.5 秒
     vi.advanceTimersByTime(2_000);
-    expect(sentAt.map((t) => t - start)).toEqual([500, 1_300]);
+    // 只看两位声称者自己的表态；之后 c1 对 c2 这次声称的试探（表 3）再顺延到 2.1 秒
+    expect(sentAt.slice(0, 2).map((t) => t - start)).toEqual([500, 1_300]);
   });
 
   it('顺延期间问询窗口已结束，顺延的表态取消，不留计时器', () => {
