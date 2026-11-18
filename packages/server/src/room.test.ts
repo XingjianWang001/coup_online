@@ -6,7 +6,7 @@ import type { GameRepository } from './repository.ts';
 
 function makeRoom(options?: RoomOptions) {
   const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
-  const events = { onBroadcast: vi.fn(), onEmpty: vi.fn(), onReaction: vi.fn() };
+  const events = { onBroadcast: vi.fn(), onEmpty: vi.fn(), onReaction: vi.fn(), onShowdownFocus: vi.fn() };
   const room = new Room('ABC123', '', repo, events, options);
   return { room, repo, events };
 }
@@ -1104,6 +1104,50 @@ describe('Room 对质悬停同步', () => {
     expect(room.focusShowdownCard(alice.id, 'sock1', null)).toEqual({ slot: null });
     expect(() => room.focusShowdownCard(alice.id, 'sock1', 2)).toThrow('illegalIntent');
     expect(() => room.focusShowdownCard(alice.id, 'sock1', '0')).toThrow('illegalIntent');
+  });
+});
+
+describe('Room 电脑翻牌前的犹豫', () => {
+  afterEach(() => vi.useRealTimers());
+
+  const lehmer = (seed: number) => () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  // Alice 先手、电脑第二：电脑声称公爵征税，Alice 质疑，走到电脑翻牌。
+  // 返回对质开始后全房间收到的电脑对准（带时刻）、翻牌时刻和翻开的牌位
+  function showdown(options: RoomOptions, roles?: Role[]) {
+    vi.useFakeTimers();
+    vi.clearAllTimers();
+    const made = makeRoom({ startingPlayerRandom: () => 0, ...options });
+    const { room, events } = made;
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    const computerId = room.playerList.find((p) => p.isComputer)!.id;
+    room.startGame(alice.id, 'sock1');
+    const hand = room.game!.players.find((p) => p.id === computerId)!.hand;
+    // 只改角色、不对调牌：整副牌的构成和这场对质无关
+    if (roles) {
+      room.game!.deck.push(...hand.splice(roles.length));
+      roles.forEach((role, i) => (hand[i].role = role));
+    }
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' });
+    room.apply((g) => chooseAction(g, computerId, 'tax'));
+    const start = Date.now();
+    const focuses: { at: number; slot: number | null }[] = [];
+    events.onShowdownFocus.mockImplementation((_, focus: { slot: number | null }) => focuses.push({ at: Date.now() - start, ...focus }));
+    room.dispatch(alice.id, 'sock1', { type: 'challenge' });
+    const deadlineMs = room.getDeadlineMs();
+    while (room.game!.phase === 'showdown') vi.advanceTimersToNextTimer();
+    const revealAt = Date.now() - start;
+    const resolved = events.onBroadcast.mock.lastCall![1].find((e: GameEvent) => e.type === 'challengeResolved');
+    return { ...made, alice, computerId, focuses, revealAt, deadlineMs, slot: resolved.slot as number };
+  }
+
+  it('两张暗牌：翻牌前全房间收到对准，在两个牌位之间移动，最后一次落在翻开的那张上', () => {
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const { focuses, revealAt, slot } = showdown({ speechRandom: lehmer(seed) });
+      expect(new Set(focuses.map((f) => f.slot))).toEqual(new Set([0, 1]));
+      expect(focuses.at(-1)!.slot).toBe(slot);
+      expect(focuses.at(-1)!.at).toBeLessThan(revealAt);
+    }
   });
 });
 
