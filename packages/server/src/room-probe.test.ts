@@ -7,7 +7,7 @@ import type { GameRepository } from './repository.ts';
 
 function makeRoom(options?: RoomOptions) {
   const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
-  const events = { onBroadcast: vi.fn(), onEmpty: vi.fn(), onReaction: vi.fn() };
+  const events = { onBroadcast: vi.fn(), onEmpty: vi.fn(), onReaction: vi.fn(), onShowdownFocus: vi.fn() };
   const room = new Room('ABC123', '', repo, events, options);
   return { room, repo, events };
 }
