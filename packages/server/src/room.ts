@@ -30,7 +30,7 @@ import type { GameRepository } from './repository.ts';
 import { PHRASES, STRENGTHS, type LobbyPlayer, type Phrase, type Reaction, type Strength } from '@coup/shared';
 import { ClientError } from './errors.ts';
 import { TUNINGS, decideComputerIntent, drawTemperament, type ComputerIntent, type Returned, type Temperament } from './computer.ts';
-import { afterOwnClaim, speak, type Moment } from './speech.ts';
+import { afterOwnClaim, speak, stagger, type Moment, type Said } from './speech.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
@@ -154,6 +154,8 @@ export class Room {
   private computerTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // 电脑还没发出的表态
   private speechTimers = new Set<ReturnType<typeof setTimeout>>();
+  // 电脑本局已发出的表态（错峰、降温、重复降权用），开局清空
+  private computerSpeech: Said[] = [];
   // 电脑玩家本局的性格，和它的局内记忆所依据的本局公开事件：每次开局重抽、清空，不带到下一局
   private temperaments = new Map<string, Temperament>();
   private gameEvents: GameEvent[] = [];
@@ -374,6 +376,7 @@ export class Room {
     this.gameNumber += 1;
     this.temperaments = new Map(entries.filter((p) => p.isComputer).map((p) => [p.id, drawTemperament(this.computerRandom, TUNINGS[p.strength!])]));
     this.gameEvents = [];
+    this.computerSpeech = [];
     this.returned.clear();
     this.repo.save(this.code, this.game);
     this.startTimer(ACTION_TIMEOUT_MS);
@@ -482,14 +485,22 @@ export class Room {
     if (!this.players.get(id)?.isComputer) return;
     const speech = speak(moment, this.speechRandom);
     if (!speech) return;
+    this.sayLater(id, speech.reaction, speech.delayMs);
+  }
+
+  // 到点时离全桌上一条电脑表态太近就顺延（stagger），顺延的计时器也在 speechTimers 里，照样随 clearTimer 取消
+  private sayLater(id: string, reaction: Reaction, ms: number): void {
     const t = setTimeout(() => {
       this.speechTimers.delete(t);
+      const now = Date.now();
+      const wait = stagger(now, this.computerSpeech.at(-1)?.at, this.speechRandom);
+      if (wait > 0) return this.sayLater(id, reaction, wait);
       try {
-        this.relay(id, speech.reaction);
+        if (this.relay(id, reaction)) this.computerSpeech.push({ playerId: id, reaction, at: now });
       } catch (e) {
         console.error('computer speech error', e);
       }
-    }, speech.delayMs);
+    }, ms);
     this.speechTimers.add(t);
   }
 

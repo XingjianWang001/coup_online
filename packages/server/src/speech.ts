@@ -71,6 +71,24 @@ export function speak({ options, delayMs: [min, max] }: Moment, random: () => nu
   return null;
 }
 
+// ── 全桌错峰与降温（#74）：Room.say 让所有场景的电脑表态都经过这里，场景表不用管 ──
+// 两条电脑表态之间至少隔这么久；撞上的顺延到那之后，再加 0～JITTER_MS 的抖动
+const SPEECH_GAP_MS = 800;
+const JITTER_MS = 300;
+
+// 电脑已发出的一条表态
+export interface Said {
+  playerId: string;
+  reaction: Reaction;
+  at: number;
+}
+
+// 到点时决定这条表态是现在说还是再等多久：离全桌上一条电脑表态（lastAt）不足间隔就顺延
+export function stagger(now: number, lastAt: number | undefined, random: () => number): number {
+  const wait = (lastAt ?? -Infinity) + SPEECH_GAP_MS - now;
+  return wait > 0 ? wait + random() * JITTER_MS : 0;
+}
+
 // 公开前情复用电脑的局内记忆（computer.ts 的 recall）：不给它自己放回牌堆的牌，它得出的就只依赖公开事件
 const memoryOf = (state: PublicState, events: readonly GameEvent[], me: string) => recall(events, me, state.players.map((p) => p.id), 0, []);
 const shownCount = (state: PublicState, role: Role) => state.players.reduce((n, p) => n + p.revealed.filter((r) => r === role).length, 0);
