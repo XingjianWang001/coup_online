@@ -119,3 +119,41 @@ export function afterOwnClaim(state: PublicState, events: readonly GameEvent[], 
   const options = toOptions(merge(AFTER_OWN_CLAIM, situation), now.standing.get(me)?.has(role) ? role : undefined);
   return { options, delayMs: AFTER_OWN_CLAIM_MS };
 }
+
+// ── 表 8：牌局结束后（只发短语） ──
+interface AfterGame {
+  won: boolean;
+  lastOut: boolean; // 自己是最后一个被淘汰的
+  shown: number; // 获胜者已揭晓几张
+  bluffShown: boolean; // 获胜者揭晓的牌里没有他最后声称的角色（他本局没声称过就不算）
+  honestShown: boolean; // 获胜者揭晓的牌里有他本局声称过的角色
+}
+const AFTER_GAME: readonly Row<AfterGame>[] = [
+  { when: (s) => !s.won && s.lastOut, say: { respect: HIGH } },
+  { when: (s) => !s.won && !s.lastOut, say: { respect: FIRST, silence: QUIET } },
+  { when: (s) => !s.won && s.bluffShown, say: { respect: FIRST, doubt: SECOND } },
+  { when: (s) => s.won && s.shown === 0, say: { respect: FIRST, silence: QUIET } },
+  { when: (s) => s.won && s.honestShown, say: { honest: FIRST, respect: SECOND } },
+  { when: (s) => s.won && s.shown === 2 && s.bluffShown, say: { dare: FIRST, respect: SECOND } },
+];
+// 每位电脑在结束后这段时间里各醒来一次（Room 抽时刻），按那时已公开的揭晓结果决定说不说，说就当即说
+export const AFTER_GAME_MS = [1_000, 6_000] as const;
+const AT_ONCE = [0, 0] as const;
+
+// 牌局没结束时没有候选。只读公开的揭晓结果，不读获胜者的暗牌
+export function afterGame(state: PublicState, events: readonly GameEvent[], me: string): Moment {
+  const winner = state.winnerId;
+  if (state.phase !== 'gameOver' || !winner) return NOTHING(AT_ONCE);
+  const claims = events.flatMap((e) =>
+    e.type === 'actionChosen' && e.actorId === winner && e.claimedRole ? [e.claimedRole] : e.type === 'blocked' && e.blockerId === winner ? [e.role] : [],
+  );
+  const shown = state.players.find((p) => p.id === winner)!.postGameRevealed.map((r) => r.role);
+  const situation: AfterGame = {
+    won: me === winner,
+    lastOut: events.filter((e) => e.type === 'eliminated').at(-1)?.playerId === me,
+    shown: shown.length,
+    bluffShown: shown.length > 0 && claims.length > 0 && !shown.includes(claims.at(-1)!),
+    honestShown: shown.some((r) => claims.includes(r)),
+  };
+  return { options: toOptions(merge(AFTER_GAME, situation), undefined), delayMs: AT_ONCE };
+}
