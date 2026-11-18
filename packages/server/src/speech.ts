@@ -83,10 +83,16 @@ export interface Said {
   at: number;
 }
 
-// 到点时决定这条表态是现在说还是再等多久：离全桌上一条电脑表态（lastAt）不足间隔就顺延
-export function stagger(now: number, lastAt: number | undefined, random: () => number): number {
+// 顺延后比原定时刻晚过这么久就取消：说的是眼前的事，晚到就过时了，也不排长队。
+// 换阶段或换行动者时 clearTimer 已经把这期间的表态清掉，这里兜住同一阶段里排得太久的（例如牌局结束后几个电脑都要说）
+const MAX_LATE_MS = 2_000;
+
+// 到点时决定这条表态现在说（0）、再等多久，还是取消（null）：离全桌上一条电脑表态（lastAt）不足间隔就顺延。dueAt 是原定时刻
+export function stagger(now: number, lastAt: number | undefined, dueAt: number, random: () => number): number | null {
   const wait = (lastAt ?? -Infinity) + SPEECH_GAP_MS - now;
-  return wait > 0 ? wait + random() * JITTER_MS : 0;
+  if (wait <= 0) return 0;
+  const delay = wait + random() * JITTER_MS;
+  return now + delay - dueAt > MAX_LATE_MS ? null : delay;
 }
 
 // 公开前情复用电脑的局内记忆（computer.ts 的 recall）：不给它自己放回牌堆的牌，它得出的就只依赖公开事件

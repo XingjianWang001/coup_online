@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { chooseAction, passChallenge } from '@coup/engine';
 import { Room, type RoomOptions } from './room.ts';
 import type { GameRepository } from './repository.ts';
+import { stagger } from './speech.ts';
 
 function makeRoom(options?: RoomOptions) {
   const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
@@ -51,5 +52,35 @@ describe('Room 电脑表态错峰', () => {
     tax(c2); // c2 的表态原定在 1.0 秒，离 c1 只有 0.5 秒
     vi.advanceTimersByTime(2_000);
     expect(sentAt.map((t) => t - start)).toEqual([500, 1_300]);
+  });
+
+  it('顺延期间问询窗口已结束，顺延的表态取消，不留计时器', () => {
+    const { room, alice, c1, c2, income, tax, allow, sentAt } = twoComputers();
+    income(alice.id);
+    tax(c1);
+    vi.advanceTimersByTime(500);
+    allow(c1);
+    tax(c2); // 原定 1.0 秒，顺延到 1.3 秒
+    vi.advanceTimersByTime(600);
+    allow(c2); // 1.1 秒窗口结束
+    expect(room.game!.phase).toBe('choosingAction');
+    expect(vi.getTimerCount()).toBe(1); // 只剩 Alice 回合的时限
+    vi.advanceTimersByTime(2_000);
+    expect(sentAt).toHaveLength(1);
+  });
+});
+
+describe('stagger', () => {
+  it('离上一条电脑表态足够远就现在说；太近就顺延到间隔之后，加少量抖动', () => {
+    expect(stagger(10_000, undefined, 10_000, () => 0.5)).toBe(0);
+    expect(stagger(10_000, 9_000, 10_000, () => 0.5)).toBe(0);
+    expect(stagger(10_000, 9_500, 10_000, () => 0)).toBe(300);
+    expect(stagger(10_000, 10_000, 10_000, () => 0.5)).toBe(950);
+  });
+
+  it('顺延后比原定时刻晚 2 秒以上就取消，不排长队', () => {
+    expect(stagger(10_000, 10_000, 9_000, () => 0)).toBe(800); // 晚 1.8 秒
+    expect(stagger(10_000, 10_000, 8_500, () => 0)).toBeNull(); // 晚 2.3 秒
+    expect(stagger(10_000, 10_000, 9_000, () => 0.999)).toBeNull(); // 抖动后晚过 2 秒
   });
 });

@@ -485,16 +485,17 @@ export class Room {
     if (!this.players.get(id)?.isComputer) return;
     const speech = speak(moment, this.speechRandom);
     if (!speech) return;
-    this.sayLater(id, speech.reaction, speech.delayMs);
+    this.sayLater(id, speech.reaction, speech.delayMs, Date.now() + speech.delayMs);
   }
 
-  // 到点时离全桌上一条电脑表态太近就顺延（stagger），顺延的计时器也在 speechTimers 里，照样随 clearTimer 取消
-  private sayLater(id: string, reaction: Reaction, ms: number): void {
+  // 到点时离全桌上一条电脑表态太近就顺延、晚太多就取消（stagger）。顺延的计时器也在 speechTimers 里，照样随 clearTimer 取消
+  private sayLater(id: string, reaction: Reaction, ms: number, dueAt: number): void {
     const t = setTimeout(() => {
       this.speechTimers.delete(t);
       const now = Date.now();
-      const wait = stagger(now, this.computerSpeech.at(-1)?.at, this.speechRandom);
-      if (wait > 0) return this.sayLater(id, reaction, wait);
+      const wait = stagger(now, this.computerSpeech.at(-1)?.at, dueAt, this.speechRandom);
+      if (wait === null) return;
+      if (wait > 0) return this.sayLater(id, reaction, wait, dueAt);
       try {
         if (this.relay(id, reaction)) this.computerSpeech.push({ playerId: id, reaction, at: now });
       } catch (e) {
