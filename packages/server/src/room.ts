@@ -30,7 +30,7 @@ import type { GameRepository } from './repository.ts';
 import { PHRASES, STRENGTHS, type LobbyPlayer, type Phrase, type Reaction, type Strength } from '@coup/shared';
 import { ClientError } from './errors.ts';
 import { TUNINGS, decideComputerIntent, drawTemperament, type ComputerIntent, type Returned, type Temperament } from './computer.ts';
-import { afterOwnClaim, speak, type Moment } from './speech.ts';
+import { afterOwnClaim, probe, speak, type Moment } from './speech.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
@@ -475,6 +475,11 @@ export class Room {
       const claimantId = g.pending!.blockById ?? g.pending!.actorId;
       this.say(claimantId, afterOwnClaim(publicState(g), this.gameEvents, claimantId));
     }
+    // 表 3：别人作出声称（含阻挡），有资格质疑、还没回应的电脑试探一句；不读也不改它要不要质疑
+    if (g.phase === 'awaitingChallenge' && events.some((e) => e.type === 'actionChosen' || e.type === 'blocked')) {
+      const state = publicState(g);
+      for (const id of this.players.keys()) this.say(id, probe(state, this.gameEvents, id));
+    }
   }
 
   // 电脑抽签决定说不说；说的话到点经和真人相同的校验与限流发出。计时器随 clearTimer 一起清
@@ -485,7 +490,8 @@ export class Room {
     const t = setTimeout(() => {
       this.speechTimers.delete(t);
       try {
-        this.relay(id, speech.reaction);
+        // 有的话只在发送时语境还在才说（例如自己已放弃）：不换阶段的变化，上面的清除管不到
+        if (!moment.current || moment.current(publicState(this.game!))) this.relay(id, speech.reaction);
       } catch (e) {
         console.error('computer speech error', e);
       }
