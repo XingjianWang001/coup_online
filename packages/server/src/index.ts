@@ -18,7 +18,12 @@ const CLIENT_DIST = join(__dirname, '../../client/dist');
 
 // 浏览器验证用（scripts/ui-check.mjs）：SPEECH_RANDOM=0 让电脑表态的随机源恒为这个数，每个能开口的时刻都开口、按最短延迟说
 const SPEECH_RANDOM = process.env.SPEECH_RANDOM === undefined ? undefined : Number(process.env.SPEECH_RANDOM);
-const roomOptions: RoomOptions = SPEECH_RANDOM === undefined ? {} : { speechRandom: () => SPEECH_RANDOM };
+// COMPUTER_DELAY_MS=300 让电脑每一步都只等这么久（替换默认区间和旁观加速），要打完一整局的场景放得进 ui-check 的时限
+const COMPUTER_DELAY_MS = process.env.COMPUTER_DELAY_MS === undefined ? undefined : Number(process.env.COMPUTER_DELAY_MS);
+const roomOptions: RoomOptions = {
+  ...(SPEECH_RANDOM !== undefined && { speechRandom: () => SPEECH_RANDOM }),
+  ...(COMPUTER_DELAY_MS !== undefined && { computerDelayMs: () => COMPUTER_DELAY_MS }),
+};
 
 const repo = new InMemoryGameRepository();
 const rooms = new Map<string, Room>();
