@@ -7,7 +7,8 @@ import type { GameRepository } from './repository.ts';
 function makeRoom(options?: RoomOptions) {
   const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
   const events = { onBroadcast: vi.fn(), onEmpty: vi.fn(), onReaction: vi.fn(), onShowdownFocus: vi.fn() };
-  const room = new Room('ABC123', '', repo, events, options);
+  // 电脑默认不开口：轮到它时的行动预告会把出手推后 0.8～1.5 秒，要量出手时刻的用例不该随 Math.random 时有时无
+  const room = new Room('ABC123', '', repo, events, { speechRandom: () => 0.999_999, ...options });
   return { room, repo, events };
 }
 
