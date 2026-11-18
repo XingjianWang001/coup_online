@@ -95,6 +95,24 @@ export function stagger(now: number, lastAt: number | undefined, dueAt: number, 
   return now + delay - dueAt > MAX_LATE_MS ? null : delay;
 }
 
+// 降温：全桌上一条电脑表态（自己的或别的电脑的）刚发出时沉默乘 COOL，COOL_MS 内线性恢复到原值
+const COOL = 3;
+const COOL_MS = 8_000;
+// 重复降权：自己最近 REPEAT_MEMORY 条里说过的同一条，权重乘 REPEAT（不禁用）
+const REPEAT = 0.3;
+const REPEAT_MEMORY = 3;
+// 同一条表态：字段相同即可，不论对象怎么拼出来的
+const lineKey = (r: Reaction) => JSON.stringify(r, Object.keys(r).sort());
+
+// 抽签前按电脑本局说过的话（said，按时间先后）调整候选的权重
+export function temper(moment: Moment, me: string, said: readonly Said[], now: number): Moment {
+  const last = said.at(-1);
+  const cool = 1 + (COOL - 1) * Math.max(0, 1 - (last ? now - last.at : Infinity) / COOL_MS);
+  const recent = new Set(said.filter((s) => s.playerId === me).slice(-REPEAT_MEMORY).map((s) => lineKey(s.reaction)));
+  const options: Options = moment.options.map(([r, w]) => [r, r ? (recent.has(lineKey(r)) ? w * REPEAT : w) : w * cool]);
+  return { ...moment, options };
+}
+
 // 公开前情复用电脑的局内记忆（computer.ts 的 recall）：不给它自己放回牌堆的牌，它得出的就只依赖公开事件
 const memoryOf = (state: PublicState, events: readonly GameEvent[], me: string) => recall(events, me, state.players.map((p) => p.id), 0, []);
 const shownCount = (state: PublicState, role: Role) => state.players.reduce((n, p) => n + p.revealed.filter((r) => r === role).length, 0);

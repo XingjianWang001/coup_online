@@ -30,7 +30,7 @@ import type { GameRepository } from './repository.ts';
 import { PHRASES, STRENGTHS, type LobbyPlayer, type Phrase, type Reaction, type Strength } from '@coup/shared';
 import { ClientError } from './errors.ts';
 import { TUNINGS, decideComputerIntent, drawTemperament, type ComputerIntent, type Returned, type Temperament } from './computer.ts';
-import { afterOwnClaim, speak, stagger, type Moment, type Said } from './speech.ts';
+import { afterOwnClaim, speak, stagger, temper, type Moment, type Said } from './speech.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
@@ -483,7 +483,7 @@ export class Room {
   // 电脑抽签决定说不说；说的话到点经和真人相同的校验与限流发出。计时器随 clearTimer 一起清
   private say(id: string, moment: Moment): void {
     if (!this.players.get(id)?.isComputer) return;
-    const speech = speak(moment, this.speechRandom);
+    const speech = speak(temper(moment, id, this.computerSpeech, Date.now()), this.speechRandom);
     if (!speech) return;
     this.sayLater(id, speech.reaction, speech.delayMs, Date.now() + speech.delayMs);
   }

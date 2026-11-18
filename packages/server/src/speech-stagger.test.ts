@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { chooseAction, passChallenge } from '@coup/engine';
 import { Room, type RoomOptions } from './room.ts';
 import type { GameRepository } from './repository.ts';
-import { stagger } from './speech.ts';
+import type { Reaction } from '@coup/shared';
+import { stagger, temper, type Moment } from './speech.ts';
 
 function makeRoom(options?: RoomOptions) {
   const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
@@ -68,6 +69,45 @@ describe('Room 电脑表态错峰', () => {
     vi.advanceTimersByTime(2_000);
     expect(sentAt).toHaveLength(1);
   });
+
+  it('顺延期间真人都离开、牌局作废，顺延的表态取消，只剩空房回收的计时器', () => {
+    const { room, alice, c1, c2, income, tax, allow, sentAt } = twoComputers();
+    income(alice.id);
+    tax(c1);
+    vi.advanceTimersByTime(500);
+    allow(c1);
+    tax(c2);
+    vi.advanceTimersByTime(600); // c2 的表态已顺延
+    room.leavePlayer(alice.id, 'sock1');
+    expect(room.game).toBeNull();
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(2_000);
+    expect(sentAt).toHaveLength(1);
+  });
+
+  it('别的电脑刚说过话时开口的概率降低，过一阵恢复到原值', () => {
+    const QUANTILES = Array.from({ length: 100 }, (_, i) => (i + 0.5) / 100);
+    // c2 首次声称征税时说不说话（局面三种情形相同）。c1 先说时，发言随机源的前两次（c1 说哪条、多久后说）取 0，让它一定开口
+    const c2Speaks = (c1First: 'income' | 'speak', pauseMs: number) =>
+      QUANTILES.filter((u) => {
+        let draws = 0;
+        const { events, alice, c1, c2, income, tax, allow } = twoComputers({ speechRandom: () => (c1First === 'speak' && (draws += 1) <= 2 ? 0 : u) });
+        income(alice.id);
+        if (c1First === 'speak') {
+          tax(c1);
+          vi.advanceTimersByTime(500);
+          allow(c1);
+        } else income(c1);
+        vi.advanceTimersByTime(pauseMs);
+        tax(c2);
+        vi.advanceTimersByTime(5_000);
+        return events.onReaction.mock.calls.some(([, r]) => r.playerId === c2);
+      }).length;
+    const fresh = c2Speaks('income', 0);
+    expect(fresh).toBeGreaterThan(0);
+    expect(c2Speaks('speak', 0)).toBeLessThan(fresh);
+    expect(c2Speaks('speak', 8_000)).toBe(fresh);
+  });
 });
 
 describe('stagger', () => {
@@ -82,5 +122,40 @@ describe('stagger', () => {
     expect(stagger(10_000, 10_000, 9_000, () => 0)).toBe(800); // 晚 1.8 秒
     expect(stagger(10_000, 10_000, 8_500, () => 0)).toBeNull(); // 晚 2.3 秒
     expect(stagger(10_000, 10_000, 9_000, () => 0.999)).toBeNull(); // 抖动后晚过 2 秒
+  });
+});
+
+describe('temper', () => {
+  const dare: Reaction = { kind: 'phrase', phrase: 'dare' };
+  const honest: Reaction = { kind: 'phrase', phrase: 'honest' };
+  const duke: Reaction = { kind: 'verbalClaim', has: true, role: 'duke' };
+  const moment: Moment = { options: [[dare, 3], [duke, 2], [null, 8]], delayMs: [500, 1_500] };
+  const NOW = 100_000;
+  const silence = (m: Moment) => m.options.find(([r]) => r === null)![1];
+  const weightOf = (m: Moment, r: Reaction) => m.options.find(([o]) => o === r)![1];
+
+  it('没有电脑说过话时不变', () => {
+    expect(temper(moment, 'me', [], NOW)).toEqual(moment);
+  });
+
+  it('自己或别的电脑刚说过话时多沉默，8 秒内线性恢复到原值；只改沉默，不改各条之间的比例', () => {
+    const after = (ago: number, by = 'other') => temper(moment, 'me', [{ playerId: by, reaction: honest, at: NOW - ago }], NOW);
+    expect(silence(after(0))).toBe(24);
+    expect(silence(after(0, 'me'))).toBe(24);
+    expect(silence(after(4_000))).toBe(16);
+    expect(silence(after(8_000))).toBe(8);
+    expect(silence(after(20_000))).toBe(8);
+    expect(after(0).options.filter(([r]) => r)).toEqual(moment.options.filter(([r]) => r));
+  });
+
+  it('自己最近说过的同一条权重降低但仍非零；别人说过的、自己更早说过的不降', () => {
+    const long = NOW - 60_000; // 早已过了降温
+    const mine = (...rs: Reaction[]) => rs.map((reaction, i) => ({ playerId: 'me', reaction, at: long + i }));
+    const repeated = temper(moment, 'me', mine({ kind: 'verbalClaim', has: true, role: 'duke' }), NOW); // 另造的同一条也算
+    expect(weightOf(repeated, duke)).toBeCloseTo(2 * 0.3);
+    expect(weightOf(repeated, dare)).toBe(3);
+    expect(silence(repeated)).toBe(8);
+    expect(weightOf(temper(moment, 'me', [{ playerId: 'other', reaction: dare, at: long }], NOW), dare)).toBe(3);
+    expect(weightOf(temper(moment, 'me', mine(dare, honest, honest, honest), NOW), dare)).toBe(3); // 之后自己又说了 3 条
   });
 });
