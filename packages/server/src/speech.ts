@@ -5,7 +5,7 @@
 // Room 在对应的时刻调用它，用 speak 抽签。新场景另写一张表和一个函数，不改已有的。调参只改表里的数。
 import type { ActionType, GameEvent, PublicState, Role } from '@coup/engine';
 import type { Phrase, Reaction } from '@coup/shared';
-import { recall } from './computer.ts';
+import { contradicts, recall } from './computer.ts';
 
 // 候选的一条：短语，或「我有 X」（claim，X 由各场景按语境定，必须在自己仍作数的声称里，否则不算候选）
 export type Line = Phrase | 'claim';
@@ -46,6 +46,8 @@ export type Options = (readonly [Reaction | null, number])[];
 export interface Moment {
   options: Options;
   delayMs: readonly [number, number]; // 从此刻起多久之后说
+  current?: (state: PublicState) => boolean; // 到点发送时语境还在不在；不给的只靠换阶段、换行动者时的清除
+  depth?: number; // 接话的层数（表 7）：回应第 n 层的这句是第 n + 1 层；不是接话的是 0
 }
 const NOTHING = (delayMs: readonly [number, number]): Moment => ({ options: [], delayMs });
 
@@ -116,6 +118,13 @@ export function temper(moment: Moment, me: string, said: readonly Said[], now: n
 // 公开前情复用电脑的局内记忆（computer.ts 的 recall）：不给它自己放回牌堆的牌，它得出的就只依赖公开事件
 const memoryOf = (state: PublicState, events: readonly GameEvent[], me: string) => recall(events, me, state.players.map((p) => p.id), 0, []);
 const shownCount = (state: PublicState, role: Role) => state.players.reduce((n, p) => n + p.revealed.filter((r) => r === role).length, 0);
+// 最近一次声称（行动或阻挡）的事件下标，没有时是 -1
+function lastClaimAt(events: readonly GameEvent[]): number {
+  let at = events.length - 1;
+  const claims = (e: GameEvent) => e.type === 'blocked' || (e.type === 'actionChosen' && !!e.claimedRole);
+  while (at >= 0 && !claims(events[at])) at -= 1;
+  return at;
+}
 
 // ── 表 2：自己刚作出声称（含阻挡），问询窗口还开着 ──
 interface OwnClaim {
@@ -146,9 +155,7 @@ export function afterOwnClaim(state: PublicState, events: readonly GameEvent[], 
   if (state.phase !== 'awaitingChallenge' || !pending || (blocking ? pending.blockById : pending.actorId) !== me) return NOTHING(AFTER_OWN_CLAIM_MS);
   const role = blocking ? pending.blockRole! : pending.claimedRole!;
   // 这次声称的事件是最后一条 actionChosen 或 blocked：在它之前就作数的才算延续
-  let at = events.length - 1;
-  while (at >= 0 && events[at].type !== 'actionChosen' && events[at].type !== 'blocked') at -= 1;
-  const before = memoryOf(state, events.slice(0, at), me);
+  const before = memoryOf(state, events.slice(0, lastClaimAt(events)), me);
   const now = memoryOf(state, events, me);
   const situation: OwnClaim = {
     continuing: before.standing.get(me)?.has(role) ?? false,
@@ -160,4 +167,121 @@ export function afterOwnClaim(state: PublicState, events: readonly GameEvent[], 
   };
   const options = toOptions(merge(AFTER_OWN_CLAIM, situation), now.standing.get(me)?.has(role) ? role : undefined);
   return { options, delayMs: AFTER_OWN_CLAIM_MS };
+}
+
+// ── 表 7：接话（#81）。听到短语和口头声称时回一句；听到行动预告、手下留情、好险的各行另加（#83） ──
+// 桌上通过校验的一条表态（真人和电脑的）：电脑「听到」的全部内容，由 Room.relay 按时间先后记下
+export interface Heard extends Said {
+  depth: number; // 接话的层数：自己起头的是 0，回应第 n 层的是 n + 1。只在服务器里记，不进协议
+}
+// 表态不带对象（ADR 0012）：先从公开语境认出听到的是哪一类、是不是冲着自己来，认不出的不接
+interface Reply {
+  heard: 'doubt' | 'backing' | 'has' | 'hasNot' | 'respect'; // 你确定？/我信你个鬼；当前声称者替声称表态；窗口之外的我有 X / 我没有 X；佩服
+  claimant: boolean; // 自己是当前问询窗口的声称者
+  continuing: boolean; // 自己是声称者，这次声称之前就仍作数地声称着这个角色（如连续征税）
+  settled: boolean; // 最近一次声称是自己的、没人质疑、已过了问询窗口，或自己刚发过口头声称
+  caught: boolean; // 自己是声称者时：自己被抓过；否则：说话者被抓过
+  proven: boolean; // 同上：证明过
+  contradicts: boolean; // 说话者对说的这个角色的声称矛盾
+  alsoMine: boolean; // 自己也仍作数地声称着说的这个角色
+  allShown: boolean; // 说的这个角色 3 张都已是明牌
+  won?: 'claimant' | 'challenger'; // 自己刚赢下一次对质：作为被证明为真的声称者，或作为质疑者
+  over: boolean; // 牌局已结束
+}
+const REPLY: readonly Row<Reply>[] = [
+  { when: (s) => s.heard === 'doubt' && s.claimant && (s.continuing || s.proven), say: { dare: FIRST, claim: SECOND, honest: THIRD } },
+  { when: (s) => s.heard === 'doubt' && s.claimant && (!s.continuing || s.caught), say: { honest: FIRST, claim: SECOND, silence: QUIET } },
+  { when: (s) => s.heard === 'doubt' && s.settled, say: { honest: FIRST, claim: SECOND, silence: QUIET } },
+  { when: (s) => s.heard === 'backing' && (s.caught || s.contradicts), say: { doubt: FIRST, sure: SECOND } },
+  { when: (s) => s.heard === 'backing' && s.proven, say: { sure: FIRST, silence: QUIET } },
+  { when: (s) => s.heard === 'backing' && s.alsoMine, say: { claim: FIRST, doubt: SECOND } },
+  { when: (s) => s.heard === 'has' && s.allShown, say: { doubt: FIRST, silence: 1 / QUIET } }, // 开口概率高
+  { when: (s) => s.heard === 'has' && (s.caught || s.alsoMine), say: { doubt: FIRST, claim: SECOND } },
+  // 其他：我没有 X 都在这行；我有 X 是上面两行都不成立时
+  { when: (s) => s.heard === 'hasNot' || (s.heard === 'has' && !s.allShown && !s.caught && !s.alsoMine), say: { sure: FIRST, doubt: SECOND, silence: QUIET } },
+  { when: (s) => s.heard === 'respect' && s.won === 'claimant', say: { honest: FIRST, respect: SECOND } },
+  { when: (s) => s.heard === 'respect' && s.won === 'challenger', say: { respect: FIRST, doubt: SECOND } },
+  { when: (s) => s.heard === 'respect' && s.over, say: { respect: FIRST } },
+];
+const REPLY_MS = [600, 2_000] as const;
+// 一句话、一句回应、一句再回应：第 MAX_DEPTH 层的话不再有电脑接
+const MAX_DEPTH = 2;
+// 「自己刚发过口头声称」的「刚」
+const JUST_SAID_MS = 6_000;
+
+// 听到 to 之后 me 回什么。heard 是本局听到的全部表态（含 to，按时间先后）。
+// 返回的 current 到点时用同一份 events、heard 再判断一次：Room 里两者都是本局只增不减的同一个数组，到点时已含这期间的事
+export function replyTo(state: PublicState, events: readonly GameEvent[], heard: readonly Heard[], to: Heard, me: string): Moment {
+  const current = (now: PublicState) => replyOptions(now, events, heard, to, me).length > 0;
+  return { options: replyOptions(state, events, heard, to, me), delayMs: REPLY_MS, depth: to.depth + 1, current };
+}
+
+type Claim = Extract<GameEvent, { type: 'actionChosen' | 'blocked' }>;
+function lastIndex(events: readonly GameEvent[], type: GameEvent['type'], end = events.length): number {
+  let at = end - 1;
+  while (at >= 0 && events[at].type !== type) at -= 1;
+  return at;
+}
+
+function replyOptions(state: PublicState, events: readonly GameEvent[], heard: readonly Heard[], to: Heard, me: string): Options {
+  const over = state.phase === 'gameOver';
+  const alive = (id: string) => state.players.find((p) => p.id === id)?.alive ?? false;
+  const at = heard.indexOf(to);
+  // 不接自己的话、第三句；牌局中已淘汰的人不接，也没人接他（对方已被淘汰）；听到之后自己已开过口就算已回应
+  if (to.depth >= MAX_DEPTH || to.playerId === me || (!over && !(alive(me) && alive(to.playerId)))) return [];
+  if (heard.slice(at + 1).some((h) => h.playerId === me)) return [];
+  const r = to.reaction;
+  const { pending } = state;
+  const block = state.challengeSubject === 'block';
+  const claimantId = state.phase === 'awaitingChallenge' ? (block ? pending!.blockById : pending!.actorId) : undefined;
+  const windowRole = claimantId ? (block ? pending!.blockRole! : pending!.claimedRole!) : undefined;
+  const byClaimant = to.playerId === claimantId;
+  let kind: Reply['heard'] | undefined;
+  if (r.kind === 'phrase') kind = r.phrase === 'sure' || r.phrase === 'doubt' ? 'doubt' : r.phrase === 'respect' ? 'respect' : byClaimant && (r.phrase === 'dare' || r.phrase === 'honest') ? 'backing' : undefined;
+  else if (r.kind === 'verbalClaim') kind = byClaimant ? (r.has ? 'backing' : undefined) : r.has ? 'has' : 'hasNot';
+  // 替声称表态只有有资格质疑且尚未回应的接（在场、不是声称者就有资格）
+  if (kind === 'backing' && state.passed.includes(me)) return [];
+  if (!kind) return [];
+
+  // 说的是哪个角色：当前声称者替声称表态时是窗口里的角色，口头声称是它说的角色
+  const role = kind === 'backing' ? windowRole : r.kind === 'verbalClaim' ? r.role : undefined;
+  const memory = memoryOf(state, events, me);
+  const claimAt = lastClaimAt(events);
+  const claim = events[claimAt] as Claim | undefined;
+  // 自己的声称已经生效：最近一次声称是自己的，没人质疑，问询窗口已过
+  const settledRole =
+    claim && (claim.type === 'blocked' ? claim.blockerId : claim.actorId) === me && !claimantId && lastIndex(events, 'challenged') < claimAt
+      ? claim.type === 'blocked' ? claim.role : claim.claimedRole
+      : undefined;
+  const mine = heard.slice(0, at).filter((h) => h.playerId === me).at(-1);
+  const justClaimed = mine?.reaction.kind === 'verbalClaim' && mine.reaction.has && to.at - mine.at <= JUST_SAID_MS ? mine.reaction.role : undefined;
+  // 刚出的对质结果：最近一次对质之后还没有新的行动
+  const resolvedAt = lastIndex(events, 'challengeResolved');
+  const resolved = resolvedAt > lastIndex(events, 'actionChosen') ? (events[resolvedAt] as Extract<GameEvent, { type: 'challengeResolved' }>) : undefined;
+  const challenger = resolved && (events[lastIndex(events, 'challenged', resolvedAt)] as Extract<GameEvent, { type: 'challenged' }>).challengerId;
+  const subject = claimantId === me ? me : to.playerId;
+  const situation: Reply = {
+    heard: kind,
+    claimant: claimantId === me,
+    continuing: claimantId === me && (memoryOf(state, events.slice(0, claimAt), me).standing.get(me)?.has(windowRole!) ?? false),
+    settled: !!settledRole || !!justClaimed,
+    caught: (memory.caught.get(subject) ?? 0) > 0,
+    proven: (memory.proven.get(subject) ?? 0) > 0,
+    contradicts: !!role && contradicts(memory, state.players.find((p) => p.id === to.playerId)!, role),
+    alsoMine: !!role && (memory.standing.get(me)?.has(role) ?? false),
+    allShown: !!role && shownCount(state, role) === 3,
+    won: resolved?.truth && resolved.claimantId === me ? 'claimant' : resolved && !resolved.truth && challenger === me ? 'challenger' : undefined,
+    over,
+  };
+  if (!REPLY.some((row) => row.when(situation))) return [];
+  // 「我有 X」的 X：回冲着自己的怀疑时是自己的声称（刚说的口头声称优先），其余是说的那个角色
+  const x = kind === 'doubt' ? (justClaimed ?? (claimantId === me ? windowRole : settledRole)) : role;
+  return halve(toOptions(merge(REPLY, situation), x && memory.standing.get(me)?.has(x) ? x : undefined), to.depth);
+}
+
+// 每深一层开口概率减半，候选之间的比例不变：开口的权重合计 N、沉默 S 时，沉默换成 N + 2S
+function halve(options: Options, times: number): Options {
+  if (times === 0) return options;
+  const spoken = options.reduce((sum, [r, w]) => sum + (r ? w : 0), 0);
+  return halve(options.map(([r, w]) => [r, r ? w : spoken + 2 * w]), times - 1);
 }
