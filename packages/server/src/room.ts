@@ -30,7 +30,7 @@ import type { GameRepository } from './repository.ts';
 import { PHRASES, STRENGTHS, type LobbyPlayer, type Phrase, type Reaction, type Strength } from '@coup/shared';
 import { ClientError } from './errors.ts';
 import { TUNINGS, decideComputerIntent, drawTemperament, type ComputerIntent, type Returned, type Temperament } from './computer.ts';
-import { afterOwnClaim, speak, type Moment } from './speech.ts';
+import { afterOwnClaim, onOwnTurn, speak, type Moment } from './speech.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
@@ -447,7 +447,7 @@ export class Room {
     const g = this.game!;
     const phase = g.phase;
     if (!isTimed(phase)) return;
-    const humanAlive = [...this.players.values()].some((p) => !p.isComputer && g.players.find((gp) => gp.id === p.id)?.alive);
+    const humanAlive = this.humanAlive();
     const [min, max] = COMPUTER_DELAY_MS[phase];
     const inquiry = phase === 'awaitingChallenge' || phase === 'awaitingBlock';
     // 声称冲着谁来只看公开信息：行动的声称冲着它的目标，阻挡的声称冲着被拦的行动者
@@ -458,6 +458,11 @@ export class Room {
       const delay = this.options.computerDelayMs?.(phase) ?? (humanAlive ? min + this.computerRandom() ** skew * (max - min) : COMPUTER_SPECTATED_MS);
       this.computerTimers.set(p.id, setTimeout(() => this.computerMove(p.id), delay + extraMs));
     }
+  }
+
+  // 房里还有没被淘汰的真人；没有时只剩旁观，电脑 1 秒一步
+  private humanAlive(): boolean {
+    return [...this.players.values()].some((p) => !p.isComputer && this.game!.players.find((gp) => gp.id === p.id)?.alive);
   }
 
   private decideComputer(id: string): ComputerIntent | null {
@@ -493,10 +498,35 @@ export class Room {
     this.speechTimers.add(t);
   }
 
-  // 到点再决定一次：这期间局面可能已变（窗口已关、已轮到别人），此刻无需它决定就什么也不做
+  // 到点再决定一次：这期间局面可能已变（窗口已关、已轮到别人），此刻无需它决定就什么也不做。
+  // 轮到自己选行动时（表 1），决定作出后可能先预告，停顿 0.8～1.5 秒再执行留着的决定；停顿记在 computerTimers 里，
+  // 换阶段、换行动者、牌局结束或作废时随 clearTimer 一起取消，所以 60 秒时限照旧。旁观加速时不预告
   private computerMove(id: string): void {
     this.computerTimers.delete(id);
     const intent = this.decideComputer(id);
+    if (!intent) return;
+    try {
+      if (intent.type === 'chooseAction' && this.humanAlive()) {
+        const speech = speak(onOwnTurn(publicState(this.game!), this.gameEvents, id, intent), this.speechRandom);
+        // 被限流丢掉的预告不算说过：不停顿
+        if (speech && this.relay(id, speech.reaction)) {
+          this.computerTimers.set(id, setTimeout(() => this.computerAct(id, intent, true), speech.delayMs));
+          return;
+        }
+      }
+      this.computerAct(id, intent);
+    } catch (e) {
+      console.error('computer move error', e);
+    }
+  }
+
+  // 停顿之后执行：留着的决定已失效（目标刚弃权）就重新决定。只有目标会在停顿里失效：换阶段或换行动者已取消了停顿
+  private computerAct(id: string, intent: ComputerIntent | null, kept = false): void {
+    if (kept) {
+      this.computerTimers.delete(id);
+      const target = intent?.type === 'chooseAction' && this.game!.players.find((p) => p.id === intent.targetId);
+      if (target && !target.alive) intent = this.decideComputer(id);
+    }
     if (!intent) return;
     if (intent.type === 'resolveExchange') this.noteReturned(id, intent.keepIds);
     try {
