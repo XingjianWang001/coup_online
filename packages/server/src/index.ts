@@ -170,6 +170,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         onEmpty: (r) => rooms.delete(r.code),
         // 发给整个房间（含发送者）：自己的座位也要亮起，且只在服务器接受后才亮
         onReaction: (r, reaction) => io.to(r.code).emit('reaction', reaction),
+        onShowdownFocus: (r, focus) => io.to(r.code).emit('showdownFocus', focus),
       }, roomOptions);
       const p = room.addPlayer(raw.name, socket.id);
       reserveRoomCreation(clientAddress(socket), rooms.size);

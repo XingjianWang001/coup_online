@@ -74,6 +74,10 @@ const COMPUTER_SPECTATED_MS = 1_000;
 // 出手延迟右偏：0～1 的均匀随机数取幂后再铺到区间上，多数时候偏快、偶尔长考，指数越大越快。
 // 问询窗口里，声称冲着自己来时想得久一些，不冲着自己来时更快。起始值，靠试玩校准
 const COMPUTER_DELAY_SKEW = { aimedAtSelf: 1.5, aimedElsewhere: 3, otherPhases: 2 };
+// 对质翻牌前的犹豫：每隔这么久（区间内均匀）换一次对准；落到要翻的那张后停这么久再翻。
+// 出手延迟最短 2 秒时也至少游移两次（550 + 550 + 250 ≤ 2000 - 600）。起始值，靠试玩校准
+const WANDER_GAP_MS = [250, 550] as const;
+const LAND_HOLD_MS = 600;
 
 // 行动超时的默认行动：金币到了 FORCED_COUP_COINS 必须政变（随机目标），否则收入
 function autoAction(g: GameState): GameEvent[] {
@@ -130,6 +134,8 @@ export interface RoomEvents {
   onEmpty(room: Room): void;
   // 表态的唯一出口：真人和电脑的表态校验通过后都从这里发给整个房间（含发送者）
   onReaction(room: Room, reaction: { playerId: string; reaction: Reaction }): void;
+  // 电脑对质时的对准：电脑没有连接，发给整个房间。真人的对准由 focusShowdownCard 返回、传输层转发给其他人
+  onShowdownFocus(room: Room, focus: { slot: number | null }): void;
 }
 
 export interface RoomOptions {
@@ -152,7 +158,7 @@ export class Room {
   previousWinnerId: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private computerTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  // 电脑还没发出的表态
+  // 电脑还没发出的表态和对质时的对准
   private speechTimers = new Set<ReturnType<typeof setTimeout>>();
   // 电脑本局已发出的表态（错峰、降温、重复降权用），开局清空
   private computerSpeech: Said[] = [];
@@ -460,7 +466,37 @@ export class Room {
       const skew = COMPUTER_DELAY_SKEW[!inquiry ? 'otherPhases' : aimedAt === p.id ? 'aimedAtSelf' : 'aimedElsewhere'];
       const delay = this.options.computerDelayMs?.(phase) ?? (humanAlive ? min + this.computerRandom() ** skew * (max - min) : COMPUTER_SPECTATED_MS);
       this.computerTimers.set(p.id, setTimeout(() => this.computerMove(p.id), delay + extraMs));
+      if (phase === 'showdown' && humanAlive) this.hesitate(p.id, delay + extraMs);
     }
+  }
+
+  // 对质翻牌前的犹豫（#58）：翻牌前在自己的暗牌之间游移几次，最后落在要翻的那张上，停一下再翻；翻牌时刻不变。
+  // 游移的顺序和时刻只抽发言随机源、只看暗牌张数（公开），与暗牌无关；落点到点才决定，就是马上翻开的那张
+  private hesitate(id: string, revealInMs: number): void {
+    const handSize = this.game!.players.find((p) => p.id === id)!.hand.length;
+    const landAt = revealInMs - LAND_HOLD_MS;
+    if (landAt < 0) return;
+    const aim = (at: number, slot: () => number | undefined) => {
+      const t = setTimeout(() => {
+        this.speechTimers.delete(t);
+        const s = slot();
+        const focus = s === undefined ? null : this.aim(id, s);
+        if (focus) this.events.onShowdownFocus(this, focus);
+      }, at);
+      this.speechTimers.add(t);
+    };
+    const gap = () => WANDER_GAP_MS[0] + this.speechRandom() * (WANDER_GAP_MS[1] - WANDER_GAP_MS[0]);
+    let last: number | null = null;
+    for (let at = gap(); at + WANDER_GAP_MS[0] <= landAt; at += gap()) {
+      // 每次换到另一张：只剩一张时一直是它，只对准一次
+      const slot: number = last === null ? Math.floor(this.speechRandom() * handSize) : (last + 1 + Math.floor(this.speechRandom() * (handSize - 1))) % handSize;
+      if (slot !== last) aim(at, () => slot);
+      last = slot;
+    }
+    aim(landAt, () => {
+      const intent = this.decideComputer(id); // 对质时的决定不抽随机数，到点翻的就是这张
+      return intent?.type === 'revealShowdownCard' ? this.game!.players.find((p) => p.id === id)!.hand.findIndex((c) => c.id === intent.cardId) : undefined;
+    });
   }
 
   private decideComputer(id: string): ComputerIntent | null {
@@ -600,6 +636,11 @@ export class Room {
   // 比客户端节流还密的消息直接丢弃，挡住刷屏；转发不进牌局状态。
   focusShowdownCard(playerId: string, socketId: string, slot: unknown): { slot: number | null } | null {
     this.requireCurrentConnection(playerId, socketId);
+    return this.aim(playerId, slot);
+  }
+
+  // 对准的内核，不看连接：电脑没有连接，走这里而不伪造 socket
+  private aim(playerId: string, slot: unknown): { slot: number | null } | null {
     const g = this.game;
     if (g?.phase !== 'showdown' || g.showdown?.claimantId !== playerId) return null;
     const handSize = g.players.find((p) => p.id === playerId)!.hand.length;
