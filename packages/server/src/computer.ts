@@ -168,7 +168,7 @@ export interface Returned {
 
 // ponytail: 每次决定都把本局的事件（Room.gameEvents，一局内只增不减）从头数一遍。一局几百条事件、一次决定几微秒；
 // 事件多到要紧时改成随事件增量更新
-function recall(events: readonly GameEvent[], me: string, ids: readonly string[], RECIPROCITY: number, returned: readonly Returned[]): Memory {
+export function recall(events: readonly GameEvent[], me: string, ids: readonly string[], RECIPROCITY: number, returned: readonly Returned[]): Memory {
   const memory: Memory = { standing: new Map(), story: new Set(), caught: new Map(), proven: new Map(), lacking: new Map(), favor: new Map(), deck: [] };
   // 牌堆张数整局不变：每人的暗牌加明牌总是 2 张（交换选牌的片刻除外）
   const deckSize = ROLE_ORDER.length * ROLE_COPIES - 2 * ids.length;
