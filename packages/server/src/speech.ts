@@ -79,6 +79,48 @@ export function speak({ options, delayMs: [min, max] }: Moment, random: () => nu
   return null;
 }
 
+// ── 全桌错峰与降温（#74）：Room.say 让所有场景的电脑表态都经过这里，场景表不用管 ──
+// 两条电脑表态之间至少隔这么久；撞上的顺延到那之后，再加 0～JITTER_MS 的抖动
+const SPEECH_GAP_MS = 800;
+const JITTER_MS = 300;
+
+// 电脑已发出的一条表态
+export interface Said {
+  playerId: string;
+  reaction: Reaction;
+  at: number;
+}
+
+// 顺延后比原定时刻晚过这么久就取消：说的是眼前的事，晚到就过时了，也不排长队。
+// 换阶段或换行动者时 clearTimer 已经把这期间的表态清掉，这里兜住同一阶段里排得太久的（例如牌局结束后几个电脑都要说）
+const MAX_LATE_MS = 2_000;
+
+// 到点时决定这条表态现在说（0）、再等多久，还是取消（null）：离全桌上一条电脑表态（lastAt）不足间隔就顺延。dueAt 是原定时刻
+export function stagger(now: number, lastAt: number | undefined, dueAt: number, random: () => number): number | null {
+  const wait = (lastAt ?? -Infinity) + SPEECH_GAP_MS - now;
+  if (wait <= 0) return 0;
+  const delay = wait + random() * JITTER_MS;
+  return now + delay - dueAt > MAX_LATE_MS ? null : delay;
+}
+
+// 降温：全桌上一条电脑表态（自己的或别的电脑的）刚发出时沉默乘 COOL，COOL_MS 内线性恢复到原值
+const COOL = 3;
+const COOL_MS = 8_000;
+// 重复降权：自己最近 REPEAT_MEMORY 条里说过的同一条，权重乘 REPEAT（不禁用）
+const REPEAT = 0.3;
+const REPEAT_MEMORY = 3;
+// 同一条表态：字段相同即可，不论对象怎么拼出来的
+const lineKey = (r: Reaction) => JSON.stringify(r, Object.keys(r).sort());
+
+// 抽签前按电脑本局说过的话（said，按时间先后）调整候选的权重
+export function temper(moment: Moment, me: string, said: readonly Said[], now: number): Moment {
+  const last = said.at(-1);
+  const cool = 1 + (COOL - 1) * Math.max(0, 1 - (last ? now - last.at : Infinity) / COOL_MS);
+  const recent = new Set(said.filter((s) => s.playerId === me).slice(-REPEAT_MEMORY).map((s) => lineKey(s.reaction)));
+  const options: Options = moment.options.map(([r, w]) => [r, r ? (recent.has(lineKey(r)) ? w * REPEAT : w) : w * cool]);
+  return { ...moment, options };
+}
+
 // 公开前情复用电脑的局内记忆（computer.ts 的 recall）：不给它自己放回牌堆的牌，它得出的就只依赖公开事件
 const memoryOf = (state: PublicState, events: readonly GameEvent[], me: string) => recall(events, me, state.players.map((p) => p.id), 0, []);
 const shownCount = (state: PublicState, role: Role) => state.players.reduce((n, p) => n + p.revealed.filter((r) => r === role).length, 0);

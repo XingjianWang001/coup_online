@@ -7,7 +7,7 @@ import type { GameRepository } from './repository.ts';
 
 function makeRoom(options?: RoomOptions) {
   const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
-  const events = { onBroadcast: vi.fn(), onEmpty: vi.fn(), onReaction: vi.fn() };
+  const events = { onBroadcast: vi.fn(), onEmpty: vi.fn(), onReaction: vi.fn(), onShowdownFocus: vi.fn() };
   const room = new Room('ABC123', '', repo, events, options);
   return { room, repo, events };
 }
@@ -39,7 +39,7 @@ describe('Room 电脑行动预告', () => {
     const announced = () =>
       made.events.onReaction.mock.calls.map(([, r]) => r).filter((r): r is { playerId: string; reaction: Extract<Reaction, { kind: 'announcement' }> } => r.reaction.kind === 'announcement');
     const acted = () =>
-      made.events.onBroadcast.mock.calls.flatMap(([, evs]: [Room, GameEvent[]]) => evs).filter((e): e is Extract<GameEvent, { type: 'actionChosen' }> => e.type === 'actionChosen' && e.actorId === computerId);
+      made.events.onBroadcast.mock.calls.flatMap(([, evs]) => evs as GameEvent[]).filter((e): e is Extract<GameEvent, { type: 'actionChosen' }> => e.type === 'actionChosen' && e.actorId === computerId);
     return { ...made, alice, bob, computerId, toComputer, announced, acted };
   }
 
