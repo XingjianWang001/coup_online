@@ -1,5 +1,5 @@
 // packages/server/src/speech-reply.test.ts —— 电脑接话：回应短语和口头声称（#81，表 7）
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   COUP_COST,
   challenge,
@@ -16,6 +16,8 @@ import {
 } from '@coup/engine';
 import type { Phrase, Reaction } from '@coup/shared';
 import { replyTo, type Heard, type Options } from './speech.ts';
+import { Room, type RoomOptions } from './room.ts';
+import type { GameRepository } from './repository.ts';
 
 // 一桌按真实流程推进的牌局：a 先手，did 记下引擎产生的事件（和 Room.gameEvents 一样），hear 记下桌上的表态（和 Room 的听到记录一样）
 const IDS = ['a', 'b', 'c'];
@@ -250,5 +252,164 @@ describe('表 7 接话：短语和口头声称', () => {
     const flow = (t: Table) => (t.taxed('a'), t.income('b', 'c'), t.options('a', t.hear('b', phrase('doubt'))));
     const swapped: Record<string, Role[]> = { a: ['ambassador', 'contessa'], b: ['captain', 'captain'], c: ['assassin', 'ambassador'] };
     expect(flow(table(swapped))).toEqual(flow(table()));
+  });
+});
+
+function makeRoom(options?: RoomOptions) {
+  const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
+  const events = { onBroadcast: vi.fn(), onEmpty: vi.fn(), onReaction: vi.fn(), onShowdownFocus: vi.fn() };
+  const room = new Room('ABC123', '', repo, events, options);
+  return { room, repo, events };
+}
+const lehmer = (seed: number) => () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+describe('Room 电脑接话', () => {
+  afterEach(() => vi.useRealTimers());
+
+  // 真人坐前面、第一位先手，电脑坐后面。电脑出手的延迟拉到很长，测试替它们走（直接调引擎）。
+  // 发言随机源默认恒为 0：有候选就开口、说第一条、按最短延迟说，顺延不加抖动
+  function seated(humans: string[], computers: number, options: RoomOptions = {}) {
+    vi.useFakeTimers();
+    vi.clearAllTimers();
+    const made = makeRoom({ startingPlayerRandom: () => 0, speechRandom: () => 0, computerDelayMs: () => 600_000, ...options });
+    const { room } = made;
+    const people = humans.map((name, i) => room.addPlayer(name, `sock${i}`));
+    const sockOf = new Map(people.map((p, i) => [p.id, `sock${i}`]));
+    for (let i = 0; i < computers; i += 1) room.addComputer(people[0].id, 'sock0');
+    room.startGame(people[0].id, 'sock0');
+    const cs = room.playerList.filter((p) => p.isComputer).map((p) => p.id);
+    const act = (id: string, intent: { type: string } & Record<string, unknown>) =>
+      sockOf.has(id)
+        ? room.dispatch(id, sockOf.get(id)!, intent)
+        : room.apply((g) => (intent.type === 'chooseAction' ? chooseAction(g, id, intent.action as 'tax') : passChallenge(g, id)));
+    const income = (id: string) => act(id, { type: 'chooseAction', action: 'income' });
+    const tax = (id: string) => act(id, { type: 'chooseAction', action: 'tax' });
+    const pass = (id: string) => act(id, { type: 'passChallenge' });
+    const say = (id: string, reaction: Reaction) => room.react(id, sockOf.get(id)!, reaction);
+    // 电脑说的每一句：谁、说什么、离 since 多少毫秒
+    const sent: { by: string; line: string; at: number }[] = [];
+    made.events.onReaction.mockImplementation((_room: Room, r: { playerId: string; reaction: Reaction }) => {
+      if (cs.includes(r.playerId)) sent.push({ by: r.playerId, line: label(r.reaction), at: Date.now() });
+    });
+    const lines = (since: number) => sent.filter((s) => s.at >= since).map(({ by, line, at }) => ({ by, line, ms: at - since }));
+    return { ...made, people, cs, income, tax, pass, say, lines };
+  }
+
+  it('真人发一条口头声称后，电脑在 0.6～2 秒内接一句', () => {
+    for (const [u, at] of [[0, 600], [0.1, 740]] as const) {
+      const { people: [alice], cs: [c1], say, lines } = seated(['Alice'], 1, { speechRandom: () => u });
+      const start = Date.now();
+      say(alice.id, has('duke'));
+      vi.advanceTimersByTime(at - 1);
+      expect(lines(start)).toEqual([]);
+      vi.advanceTimersByTime(2_000);
+      expect(lines(start)).toEqual([{ by: c1, line: 'sure', ms: at }]);
+    }
+  });
+
+  it('电脑也接电脑的话，最多两层：一句话、一句回应、一句再回应', () => {
+    const { people: [alice], cs: [c1, c2], income, tax, pass, lines } = seated(['Alice'], 2);
+    income(alice.id);
+    income(c1);
+    tax(c2); // c2 仍作数地声称着公爵
+    [alice.id, c1].forEach(pass);
+    vi.advanceTimersByTime(5_000);
+    income(alice.id);
+    const start = Date.now();
+    tax(c1); // c1 首次声称公爵，问询窗口开着
+    vi.advanceTimersByTime(10_000);
+    expect(lines(start)).toEqual([
+      { by: c1, line: 'honest', ms: 500 }, // 表 2：自己刚作出声称
+      { by: c2, line: 'claim:duke', ms: 1_300 }, // 当前声称者说我是老实人，自己也声称着公爵（错峰顺延到 0.8 秒之后）
+      { by: c1, line: 'doubt', ms: 2_100 }, // 窗口之外听到我有公爵，自己也声称着
+      // c2 刚发过口头声称、又听到我信你个鬼：已是第三句，不再接
+    ]);
+  });
+
+  it('到点时自己已回应，接话取消，不留计时器', () => {
+    const { people: [alice, bob], cs: [c1], income, tax, pass, say, lines } = seated(['Alice', 'Bob'], 1);
+    income(alice.id);
+    income(bob.id);
+    tax(c1);
+    [alice.id, bob.id].forEach(pass);
+    tax(alice.id);
+    const start = Date.now();
+    const timers = vi.getTimerCount();
+    say(alice.id, has('duke')); // c1 也声称着公爵：要接
+    vi.advanceTimersByTime(300);
+    pass(c1); // Bob 还没回应，窗口没关
+    vi.advanceTimersByTime(3_000);
+    expect(lines(start)).toEqual([]);
+    expect(vi.getTimerCount()).toBe(timers);
+  });
+
+  it('到点时说话者已被淘汰，接话取消', () => {
+    const { room, people: [, bob], say, lines } = seated(['Alice', 'Bob'], 1);
+    const start = Date.now();
+    say(bob.id, has('duke'));
+    vi.advanceTimersByTime(300);
+    room.apply((g) => forfeit(g, bob.id)); // 不是 Bob 的回合：不换阶段也不换行动者
+    vi.advanceTimersByTime(3_000);
+    expect(lines(start)).toEqual([]);
+  });
+
+  it('真人连续刷表态：电脑每条之间仍隔着 1.5 秒的限流，没发出的接话不会越积越多', () => {
+    const { people: [alice], cs: [c1], income, tax, pass, say, lines } = seated(['Alice'], 1, { speechRandom: lehmer(3) });
+    income(alice.id);
+    tax(c1); // c1 的征税生效：Alice 的怀疑冲着它来
+    pass(alice.id);
+    vi.advanceTimersByTime(3_000);
+    const start = Date.now();
+    let most = 0;
+    for (let i = 0; i < 600; i += 1) {
+      say(alice.id, phrase(i % 2 ? 'doubt' : 'sure'));
+      vi.advanceTimersByTime(100);
+      most = Math.max(most, vi.getTimerCount());
+    }
+    const said = lines(start);
+    expect(said.length).toBeGreaterThan(1);
+    for (let i = 1; i < said.length; i += 1) expect(said[i].ms - said[i - 1].ms).toBeGreaterThanOrEqual(1_500);
+    expect(said.every((s) => s.by === c1)).toBe(true);
+    expect(most).toBeLessThanOrEqual(4); // 回合时限 + 至多 3 条还没发出的接话
+  });
+
+  it('同一局面和行动种子下，无论听到什么表态，电脑的行动相同', () => {
+    const TALK: Reaction[] = [phrase('doubt'), has('duke'), phrase('sure'), has('captain', false), phrase('respect'), phrase('dare')];
+    const play = (talk: boolean) => {
+      vi.spyOn(Math, 'random').mockImplementation(lehmer(5)); // 发牌、洗牌用的：两局同一副牌
+      const { room, events, people: [alice], cs } = seated(['Alice'], 2, { computerRandom: lehmer(7), computerDelayMs: () => 1_000 });
+      // Alice 只收入（金币到 10 就政变第一个对手），从不质疑、阻挡，对质和失去影响力时选第一张
+      const move = () => {
+        const g = room.game!;
+        const self = g.players.find((p) => p.id === alice.id)!;
+        const first = self.hand[0]?.id;
+        const turn = self.coins >= 10 ? { type: 'chooseAction', action: 'coup', targetId: g.players.find((p) => p.alive && p.id !== alice.id)!.id } : { type: 'chooseAction', action: 'income' };
+        for (const intent of [turn, { type: 'passChallenge' }, { type: 'passBlock' }, { type: 'resolveLoss', cardId: first }, { type: 'revealShowdownCard', cardId: first }]) {
+          try {
+            room.dispatch(alice.id, 'sock0', intent);
+          } catch {
+            // 此刻不该 Alice 这么做
+          }
+        }
+      };
+      for (let step = 0; step < 4_000 && room.game!.phase !== 'gameOver'; step += 1) {
+        if (talk) room.react(alice.id, 'sock0', TALK[step % TALK.length]);
+        move();
+        vi.advanceTimersByTime(250);
+      }
+      expect(room.game!.phase).toBe('gameOver');
+      const replies = events.onReaction.mock.calls.filter(([, r]) => cs.includes(r.playerId)).length;
+      // 两个房间的玩家 id 不同：换成座位号再比
+      const seats = room.game!.players.map((p) => p.id);
+      const moves = JSON.stringify(events.onBroadcast.mock.calls.flatMap(([, evs]) => evs)).replace(/"[0-9a-f]{16}"/g, (id) => `"seat${seats.indexOf(JSON.parse(id))}"`);
+      vi.restoreAllMocks();
+      return { moves, replies };
+    };
+    // 发言随机源恒为 0：有候选就开口，两局里电脑自己起头的话相同，多出来的就是接话
+    const quiet = play(false);
+    const noisy = play(true);
+    expect(noisy.replies).toBeGreaterThan(quiet.replies);
+    expect(quiet.moves.match(/actionChosen/g)!.length).toBeGreaterThan(10);
+    expect(noisy.moves).toEqual(quiet.moves);
   });
 });
