@@ -1,7 +1,7 @@
 // packages/server/src/room.test.ts
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Room, type RoomOptions } from './room.ts';
-import { chooseAction, forfeit, type GameEvent, type GameState, type Role } from '@coup/engine';
+import { challenge, chooseAction, forfeit, type GameEvent, type GameState, type Role } from '@coup/engine';
 import type { GameRepository } from './repository.ts';
 
 function makeRoom(options?: RoomOptions) {
@@ -1148,6 +1148,98 @@ describe('Room 电脑翻牌前的犹豫', () => {
       expect(focuses.at(-1)!.slot).toBe(slot);
       expect(focuses.at(-1)!.at).toBeLessThan(revealAt);
     }
+  });
+
+  it('只剩一张暗牌：只对准它', () => {
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const { focuses } = showdown({ speechRandom: lehmer(seed) }, ['captain']);
+      expect(focuses.length).toBeGreaterThan(0);
+      expect(focuses.every((f) => f.slot === 0)).toBe(true);
+    }
+  });
+
+  it('固定发言种子，改暗牌：落点之前的游移序列和时刻不变，落点随翻开的牌变', () => {
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const options = { computerRandom: () => 0.5, speechRandom: lehmer(seed) };
+      const first = showdown({ ...options, speechRandom: lehmer(seed) }, ['duke', 'captain']);
+      const second = showdown({ ...options, speechRandom: lehmer(seed) }, ['contessa', 'duke']);
+      expect([first.slot, second.slot]).toEqual([0, 1]);
+      expect(second.focuses.slice(0, -1)).toEqual(first.focuses.slice(0, -1));
+      expect(second.focuses.at(-1)!.at).toBe(first.focuses.at(-1)!.at);
+      expect(second.revealAt).toBe(first.revealAt);
+    }
+  });
+
+  it('游移多寡不改变翻牌时刻和行动随机源的抽取：翻牌仍在 2～4 秒内，对质时限仍是 20 秒', () => {
+    for (let i = 0; i < 100; i += 1) {
+      const u = (i + 0.5) / 100;
+      const run = (speech: number) => {
+        let draws = 0;
+        const { focuses, revealAt, deadlineMs } = showdown({ computerRandom: () => ((draws += 1), u), speechRandom: () => speech }, ['duke', 'captain']);
+        return { wanders: focuses.length, revealAt, deadlineMs, draws };
+      };
+      const [busy, calm] = [run(0), run(0.999)];
+      expect(busy.wanders).toBeGreaterThan(calm.wanders);
+      expect(calm.wanders).toBeGreaterThanOrEqual(3); // 至少游移两次再落点
+      expect(busy.revealAt).toBe(calm.revealAt);
+      expect(busy.draws).toBe(calm.draws);
+      expect(busy.revealAt).toBeGreaterThanOrEqual(2_000);
+      expect(busy.revealAt).toBeLessThanOrEqual(4_000);
+      expect(busy.deadlineMs).toBe(20_000);
+    }
+  });
+
+  it('对质结束后不再对准；电脑犹豫时牌局结束、再来一局、牌局作废都不留计时器', () => {
+    const { events, focuses } = showdown({ speechRandom: lehmer(1) });
+    const count = focuses.length;
+    vi.advanceTimersByTime(60_000);
+    expect(focuses.length).toBe(count);
+
+    // 对质开始 1 秒：电脑还在游移
+    const begin = (computers: number) => {
+      vi.useFakeTimers();
+      vi.clearAllTimers();
+      const made = makeRoom({ startingPlayerRandom: () => 0 });
+      const alice = made.room.addPlayer('Alice', 'sock1');
+      for (let i = 0; i < computers; i += 1) made.room.addComputer(alice.id, 'sock1');
+      const computerId = made.room.playerList.find((p) => p.isComputer)!.id;
+      made.room.startGame(alice.id, 'sock1');
+      made.room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' });
+      made.room.apply((g) => chooseAction(g, computerId, 'tax'));
+      made.room.dispatch(alice.id, 'sock1', { type: 'challenge' });
+      vi.advanceTimersByTime(1_000);
+      expect(made.room.game!.phase).toBe('showdown');
+      return { ...made, alice, computerId };
+    };
+    const ended = begin(1);
+    ended.room.apply((g) => forfeit(g, ended.computerId));
+    expect(ended.room.game!.phase).toBe('gameOver');
+    expect(vi.getTimerCount()).toBe(0);
+    ended.room.rematch(ended.alice.id, 'sock1');
+    expect(vi.getTimerCount()).toBe(0);
+
+    const voided = begin(2); // Alice 走后还剩两个电脑，牌局没结束，作废
+    voided.room.leavePlayer(voided.alice.id, 'sock1');
+    expect(voided.room.game).toBeNull();
+    expect(vi.getTimerCount()).toBe(1); // 只剩空房回收
+    expect(events.onShowdownFocus).toHaveBeenCalledTimes(count);
+  });
+
+  it('房里的真人全被淘汰、电脑 1 秒一步时不游移', () => {
+    vi.useFakeTimers();
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    const [first, second] = room.playerList.filter((p) => p.isComputer).map((p) => p.id);
+    room.startGame(alice.id, 'sock1');
+    room.apply((g) => forfeit(g, alice.id));
+    room.apply((g) => chooseAction(g, first, 'tax'));
+    room.apply((g) => challenge(g, second));
+    expect(room.game!.showdown?.claimantId).toBe(first);
+    vi.advanceTimersByTime(1_000);
+    expect(room.game!.phase).not.toBe('showdown');
+    expect(events.onShowdownFocus).not.toHaveBeenCalled();
   });
 });
 
