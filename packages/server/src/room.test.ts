@@ -8,7 +8,8 @@ import type { Reaction } from '@coup/shared';
 function makeRoom(options?: RoomOptions) {
   const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
   const events = { onBroadcast: vi.fn(), onEmpty: vi.fn(), onReaction: vi.fn(), onShowdownFocus: vi.fn() };
-  const room = new Room('ABC123', '', repo, events, options);
+  // 电脑默认不开口：轮到它时的行动预告会把出手推后 0.8～1.5 秒，要量出手时刻的用例不该随 Math.random 时有时无
+  const room = new Room('ABC123', '', repo, events, { speechRandom: () => 0.999_999, ...options });
   return { room, repo, events };
 }
 
@@ -929,6 +930,7 @@ describe('Room 电脑出手', () => {
     room.startGame(alice.id, 'sock1');
     for (let step = 0; step < 2_000 && room.game!.phase !== 'gameOver'; step += 1) vi.advanceTimersToNextTimer();
     expect(room.game!.phase).toBe('gameOver');
+    vi.advanceTimersByTime(10_000); // 赛后的表态和揭晓（#77）说完、揭完
     expect(vi.getTimerCount()).toBe(0);
     // 默认行动只会收入或政变：出现别的行动，说明是电脑自己在出手，而不是超时替它出
     const chosen = events.onBroadcast.mock.calls.flatMap(([, evs]) => evs).filter((e) => e.type === 'actionChosen' && e.actorId !== alice.id);
@@ -1215,7 +1217,7 @@ describe('Room 电脑翻牌前的犹豫', () => {
     const ended = begin(1);
     ended.room.apply((g) => forfeit(g, ended.computerId));
     expect(ended.room.game!.phase).toBe('gameOver');
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1); // 只剩输掉的电脑赛后醒来的那一次（#77）
     ended.room.rematch(ended.alice.id, 'sock1');
     expect(vi.getTimerCount()).toBe(0);
 
@@ -1418,7 +1420,7 @@ describe('Room 电脑表态', () => {
     ended.claim();
     ended.room.apply((g) => forfeit(g, ended.alice.id));
     expect(ended.room.game!.phase).toBe('gameOver');
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(3); // 只剩赛后（#77）：获胜的电脑醒来一次、两次揭晓
     ended.room.rematch(ended.alice.id, 'sock1');
     vi.advanceTimersByTime(1_500);
     expect(ended.events.onReaction).not.toHaveBeenCalled();

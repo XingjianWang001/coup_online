@@ -3,12 +3,14 @@
 //
 // 每个场景是一张表（条件 → 带权重的候选）加一个把公开局面翻成表里条件的函数，返回候选和发言延迟的区间；
 // Room 在对应的时刻调用它，用 speak 抽签。新场景另写一张表和一个函数，不改已有的。调参只改表里的数。
-import type { ActionType, GameEvent, PublicState, Role } from '@coup/engine';
-import type { Phrase, Reaction } from '@coup/shared';
+import { ASSASSINATE_COST, COUP_COST, FORCED_COUP_COINS, needsTarget, type ActionType, type GameEvent, type PublicState, type Role } from '@coup/engine';
+import { PHRASES, type Phrase, type Reaction } from '@coup/shared';
 import { recall } from './computer.ts';
 
-// 候选的一条：短语，或「我有 X」（claim，X 由各场景按语境定，必须在自己仍作数的声称里，否则不算候选）
-export type Line = Phrase | 'claim';
+// 候选的一条：短语，「我有 X」（claim，X 由各场景按语境定，必须在自己仍作数的声称里，否则不算候选），
+// 或一种行动预告（真的 announce、虚晃到另一目标 feintTarget、虚晃成另一种针对性行动 feintAction），具体预告什么由各场景给出
+export type Line = Phrase | 'claim' | Announcing;
+type Announcing = 'announce' | 'feintTarget' | 'feintAction';
 type Weights = Partial<Record<Line | 'silence', number>>;
 
 // 场景表的一行：条件成立时给出带权重的候选。silence 是这一行对沉默的倍数（「多沉默」大于 1，「开口概率高」小于 1）
@@ -49,13 +51,19 @@ export interface Moment {
 }
 const NOTHING = (delayMs: readonly [number, number]): Moment => ({ options: [], delayMs });
 
-// 把合并后的候选翻成表态；claimRole 是「我有 X」的 X，不在自己仍作数的声称里时不给（这条不算候选）
-function toOptions(weights: Map<Line | 'silence', number>, claimRole: Role | undefined): Options {
+// 把合并后的候选翻成表态；claimRole 是「我有 X」的 X，不在自己仍作数的声称里时不给（这条不算候选）。
+// 预告类的一条可以对应几条具体预告（如虚晃到另外几个目标），平分这条的权重；一条也没有就不算候选
+function toOptions(weights: Map<Line | 'silence', number>, claimRole: Role | undefined, announcements: Partial<Record<Announcing, readonly Reaction[]>> = {}): Options {
   const options: Options = [];
   for (const [line, w] of weights) {
     if (line === 'silence') continue;
-    if (line !== 'claim') options.push([{ kind: 'phrase', phrase: line }, w]);
-    else if (claimRole) options.push([{ kind: 'verbalClaim', has: true, role: claimRole }, w]);
+    if ((PHRASES as readonly string[]).includes(line)) options.push([{ kind: 'phrase', phrase: line as Phrase }, w]);
+    else if (line === 'claim') {
+      if (claimRole) options.push([{ kind: 'verbalClaim', has: true, role: claimRole }, w]);
+    } else {
+      const said = announcements[line as Announcing] ?? [];
+      for (const reaction of said) options.push([reaction, w / said.length]);
+    }
   }
   options.push([null, weights.get('silence')!]);
   return options;
@@ -116,6 +124,76 @@ export function temper(moment: Moment, me: string, said: readonly Said[], now: n
 // 公开前情复用电脑的局内记忆（computer.ts 的 recall）：不给它自己放回牌堆的牌，它得出的就只依赖公开事件
 const memoryOf = (state: PublicState, events: readonly GameEvent[], me: string) => recall(events, me, state.players.map((p) => p.id), 0, []);
 const shownCount = (state: PublicState, role: Role) => state.players.reduce((n, p) => n + p.revealed.filter((r) => r === role).length, 0);
+
+// 任何行动预告都要看起来说得通：自己付得起（金币到 10 只能政变），针对性行动的目标在场、不是自己（偷窃还得对方有金币可偷），
+// 非针对性行动不带目标。只看公开信息
+const COST: Partial<Record<ActionType, number>> = { coup: COUP_COST, assassinate: ASSASSINATE_COST };
+export function plausible(state: PublicState, me: string, action: ActionType, targetId?: string): boolean {
+  const { coins } = state.players.find((p) => p.id === me)!;
+  if (coins < (COST[action] ?? 0) || (coins >= FORCED_COUP_COINS && action !== 'coup')) return false;
+  if (!needsTarget(action)) return targetId === undefined;
+  const target = state.players.find((p) => p.id === targetId);
+  return !!target?.alive && target.id !== me && (action !== 'steal' || target.coins > 0);
+}
+const announcement = (action: ActionType, targetId?: string): Reaction =>
+  targetId === undefined ? { kind: 'announcement', action } : { kind: 'announcement', action, targetId };
+
+// ── 表 1：轮到自己，行动决定已作出（行动预告）──
+// 发言模块唯一的私有输入：自己刚作出、停顿之后就公开的那个决定，只用在这张表里（#58）。
+// 嘴跟着手走：这里读决定，决定不读这里
+export interface Decision {
+  action: ActionType;
+  targetId?: string;
+}
+interface OwnTurn {
+  action: ActionType;
+  forced: boolean; // 金币已到 10，人人知道必须政变
+  atAttacker: boolean; // 目标是最近打过自己的人
+  duel: boolean; // 两人对峙
+  dukeStanding: boolean; // 公爵已在自己仍作数的声称里
+  dukeElsewhere: boolean; // 有别人仍作数地声称着公爵
+}
+const FEINT = LOW; // 虚晃是小概率
+const EAGER = 0.5; // 开口概率高一些
+const TARGETED: readonly ActionType[] = ['coup', 'assassinate', 'steal'];
+const assassinateOrSteal = (s: OwnTurn) => s.action === 'assassinate' || s.action === 'steal';
+const ON_OWN_TURN: readonly Row<OwnTurn>[] = [
+  { when: (s) => s.action === 'coup' && !s.forced, say: { announce: FIRST, feintTarget: FEINT } },
+  { when: (s) => s.action === 'coup' && s.forced, say: { announce: FIRST, feintTarget: FEINT, silence: EAGER } },
+  { when: (s) => assassinateOrSteal(s) && s.atAttacker, say: { announce: HIGH, feintTarget: FEINT * LOW, feintAction: FEINT * LOW * LOW } },
+  { when: (s) => assassinateOrSteal(s) && !s.atAttacker, say: { announce: FIRST, feintTarget: FEINT, feintAction: FEINT * LOW } },
+  // 真预告的权重由上面按行动给；这一行只排除虚晃目标
+  { when: (s) => needsTarget(s.action) && s.duel, say: { announce: 1 }, exclude: ['feintTarget'] },
+  { when: (s) => s.action === 'tax' && s.dukeStanding, say: { announce: FIRST } },
+  { when: (s) => s.action === 'tax' && !s.dukeStanding, say: { announce: FIRST, silence: QUIET } },
+  { when: (s) => s.action === 'foreignAid' && s.dukeElsewhere, say: { announce: FIRST } }, // 像在试探他挡不挡
+  { when: (s) => s.action === 'foreignAid' && !s.dukeElsewhere, say: { announce: FIRST, silence: QUIET } },
+  { when: (s) => s.action === 'exchange' || s.action === 'income', say: { announce: FIRST, silence: QUIET } },
+];
+// 这张表的延迟是说完之后停多久再出手：预告此刻就说，决定在停顿之后执行
+const ON_OWN_TURN_MS = [800, 1_500] as const;
+
+// me 不是此刻选行动的当前玩家时没有候选
+export function onOwnTurn(state: PublicState, events: readonly GameEvent[], me: string, { action, targetId }: Decision): Moment {
+  if (state.phase !== 'choosingAction' || state.currentPlayerId !== me) return NOTHING(ON_OWN_TURN_MS);
+  const memory = memoryOf(state, events, me);
+  const rivals = state.players.filter((p) => p.alive && p.id !== me);
+  const situation: OwnTurn = {
+    action,
+    forced: state.players.find((p) => p.id === me)!.coins >= FORCED_COUP_COINS,
+    atAttacker: targetId !== undefined && memory.attacker === targetId,
+    duel: rivals.length === 1,
+    dukeStanding: memory.standing.get(me)?.has('duke') ?? false,
+    dukeElsewhere: rivals.some((p) => memory.standing.get(p.id)?.has('duke')),
+  };
+  const say = (a: ActionType, t?: string) => (plausible(state, me, a, t) ? [announcement(a, t)] : []);
+  const announcements = {
+    announce: say(action, targetId),
+    feintTarget: needsTarget(action) ? rivals.filter((p) => p.id !== targetId).flatMap((p) => say(action, p.id)) : [],
+    feintAction: needsTarget(action) ? TARGETED.filter((a) => a !== action).flatMap((a) => say(a, targetId)) : [],
+  };
+  return { options: toOptions(merge(ON_OWN_TURN, situation), undefined, announcements), delayMs: ON_OWN_TURN_MS };
+}
 
 // ── 表 2：自己刚作出声称（含阻挡），问询窗口还开着 ──
 interface OwnClaim {
