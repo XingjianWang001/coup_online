@@ -35,6 +35,7 @@ import { scheduleAutoDismiss } from './transient.ts';
 import { useSmoothHeight } from './motion.ts';
 import { closeShowdown, initialSession, reduceSession, rejoinIntent, type CountdownSnapshot, type Session, type Showcase, type ShowdownView } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
+import { CARD_STYLES, loadCardStyle, loadDebug, persistCardStyle, type CardStyle } from './cardStyle.ts';
 import {
   LANGUAGE_OPTIONS,
   loadLocale,
@@ -95,6 +96,9 @@ const LINK_ROOM = (() => {
 let pendingLinkRoom = LINK_ROOM;
 // 座位被其他标签页接管后，本标签页断线重连不再自动加入，直到用户在这里重新进房。
 let replaced = false;
+
+// 调试开关打开时，设置里才出现牌面风格；关掉后大牌一律按默认风格显示，选过的风格留着下次用。
+const DEBUG = loadDebug(browserStorage(), window.location.search);
 
 function browserStorage(): Storage | null {
   try {
@@ -226,6 +230,12 @@ export function App() {
   function changeLocale(nextLocale: Locale) {
     setLocale(nextLocale);
     persistLocale(browserStorage(), nextLocale);
+  }
+
+  const [cardStyle, setCardStyle] = useState(() => loadCardStyle(browserStorage()));
+  function changeCardStyle(nextStyle: CardStyle) {
+    setCardStyle(nextStyle);
+    persistCardStyle(browserStorage(), nextStyle);
   }
 
   const showError = (error: TransientErrorState['error']) => {
@@ -404,6 +414,11 @@ export function App() {
     document.documentElement.lang = locale;
   }, [locale]);
 
+  // 大牌的画风全在 style.css 里按这个属性切换，组件不用知道风格
+  useEffect(() => {
+    document.documentElement.dataset.cardStyle = DEBUG ? cardStyle : 'default';
+  }, [cardStyle]);
+
   return (
     <div className="app">
       <header className="header">
@@ -426,7 +441,13 @@ export function App() {
       {showRules && <RulesPanel locale={locale} onLocaleChange={changeLocale} onClose={closeRules} />}
 
       {showSettings && (
-        <SettingsPanel locale={locale} onLocaleChange={changeLocale} onClose={closeSettings} />
+        <SettingsPanel
+          locale={locale}
+          onLocaleChange={changeLocale}
+          cardStyle={DEBUG ? cardStyle : undefined}
+          onCardStyleChange={changeCardStyle}
+          onClose={closeSettings}
+        />
       )}
 
       {confirmLeave && (
@@ -533,6 +554,8 @@ export function App() {
 function SettingsPanel(props: {
   locale: Locale;
   onLocaleChange: (locale: Locale) => void;
+  cardStyle?: CardStyle;
+  onCardStyleChange: (style: CardStyle) => void;
   onClose: () => void;
 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -572,6 +595,25 @@ function SettingsPanel(props: {
             ))}
           </div>
         </fieldset>
+        {props.cardStyle && (
+          <fieldset className="language-settings">
+            <legend>{translate(props.locale, 'cardStyle')}</legend>
+            <div className="language-options">
+              {CARD_STYLES.map((style) => (
+                <label className="language-option" key={style}>
+                  <input
+                    type="radio"
+                    name="cardStyle"
+                    value={style}
+                    checked={props.cardStyle === style}
+                    onChange={() => props.onCardStyleChange(style)}
+                  />
+                  <span>{translate(props.locale, style === 'totem' ? 'cardStyleTotem' : 'cardStyleDefault')}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
       </div>
     </div>
   );
