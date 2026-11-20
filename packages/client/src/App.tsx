@@ -98,7 +98,7 @@ let pendingLinkRoom = LINK_ROOM;
 let replaced = false;
 
 // 调试开关打开时，设置里才出现牌面风格；关掉后大牌一律按默认风格显示，选过的风格留着下次用。
-const DEBUG = loadDebug(browserStorage(), window.location.search);
+const DEBUG = loadDebug(browserStorage(), window.location.search, window.location.hostname);
 
 function browserStorage(): Storage | null {
   try {
