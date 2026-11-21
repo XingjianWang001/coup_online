@@ -30,7 +30,7 @@ import type { GameRepository } from './repository.ts';
 import { PHRASES, STRENGTHS, type LobbyPlayer, type Phrase, type Reaction, type Strength } from '@coup/shared';
 import { ClientError } from './errors.ts';
 import { TUNINGS, decideComputerIntent, drawTemperament, type ComputerIntent, type Returned, type Temperament } from './computer.ts';
-import { AFTER_GAME_MS, afterGame, afterOwnClaim, offTurn, onOwnTurn, probe, replyTo, speak, stagger, targeted, temper, type Heard, type Moment, type Said } from './speech.ts';
+import { AFTER_GAME_MS, afterGame, afterOwnClaim, afterResult, offTurn, onOwnTurn, probe, replyTo, speak, stagger, targeted, temper, type Heard, type Moment, type Said } from './speech.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
@@ -166,6 +166,8 @@ export class Room {
   private speechTimers = new Set<ReturnType<typeof setTimeout>>();
   // 本局通过校验的全部表态（真人和电脑的，按时间先后）：电脑「听到」的就是这些，开局清空
   private heard: Heard[] = [];
+  // 本局最近一次声称时 heard 已有几条（表 5 看这次声称以来自己说过什么）
+  private claimHeard = 0;
   // 每位电脑上次看时已成立的回合外局势（表 6），开局清空：同一局势只在刚出现时给一次机会
   private offTurnHeld = new Map<string, ReadonlySet<string>>();
   // 电脑玩家本局的性格，和它的局内记忆所依据的本局公开事件：每次开局重抽、清空，不带到下一局
@@ -536,6 +538,19 @@ export class Room {
     if (aimed?.type === 'actionChosen') {
       const moment = targeted(publicState(g), this.gameEvents, aimed.targetId!);
       this.say(aimed.targetId!, this.humanAlive() ? moment : { ...moment, options: moment.options.filter(([r]) => r?.kind !== 'announcement') });
+    }
+    // 表 5：结果公开后。一次结算（对质结果、失去影响力、淘汰）每位电脑一次机会，对质的结果等揭晓动画播完再说。
+    // 候选看这次声称以来自己说过什么，所以声称时记下 heard 的位置（结果总在本局的某次声称之后，换局不用清）。旁观加速时不反预告
+    if (events.some((e) => (e.type === 'actionChosen' && e.claimedRole) || e.type === 'blocked')) this.claimHeard = this.heard.length;
+    if (events.length > 0) {
+      const state = publicState(g);
+      const reveal = events.some((e) => e.type === 'challengeResolved') ? REVEAL_MS : 0;
+      for (const p of this.players.values()) {
+        if (!p.isComputer) continue;
+        const moment = afterResult(state, this.gameEvents, events.length, this.heard.slice(this.claimHeard), p.id);
+        const options = this.humanAlive() ? moment.options : moment.options.filter(([r]) => r?.kind !== 'announcement');
+        if (options.some(([r]) => r)) this.say(p.id, { ...moment, options, delayMs: [moment.delayMs[0] + reveal, moment.delayMs[1] + reveal] });
+      }
     }
     // 表 6：没轮到自己时，局势刚出现的电脑可能说一句。旁观加速时不预告；只有沉默可选时不抽签
     if (g.phase !== 'gameOver') {
