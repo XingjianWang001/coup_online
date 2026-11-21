@@ -48,7 +48,9 @@ export type Options = (readonly [Reaction | null, number])[];
 export interface Moment {
   options: Options;
   delayMs: readonly [number, number]; // 从此刻起多久之后说
-  current?: (state: PublicState) => boolean; // 到点发送时语境还在不在；不给的只靠换阶段、换行动者时的清除
+  // 到点发送时语境还在不在。给了的换阶段、换行动者时 Room 不清它，全靠它判断，所以它自己要写全「还算不算数」；
+  // 不给的只靠换阶段、换行动者时的清除
+  current?: (state: PublicState) => boolean;
   depth?: number; // 接话的层数（表 7）：回应第 n 层的这句是第 n + 1 层；不是接话的是 0
 }
 const NOTHING = (delayMs: readonly [number, number]): Moment => ({ options: [], delayMs });
@@ -285,11 +287,18 @@ export function afterGame(state: PublicState, events: readonly GameEvent[], me: 
   return { options: toOptions(merge(AFTER_GAME, situation), undefined), delayMs: AT_ONCE };
 }
 
+// 从此刻起还没换过回合。events 在 Room 里是本局只增不减的同一个数组，到点时已含这期间的事
+const thisTurn = (events: readonly GameEvent[]) => {
+  const seen = events.length;
+  return () => !events.slice(seen).some((e) => e.type === 'turnChanged');
+};
+
 // 问询窗口前段、自己还没回应时说的话（表 3 试探；表 4 里偷窃、暗杀的目标也这样）：发送时自己已回应、有人质疑或窗口已关就作废。
-// 自己放弃不换阶段，Room 换阶段时的清除管不到，所以发送时再看一眼
-const whileUndecided = (state: PublicState, me: string) => {
+// 窗口关了又在下一回合开出同一种窗口也不算
+const whileUndecided = (state: PublicState, events: readonly GameEvent[], me: string) => {
   const subject = state.challengeSubject;
-  return (now: PublicState) => now.phase === 'awaitingChallenge' && now.challengeSubject === subject && !now.passed.includes(me);
+  const sameTurn = thisTurn(events);
+  return (now: PublicState) => now.phase === 'awaitingChallenge' && now.challengeSubject === subject && !now.passed.includes(me) && sameTurn();
 };
 
 // ── 表 3：别人作出声称（含阻挡），自己有资格质疑且尚未回应（试探）。冲着自己来的行动另见表 4 ──
@@ -335,7 +344,7 @@ export function probe(state: PublicState, events: readonly GameEvent[], me: stri
     alsoMine: memory.standing.get(me)?.has(role) ?? false,
     blocking: blocking ? (pending.actorId === me ? 'mine' : 'other') : undefined,
   };
-  return { options: toOptions(merge(PROBE, situation), situation.alsoMine ? role : undefined), delayMs: PROBE_MS, current: whileUndecided(state, me) };
+  return { options: toOptions(merge(PROBE, situation), situation.alsoMine ? role : undefined), delayMs: PROBE_MS, current: whileUndecided(state, events, me) };
 }
 
 // 反预告：以 targetId 为目标的行动预告，在政变、暗杀、偷窃里选头一个说得通的（自己付得起，偷窃还得对方有金币）；
@@ -407,7 +416,7 @@ export function targeted(state: PublicState, events: readonly GameEvent[], me: s
     actorCaught: (memory.caught.get(actorId) ?? 0) > 0,
   };
   const options = toOptions(merge(TARGETED_AT_ME, situation), blocker, { counter: counterAnnouncement(state, me, actorId) });
-  return { options, delayMs: TARGETED_MS, current: coup ? undefined : whileUndecided(state, me) };
+  return { options, delayMs: TARGETED_MS, current: coup ? undefined : whileUndecided(state, events, me) };
 }
 
 // ── 表 5：结果公开后（#82）。一次结算里的质疑结果、失去影响力、淘汰合并成一次机会 ──
@@ -515,8 +524,16 @@ export function afterResult(state: PublicState, events: readonly GameEvent[], ba
   };
   if (!AFTER_RESULT.some((row) => row.when(situation))) return NOTHING(AFTER_RESULT_MS);
   const counter = attacker && !situation.out ? counterAnnouncement(state, me, attacker) : [];
-  return { options: toOptions(merge(AFTER_RESULT, situation), undefined, { counter }), delayMs: AFTER_RESULT_MS };
+  // 说到下一次结算为止：选丢哪张（这次结算里待丢的）、下一位行动都不算，下一次行动之后的对质结果、失去影响力、阻挡才算；牌局结束归表 8
+  const seen = events.length;
+  const current = (now: PublicState) => {
+    const later = events.slice(seen);
+    const next = later.findIndex((e) => e.type === 'actionChosen');
+    return now.phase !== 'gameOver' && (next < 0 || !later.slice(next).some((e) => NEXT_RESULT.includes(e.type)));
+  };
+  return { options: toOptions(merge(AFTER_RESULT, situation), undefined, { counter }), delayMs: AFTER_RESULT_MS, current };
 }
+const NEXT_RESULT: readonly GameEvent['type'][] = ['challengeResolved', 'influenceLost', 'blocked'];
 
 // ── 表 6：回合外的局势（没轮到自己时，只读公开信息：谁最近打过自己、各人的金币和影响力）──
 // 预告不兑现也无妨，行动策略不读它。每种局势在刚出现时给一次机会：held 是上次看时已成立的局势，
@@ -641,9 +658,13 @@ const MAX_DEPTH = 2;
 const JUST_SAID_MS = 6_000;
 
 // 听到 to 之后 me 回什么。heard 是本局听到的全部表态（含 to，按时间先后）。
-// 返回的 current 到点时用同一份 events、heard 再判断一次：Room 里两者都是本局只增不减的同一个数组，到点时已含这期间的事
+// 返回的 current 到点时用同一份 events、heard 再判断一次：Room 里两者都是本局只增不减的同一个数组，到点时已含这期间的事。
+// 在问询窗口里听到的，窗口关了就作废；其余的（如轮到谁时的行动预告）说到这一回合结束，预告的行动执行了也还算
 export function replyTo(state: PublicState, events: readonly GameEvent[], heard: readonly Heard[], to: Heard, me: string): Moment {
-  const current = (now: PublicState) => replyOptions(now, events, heard, to, me).length > 0;
+  const subject = state.phase === 'awaitingChallenge' ? state.challengeSubject : null;
+  const sameTurn = thisTurn(events);
+  const inWindow = (now: PublicState) => !subject || (now.phase === 'awaitingChallenge' && now.challengeSubject === subject);
+  const current = (now: PublicState) => sameTurn() && inWindow(now) && replyOptions(now, events, heard, to, me).length > 0;
   return { options: replyOptions(state, events, heard, to, me), delayMs: REPLY_MS, depth: to.depth + 1, current };
 }
 

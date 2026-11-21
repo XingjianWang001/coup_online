@@ -162,8 +162,10 @@ export class Room {
   previousWinnerId: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private computerTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  // 电脑还没发出的表态和对质时的对准
+  // 电脑还没发出的表态和对质时的对准。speechTimers 说的是眼前的事，换阶段或换行动者就清掉；
+  // lastingTimers 是自带 current 的表态（到点自己判断还算不算数）和赛后的表态、揭晓，只在回到大厅、空房时清
   private speechTimers = new Set<ReturnType<typeof setTimeout>>();
+  private lastingTimers = new Set<ReturnType<typeof setTimeout>>();
   // 本局通过校验的全部表态（真人和电脑的，按时间先后）：电脑「听到」的就是这些，开局清空
   private heard: Heard[] = [];
   // 本局最近一次声称时 heard 已有几条（表 5 看这次声称以来自己说过什么）
@@ -363,7 +365,7 @@ export class Room {
     // 先清牌局：下面的 removePlayer 可能走到 scheduleEmptyCleanup，那里不能再看到进行中的牌局
     this.game = null;
     this.repo.delete(this.code);
-    this.clearTimer();
+    this.clearTimer(true);
     // 牌局中宽限期已到而弃权的真人玩家仍占着座位且没有计时器，不带进新的大厅阶段；电脑玩家留下。
     for (const p of [...this.players.values()]) {
       if (!p.isComputer && !this.isPresent(p)) this.removePlayer(p.id);
@@ -448,16 +450,31 @@ export class Room {
   }
 
   // 阶段时限、电脑出手和电脑没发出的表态一起清：换阶段或换行动者、牌局结束、回到大厅时都不留旧的电脑计时器。
-  // 表态说的是眼前的事，换了阶段或行动者就过时了
-  private clearTimer(): void {
+  // 不带 current 的表态说的是眼前的事，换了阶段或行动者就过时了；all 连 lastingTimers 一起清（回到大厅、空房）
+  private clearTimer(all = false): void {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
     this.deadlineAt = null;
-    for (const t of [...this.computerTimers.values(), ...this.speechTimers]) clearTimeout(t);
+    for (const t of [...this.computerTimers.values(), ...this.speechTimers, ...(all ? this.lastingTimers : [])]) clearTimeout(t);
     this.computerTimers.clear();
     this.speechTimers.clear();
+    if (all) this.lastingTimers.clear();
+  }
+
+  // 电脑表态、对准和赛后揭晓的计时器：记在 speechTimers（lasting 时记在 lastingTimers）里随清除取消，出错只记日志
+  private later(ms: number, fn: () => void, lasting = false): void {
+    const timers = lasting ? this.lastingTimers : this.speechTimers;
+    const t = setTimeout(() => {
+      timers.delete(t);
+      try {
+        fn();
+      } catch (e) {
+        console.error('computer speech error', e);
+      }
+    }, ms);
+    timers.add(t);
   }
 
   // 给此刻要作决定、还没排上的电脑各排一次出手。已排上的不重排：同一窗口里别人放弃不推迟它
@@ -600,12 +617,13 @@ export class Room {
     );
   }
 
-  // 电脑抽签决定说不说；说的话到点经和真人相同的校验与限流发出。计时器随 clearTimer 一起清
+  // 电脑抽签决定说不说；说的话到点经和真人相同的校验与限流发出。计时器随 clearTimer 一起清。
+  // 带 current 的表态到点自己判断还算不算数：换阶段、换行动者不清它，顺延得再晚也不因晚到取消（截止时刻记作 Infinity）
   private say(id: string, moment: Moment): void {
     if (!this.players.get(id)?.isComputer) return;
     const speech = speak(temper(moment, id, this.computerSpeech, Date.now()), this.speechRandom);
     if (!speech) return;
-    this.sayLater(id, speech.reaction, speech.delayMs, Date.now() + speech.delayMs, moment.current, moment.depth);
+    this.sayLater(id, speech.reaction, speech.delayMs, moment.current ? Infinity : Date.now() + speech.delayMs, moment.current, moment.depth);
   }
 
   // 电脑本局已发出的表态（错峰、降温、重复降权用）
@@ -613,23 +631,16 @@ export class Room {
     return this.heard.filter((h) => this.players.get(h.playerId)?.isComputer);
   }
 
-  // 到点时离全桌上一条电脑表态太近就顺延、晚太多就取消（stagger）。顺延的计时器也在 speechTimers 里，照样随 clearTimer 取消
+  // 到点时离全桌上一条电脑表态太近就顺延、晚太多就取消（stagger）。顺延的计时器和原来的记在同一处，照样随清除取消
   private sayLater(id: string, reaction: Reaction, ms: number, dueAt: number, current?: Moment['current'], depth = 0): void {
-    const t = setTimeout(() => {
-      this.speechTimers.delete(t);
-      const now = Date.now();
-      const wait = stagger(now, this.computerSpeech.at(-1)?.at, dueAt, this.speechRandom);
+    this.later(ms, () => {
+      const wait = stagger(Date.now(), this.computerSpeech.at(-1)?.at, dueAt, this.speechRandom);
       if (wait === null) return;
       if (wait > 0) return this.sayLater(id, reaction, wait, dueAt, current, depth);
-      try {
-        // 有的话只在发送时语境还在才说（例如自己已放弃、已回应）：不换阶段的变化，clearTimer 管不到
-        if (current && !current(publicState(this.game!))) return;
-        this.relay(id, reaction, depth);
-      } catch (e) {
-        console.error('computer speech error', e);
-      }
-    }, ms);
-    this.speechTimers.add(t);
+      // 有的话只在发送时语境还在才说（例如自己已放弃、已回应、窗口已关）
+      if (current && !current(publicState(this.game!))) return;
+      this.relay(id, reaction, depth);
+    }, !!current);
   }
 
   // 到点再决定一次：这期间局面可能已变（窗口已关、已轮到别人），此刻无需它决定就什么也不做。
@@ -839,7 +850,7 @@ export class Room {
   private scheduleEmptyCleanup(): void {
     if (this.game && this.game.phase !== 'gameOver') this.returnToLobby();
     // 已结束的牌局留到有人回来或回收，但没人听了：赛后还没发出的表态和揭晓一并取消
-    else this.clearTimer();
+    else this.clearTimer(true);
     if (this.emptyTimer) return;
     this.emptyTimer = setTimeout(() => {
       if (!this.hasPresentPlayer()) {

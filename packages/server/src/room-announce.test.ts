@@ -43,6 +43,26 @@ describe('Room 电脑行动预告', () => {
     return { ...made, alice, bob, computerId, toComputer, announced, acted };
   }
 
+  it('被预告政变的电脑接的话，不因预告者停顿后出手而作废', () => {
+    vi.useFakeTimers();
+    vi.clearAllTimers();
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0, computerRandom: () => 0.5, computerDelayMs: () => 0, speechRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    const [c1, c2] = room.playerList.filter((p) => p.isComputer).map((p) => p.id);
+    room.game!.players.find((p) => p.id === c1)!.coins = 10;
+    room.game!.players.find((p) => p.id === alice.id)!.hand.pop(); // 只剩 1 点影响力的 Alice 不如 c2 值得政变
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' });
+    vi.advanceTimersToNextTimer(); // c1 作出决定，先预告
+    const said = () => events.onReaction.mock.calls.map(([, r]) => r);
+    expect(said()).toEqual([{ playerId: c1, reaction: { kind: 'announcement', action: 'coup', targetId: c2 } }]);
+    vi.advanceTimersByTime(3_000);
+    expect(room.game!.lossToResolve?.playerId ?? room.game!.players.find((p) => p.id === c2)!.revealed.length).toBeTruthy(); // c1 已出手
+    expect(said()).toContainEqual({ playerId: c2, reaction: { kind: 'phrase', phrase: 'mercy' } }); // 预告政变自己，对方金币够 7
+  });
+
   it('真预告发出后停顿约 0.8 秒，再执行同一个决定', () => {
     const { room, alice, computerId, toComputer, announced, acted } = turnTable();
     toComputer();
