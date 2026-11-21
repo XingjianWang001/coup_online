@@ -1987,12 +1987,14 @@ function GameBoard(props: {
         )}
 
       <div className="table" data-seats={seats.opponents.length}>
-        {(['left', 'top', 'right'] as const).map((side) => (
-          <div key={side} className={`rail rail--${side}`}>
-            {rails[side].map((s) => renderSeat(s.player, s.angle))}
-          </div>
-        ))}
-        {/* 牌桌中央：live 区常驻，内容换行时淡入；倒计时放在 live 区外，避免读屏每秒播报 */}
+        <div className="opponent-seats">
+          {(['left', 'top', 'right'] as const).map((side) => (
+            <div key={side} className={`rail rail--${side}`}>
+              {rails[side].map((s) => renderSeat(s.player, s.angle))}
+            </div>
+          ))}
+        </div>
+        {/* live 区常驻；倒计时放在外面，避免读屏每秒播报 */}
         <div className={`narration${centerText ? '' : ' is-empty'}`}>
           <span className="narration-text" aria-live="polite">
             {centerText && <span key={centerText} className="narration-line">{centerText}</span>}

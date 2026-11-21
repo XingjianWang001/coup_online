@@ -290,6 +290,7 @@ input:focus-visible {
 }
 
 .notice {
+  overflow-wrap: anywhere;
   --surface: color-mix(in srgb, var(--gold) 13%, var(--panel));
   background: var(--surface);
   color: var(--gold);
@@ -524,6 +525,7 @@ input:focus-visible {
   height: 290px;
 }
 
+.opponent-seats,
 .rail {
   display: contents;
 }
@@ -968,6 +970,9 @@ input:focus-visible {
 }
 
 .narration-text {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   font-weight: 600;
   font-size: 17px;
   line-height: 1.4;
@@ -2168,7 +2173,7 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
   .table[data-seats='1'],
   .table[data-seats='2'] {
     display: grid;
-    grid-template-columns: minmax(0, 100px) minmax(0, 1fr) minmax(0, 100px);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 100px) minmax(0, 1fr);
     grid-template-areas:
       'left top right'
       'left center right';
@@ -2308,5 +2313,117 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
        ponytail: 视口矮于行动栏（约 260px）时栏顶看不全；真遇到再加 max-height + 气泡朝下。 */
     box-shadow: 0 -8px 24px oklch(0.08 0.01 155 / 0.55);
   }
+}
+
+/* 三人以上的窄桌把行动独立成行：昵称可换行，倒计时始终占自己的位置。 */
+@media (max-width: 1024px) {
+  .table:not([data-seats='1']) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    height: auto;
+  }
+
+  .table:not([data-seats='1']) .narration {
+    position: static;
+    transform: none;
+    align-self: stretch;
+    width: auto;
+    flex-direction: row;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
+    text-align: start;
+    border-block: 1px solid var(--gold-dim);
+  }
+
+  .table:not([data-seats='1']) .narration.is-empty {
+    padding: 0;
+    border: 0;
+    height: 0;
+  }
+}
+
+@media (768px < width <= 1024px) {
+  .table:not([data-seats='1']) .opponent-seats {
+    display: block;
+    position: relative;
+    height: 380px;
+    --cy: 300px;
+    --ry: 222px;
+    --rx: calc(50% - 78px);
+  }
+
+  .table[data-seats='2'] .opponent-seats {
+    height: 180px;
+    --cy: 160px;
+    --ry: 140px;
+  }
+
+  .table:not([data-seats='1']) .seat.opponent {
+    width: 148px;
+    --pad-x: var(--sp-2);
+    --pad-b: var(--sp-2);
+    padding: var(--sp-2);
+    gap: var(--sp-1);
+  }
+
+  .table:not([data-seats='1']) .seat-head {
+    flex-wrap: nowrap;
+  }
+
+  .table:not([data-seats='1']) .seat .coins {
+    flex-shrink: 0;
+  }
+
+  .table:not([data-seats='1']) .seat.opponent :is(.card, .card-back) {
+    width: 44px;
+    height: 62px;
+  }
+}
+
+@media (max-width: 768px) {
+  .table:not([data-seats='1']) .opponent-seats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas: 'left top right';
+    gap: var(--sp-1);
+    align-items: start;
+  }
+
+  .opponent-seats .rail--right { align-items: flex-end; }
+
+  .table:not([data-seats='1']) .seat.opponent {
+    --pad-b: var(--sp-1);
+    padding-block: var(--sp-1);
+    gap: var(--sp-1);
+  }
+
+  .table:not([data-seats='1']) .seat.opponent :is(.card, .card-back) {
+    width: 34px;
+    height: 48px;
+  }
+
+  .table:not([data-seats='1']) .seat-head { row-gap: 0; }
+
+  .table:not([data-seats='1']) .nameplate {
+    height: calc(2lh + var(--sp-1));
+    margin-top: 0;
+  }
+}
+
+@media (max-width: 360px) {
+  /* 窄屏满桌时，给限时行动留出首屏空间。 */
+  .app:has(.table) .header {
+    gap: var(--sp-1);
+    padding-bottom: var(--sp-2);
+    margin-bottom: var(--sp-2);
+  }
+
+  .app:has(.table) .header-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .app:has(.table) .header-actions button { padding-inline: var(--sp-1); }
 }
 
