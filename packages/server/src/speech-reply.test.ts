@@ -466,6 +466,21 @@ describe('Room 电脑接话', () => {
     }
   });
 
+  it('听到手下留情，刚偷窃他的电脑再预告一遍；房里的真人全被淘汰时不预告', () => {
+    for (const spectating of [false, true]) {
+      const { room, people: [alice], cs: [c1, c2], lines } = seated(['Alice'], 2);
+      room.apply((g) => (spectating ? forfeit(g, alice.id) : chooseAction(g, alice.id, 'income'))); // 轮到 c1
+      const start = Date.now();
+      room.apply((g) => chooseAction(g, c1, 'steal', c2)); // c2 被偷窃、没声称过队长或大使：先说手下留情
+      vi.advanceTimersByTime(5_000);
+      expect(lines(start).map(({ by, line }) => [by, line])).toEqual([
+        [c1, 'honest'], // 首次声称队长
+        [c2, 'mercy'],
+        ...(spectating ? [[c1, 'sure']] : [[c1, 'steal'], [c2, 'mercy']]), // 又听到预告偷窃自己：再回一句，已是第三句
+      ]);
+    }
+  });
+
   it('电脑也接电脑的话，最多两层：一句话、一句回应、一句再回应', () => {
     const { people: [alice], cs: [c1, c2], income, tax, pass, say, lines } = seated(['Alice'], 2);
     income(alice.id);
