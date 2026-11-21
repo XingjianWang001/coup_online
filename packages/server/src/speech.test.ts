@@ -603,6 +603,21 @@ describe('表 6：回合外的局势', () => {
     expect(moment.options.at(-1)![0]).toBeNull(); // 沉默有概率
   });
 
+  it('最近打过自己的人随回合淡出：他之后又走了两个回合（没再针对自己）就不算，预告政变领先者', () => {
+    const t = table();
+    bStoleFromA(t);
+    t.income('c');
+    t.income('a');
+    t.income('b'); // b 偷 a 之后的第一个回合：还算
+    t.seat('c').coins = 6; // 领先者是 c
+    expect(spoken(after(t, coins(t, 'a', 7)).moment.options)).toEqual(['coup:b']);
+    t.income('c');
+    t.income('a');
+    t.income('b'); // 第二个回合：不算了
+    t.seat('a').coins = 5;
+    expect(spoken(after(t, coins(t, 'a', 7)).moment.options)).toEqual(['coup:c']);
+  });
+
   it('多沉默：只有「对手够政变、自己只剩 1 点」那一行开口概率不低', () => {
     const rich = table();
     rich.income('a');

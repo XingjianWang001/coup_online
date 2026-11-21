@@ -125,8 +125,14 @@ export function temper(moment: Moment, me: string, said: readonly Said[], now: n
   return { ...moment, options };
 }
 
-// 公开前情复用电脑的局内记忆（computer.ts 的 recall）：不给它自己放回牌堆的牌，它得出的就只依赖公开事件
-const memoryOf = (state: PublicState, events: readonly GameEvent[], me: string) => recall(events, me, state.players.map((p) => p.id), 0, []);
+// 公开前情复用电脑的局内记忆（computer.ts 的 recall）：不给它自己放回牌堆的牌，它得出的就只依赖公开事件。
+// 「谁最近打过自己」随回合淡化，只在发言里：和表 4 的「第二次被同一人针对」一样，他之后自己的回合超出 AGAIN_FADE 就不算。
+// ponytail: 用到它的都是有无两档的条件，淡化只取了截止，不按回合减权重
+function memoryOf(state: PublicState, events: readonly GameEvent[], me: string) {
+  const memory = recall(events, me, state.players.map((p) => p.id), 0, []);
+  const { attacker } = memory;
+  return { ...memory, attacker: attacker && aimedAgo(events, events.length, attacker, me) ? attacker : undefined };
+}
 const shownCount = (state: PublicState, role: Role) => state.players.reduce((n, p) => n + p.revealed.filter((r) => r === role).length, 0);
 // 最近一次声称（行动或阻挡）的事件下标，没有时是 -1
 function lastClaimAt(events: readonly GameEvent[]): number {
@@ -365,6 +371,16 @@ interface Targeted {
 // 第二次被同一人针对的加权随回合淡化：他上一回合刚针对过自己时全额，再早一回合的按指数减弱，更早的不算。
 // 指数小于 1 只让倍数向 1 靠拢，不会压低别的行已给的权重
 const AGAIN_FADE = [1, 0.5];
+// 往回数 actorId 自己的回合（1 是 end 之前他的最近一个回合），找他最近一次针对 me 的行动；超出淡化的回合数就不算（0）
+function aimedAgo(events: readonly GameEvent[], end: number, actorId: string, me: string): number {
+  for (let i = end - 1, n = 1; i >= 0 && n <= AGAIN_FADE.length; i -= 1) {
+    const e = events[i];
+    if (e.type !== 'actionChosen' || e.actorId !== actorId) continue;
+    if (e.targetId === me) return n;
+    n += 1;
+  }
+  return 0;
+}
 const again = (turns: number, fade: number): Row<Targeted> => ({
   when: (s) => s.again === turns,
   say: { counter: HIGH ** fade, doubt: SECOND ** fade, mercy: THIRD ** fade },
@@ -395,24 +411,13 @@ export function targeted(state: PublicState, events: readonly GameEvent[], me: s
     ? state.phase === 'choosingLoss' && state.lossPlayerId === me
     : (action === 'steal' || action === 'assassinate') && state.phase === 'awaitingChallenge' && state.challengeSubject === 'action' && !state.passed.includes(me);
   if (!open) return NOTHING(TARGETED_MS);
-  // 往回数行动者自己的回合，找他上一次针对自己；超出淡化的回合数就不算
-  let turns = 0;
-  for (let i = at - 1, n = 1; i >= 0 && n <= AGAIN_FADE.length; i -= 1) {
-    const e = events[i];
-    if (e.type !== 'actionChosen' || e.actorId !== actorId) continue;
-    if (e.targetId === me) {
-      turns = n;
-      break;
-    }
-    n += 1;
-  }
   const memory = memoryOf(state, events, me);
   const blocker = BLOCK_ROLES[action].find((r) => memory.standing.get(me)?.has(r));
   const situation: Targeted = {
     action,
     blocker,
     lastCard: state.players.find((p) => p.id === me)!.handCount === 1,
-    again: turns,
+    again: aimedAgo(events, at, actorId, me),
     actorCaught: (memory.caught.get(actorId) ?? 0) > 0,
   };
   const options = toOptions(merge(TARGETED_AT_ME, situation), blocker, { counter: counterAnnouncement(state, me, actorId) });
