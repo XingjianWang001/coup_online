@@ -17,7 +17,7 @@ import {
   type Role,
 } from '@coup/engine';
 import type { Reaction } from '@coup/shared';
-import { afterGame, afterOwnClaim, merge, onOwnTurn, plausible, type Decision, type Options, type Row } from './speech.ts';
+import { afterGame, afterOwnClaim, merge, onOwnTurn, plausible, probe, type Decision, type Options, type Row } from './speech.ts';
 
 describe('场景表的合并', () => {
   it('成立的行合并候选：同一条的权重相乘，写了排除的不出现，沉默始终在候选里；不成立的行不算', () => {
@@ -373,5 +373,188 @@ describe('表 1：轮到自己（行动预告，读已作出的决定）', () =>
       return onOwnTurn(publicState(g), [], 'a', { action: 'steal', targetId: 'b' });
     };
     expect(run({ a: ['captain', 'captain'], b: ['duke', 'duke'], c: ['contessa', 'contessa'] })).toEqual(run({ a: ['duke', 'assassin'], b: ['captain', 'ambassador'], c: ['duke', 'contessa'] }));
+  });
+});
+
+describe('表 3：别人作出声称，自己有资格质疑且尚未回应（试探）', () => {
+  const probes = (t: Table, me = 'b') => probe(publicState(t.g), t.events, me);
+  // 抽签用到的部分：候选和延迟区间
+  const draw = (t: Table, me = 'b') => (({ options, delayMs }) => ({ options, delayMs }))(probes(t, me));
+  // b 先征税声称公爵（没人质疑），再轮到 a
+  const bClaimsDuke = (t: Table) => {
+    t.income('a');
+    t.did(chooseAction(t.g, 'b', 'tax'));
+    t.passAll('b');
+    t.income('c');
+  };
+
+  it.each<[string, (t: Table) => void, string, string[]]>([
+    ['基线：没有前情', (t) => t.tax(), 'b', ['silence', 'sure']],
+    ['同一声称的延续（连续征税）与基线相同', (t) => (taxedBefore(t), t.tax()), 'b', ['silence', 'sure']],
+    [
+      '声称者被抓过',
+      (t) => {
+        t.challengedTax('captain');
+        t.income('b', 'c');
+        t.tax();
+      },
+      'c',
+      ['doubt', 'silence', 'sure'],
+    ],
+    [
+      // a 失去影响力时丢掉了队长，又声称队长去偷 c；b 旁观
+      '声称矛盾',
+      (t) => {
+        t.income('a');
+        t.coup('b', 'a', 'captain');
+        t.income('c');
+        t.did(chooseAction(t.g, 'a', 'steal', 'c'));
+      },
+      'b',
+      ['doubt', 'silence', 'sure'],
+    ],
+    [
+      '声称者证明过',
+      (t) => {
+        t.challengedTax('duke');
+        t.did(resolveLoss(t.g, 'b', t.seat('b').hand[0].id));
+        t.income('b', 'c');
+        t.tax();
+      },
+      'c',
+      ['silence', 'sure'],
+    ],
+    ['该角色明牌已有 2 张', (t) => (twoDukesShown(t), t.tax()), 'b', ['doubt', 'silence', 'sure']],
+    [
+      // c 手里两张公爵都亮了，b 亮了一张
+      '该角色 3 张都已是明牌',
+      (t) => {
+        t.seat('c').hand[1].role = 'duke';
+        t.income('a');
+        t.coup('b', 'c', 'duke');
+        t.coup('c', 'b', 'duke');
+        t.income('a');
+        t.coup('b', 'c', 'duke');
+        t.tax();
+      },
+      'b',
+      ['doubt', 'silence'],
+    ],
+    ['自己也仍作数地声称着同一角色', (t) => (bClaimsDuke(t), t.tax()), 'b', ['claim:duke', 'doubt', 'silence']],
+    [
+      '是阻挡，拦的是自己的行动',
+      (t) => {
+        t.income('a');
+        t.did(chooseAction(t.g, 'b', 'foreignAid'));
+        t.did(block(t.g, 'a', 'duke'));
+      },
+      'b',
+      ['doubt', 'silence', 'sure'],
+    ],
+    [
+      '是阻挡，拦的是别人的行动',
+      (t) => {
+        t.income('a', 'b');
+        t.did(chooseAction(t.g, 'c', 'foreignAid'));
+        t.did(block(t.g, 'a', 'duke'));
+      },
+      'b',
+      ['silence', 'sure'],
+    ],
+  ])('%s', (_, setup, me, expected) => {
+    const t = table();
+    setup(t);
+    expect(t.g.phase).toBe('awaitingChallenge');
+    const options = probes(t, me);
+    expect(labels(options.options)).toEqual(expected);
+    for (const [, weight] of options.options) expect(weight).toBeGreaterThan(0);
+  });
+
+  it('权重：矛盾时我信你个鬼比你确定？重；基线、证明过、拦别人的阻挡多沉默；3 张都已是明牌时开口概率高', () => {
+    const contradicted = table();
+    contradicted.income('a');
+    contradicted.coup('b', 'a', 'captain');
+    contradicted.income('c');
+    contradicted.did(chooseAction(contradicted.g, 'a', 'steal', 'c'));
+    const weight = (options: Options, l: string) => options.find(([r]) => label(r) === l)![1];
+    const { options } = probes(contradicted);
+    expect(weight(options, 'doubt')).toBeGreaterThan(weight(options, 'sure'));
+
+    const baseline = table();
+    baseline.tax();
+    const caught = table();
+    caught.challengedTax('captain');
+    caught.income('b', 'c');
+    caught.tax();
+    const allShown = table();
+    allShown.seat('c').hand[1].role = 'duke';
+    allShown.income('a');
+    allShown.coup('b', 'c', 'duke');
+    allShown.coup('c', 'b', 'duke');
+    allShown.income('a');
+    allShown.coup('b', 'c', 'duke');
+    allShown.tax();
+    expect(silenceShare(probes(baseline).options)).toBeGreaterThan(silenceShare(probes(caught, 'c').options));
+    expect(silenceShare(probes(allShown).options)).toBeLessThan(silenceShare(probes(caught, 'c').options));
+  });
+
+  it('同一声称重复多次，试探的候选和概率都不变', () => {
+    const once = table();
+    once.tax();
+    const thrice = table();
+    taxedBefore(thrice);
+    taxedBefore(thrice);
+    thrice.tax();
+    expect(draw(thrice)).toEqual(draw(once));
+  });
+
+  it('信息边界：只改暗牌，候选和概率都不变', () => {
+    const t = table();
+    t.tax();
+    const before = draw(t);
+    t.seat('b').hand.forEach((c) => (c.role = 'duke'));
+    t.seat('a').hand.forEach((c) => (c.role = 'ambassador'));
+    expect(draw(t)).toEqual(before);
+  });
+
+  it('自己是声称者、已放弃、已被淘汰、被冲着来（表 4），或问询窗口没开着时没有候选', () => {
+    const t = table();
+    expect(probes(t).options).toEqual([]);
+    t.tax();
+    expect(probes(t, 'a').options).toEqual([]);
+    t.did(passChallenge(t.g, 'b'));
+    expect(probes(t, 'b').options).toEqual([]);
+    expect(probes(t, 'c').options).not.toEqual([]);
+
+    const targeted = table();
+    targeted.did(chooseAction(targeted.g, 'a', 'steal', 'c'));
+    expect(probes(targeted, 'c').options).toEqual([]);
+    expect(probes(targeted, 'b').options).not.toEqual([]);
+
+    const out = table();
+    out.seat('c').hand[1].role = 'duke';
+    out.income('a');
+    out.coup('b', 'c', 'duke');
+    out.income('c', 'a');
+    out.coup('b', 'c', 'duke');
+    out.tax();
+    expect(probes(out, 'c').options).toEqual([]);
+  });
+
+  it('发送时仍作数：自己还没回应、窗口还开着才说；自己放弃或有人质疑就作废', () => {
+    const t = table();
+    t.tax();
+    const { current } = probes(t);
+    expect(current!(publicState(t.g))).toBe(true);
+    t.did(passChallenge(t.g, 'c'));
+    expect(current!(publicState(t.g))).toBe(true); // 别人放弃不算
+    t.did(passChallenge(t.g, 'b'));
+    expect(current!(publicState(t.g))).toBe(false);
+
+    const challenged = table();
+    challenged.tax();
+    const later = probes(challenged).current!;
+    challenged.did(challenge(challenged.g, 'c'));
+    expect(later(publicState(challenged.g))).toBe(false);
   });
 });

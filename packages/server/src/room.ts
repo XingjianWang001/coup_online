@@ -30,7 +30,7 @@ import type { GameRepository } from './repository.ts';
 import { PHRASES, STRENGTHS, type LobbyPlayer, type Phrase, type Reaction, type Strength } from '@coup/shared';
 import { ClientError } from './errors.ts';
 import { TUNINGS, decideComputerIntent, drawTemperament, type ComputerIntent, type Returned, type Temperament } from './computer.ts';
-import { AFTER_GAME_MS, afterGame, afterOwnClaim, onOwnTurn, speak, stagger, temper, type Moment, type Said } from './speech.ts';
+import { AFTER_GAME_MS, afterGame, afterOwnClaim, onOwnTurn, probe, speak, stagger, temper, type Moment, type Said } from './speech.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
@@ -523,6 +523,11 @@ export class Room {
       const claimantId = g.pending!.blockById ?? g.pending!.actorId;
       this.say(claimantId, afterOwnClaim(publicState(g), this.gameEvents, claimantId));
     }
+    // 表 3：别人作出声称（含阻挡），有资格质疑、还没回应的电脑试探一句；不读也不改它要不要质疑
+    if (g.phase === 'awaitingChallenge' && events.some((e) => e.type === 'actionChosen' || e.type === 'blocked')) {
+      const state = publicState(g);
+      for (const id of this.players.keys()) this.say(id, probe(state, this.gameEvents, id));
+    }
     // 表 8 和赛后揭晓：牌局刚结束
     if (events.some((e) => e.type === 'gameOver')) this.scheduleAfterGame();
   }
@@ -565,18 +570,20 @@ export class Room {
     if (!this.players.get(id)?.isComputer) return;
     const speech = speak(temper(moment, id, this.computerSpeech, Date.now()), this.speechRandom);
     if (!speech) return;
-    this.sayLater(id, speech.reaction, speech.delayMs, Date.now() + speech.delayMs);
+    this.sayLater(id, speech.reaction, speech.delayMs, Date.now() + speech.delayMs, moment.current);
   }
 
   // 到点时离全桌上一条电脑表态太近就顺延、晚太多就取消（stagger）。顺延的计时器也在 speechTimers 里，照样随 clearTimer 取消
-  private sayLater(id: string, reaction: Reaction, ms: number, dueAt: number): void {
+  private sayLater(id: string, reaction: Reaction, ms: number, dueAt: number, current?: Moment['current']): void {
     const t = setTimeout(() => {
       this.speechTimers.delete(t);
       const now = Date.now();
       const wait = stagger(now, this.computerSpeech.at(-1)?.at, dueAt, this.speechRandom);
       if (wait === null) return;
-      if (wait > 0) return this.sayLater(id, reaction, wait, dueAt);
+      if (wait > 0) return this.sayLater(id, reaction, wait, dueAt, current);
       try {
+        // 有的话只在发送时语境还在才说（例如自己已放弃）：不换阶段的变化，clearTimer 管不到
+        if (current && !current(publicState(this.game!))) return;
         if (this.relay(id, reaction)) this.computerSpeech.push({ playerId: id, reaction, at: now });
       } catch (e) {
         console.error('computer speech error', e);
