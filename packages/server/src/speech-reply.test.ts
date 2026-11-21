@@ -308,25 +308,26 @@ describe('Room 电脑接话', () => {
   });
 
   it('电脑也接电脑的话，最多两层：一句话、一句回应、一句再回应', () => {
-    const { people: [alice], cs: [c1, c2], income, tax, pass, lines } = seated(['Alice'], 2);
+    const { people: [alice], cs: [c1, c2], income, tax, pass, say, lines } = seated(['Alice'], 2);
     income(alice.id);
     income(c1);
     tax(c2); // c2 仍作数地声称着公爵
     [alice.id, c1].forEach(pass);
     vi.advanceTimersByTime(5_000);
     income(alice.id);
-    const start = Date.now();
     tax(c1); // c1 首次声称公爵，问询窗口开着
-    vi.advanceTimersByTime(10_000);
+    vi.advanceTimersByTime(7_000); // 声称后的表态、试探和它们引出的接话都已说完，也不再算「刚说过」
+    const start = Date.now();
+    say(alice.id, phrase('sure'));
+    vi.advanceTimersByTime(8_000);
     expect(lines(start)).toEqual([
-      { by: c1, line: 'honest', ms: 500 }, // 表 2：自己刚作出声称
-      { by: c2, line: 'claim:duke', ms: 1_300 }, // 当前声称者说我是老实人，自己也声称着公爵（错峰顺延到 0.8 秒之后）
-      { by: c1, line: 'doubt', ms: 2_100 }, // 窗口之外听到我有公爵，自己也声称着
-      // c2 刚发过口头声称、又听到我信你个鬼：已是第三句，不再接
+      { by: c1, line: 'honest', ms: 600 }, // 自己是当前窗口的声称者，首次声称
+      { by: c2, line: 'claim:duke', ms: 1_400 }, // 当前声称者说我是老实人，自己也声称着公爵（错峰顺延到 0.8 秒之后）
+      // c1 听到窗口之外的我有公爵、自己也声称着，本可以接我信你个鬼：已是第三句，不再接
     ]);
   });
 
-  it('到点时自己已回应，接话取消，不留计时器', () => {
+  it('到点时自己已回应，接话取消', () => {
     const { people: [alice, bob], cs: [c1], income, tax, pass, say, lines } = seated(['Alice', 'Bob'], 1);
     income(alice.id);
     income(bob.id);
@@ -334,13 +335,11 @@ describe('Room 电脑接话', () => {
     [alice.id, bob.id].forEach(pass);
     tax(alice.id);
     const start = Date.now();
-    const timers = vi.getTimerCount();
     say(alice.id, has('duke')); // c1 也声称着公爵：要接
     vi.advanceTimersByTime(300);
     pass(c1); // Bob 还没回应，窗口没关
     vi.advanceTimersByTime(3_000);
     expect(lines(start)).toEqual([]);
-    expect(vi.getTimerCount()).toBe(timers);
   });
 
   it('到点时说话者已被淘汰，接话取消', () => {
@@ -398,17 +397,16 @@ describe('Room 电脑接话', () => {
         vi.advanceTimersByTime(250);
       }
       expect(room.game!.phase).toBe('gameOver');
-      const replies = events.onReaction.mock.calls.filter(([, r]) => cs.includes(r.playerId)).length;
+      const said = events.onReaction.mock.calls.filter(([, r]) => cs.includes(r.playerId)).map(([, r]) => label(r.reaction));
       // 两个房间的玩家 id 不同：换成座位号再比
       const seats = room.game!.players.map((p) => p.id);
       const moves = JSON.stringify(events.onBroadcast.mock.calls.flatMap(([, evs]) => evs)).replace(/"[0-9a-f]{16}"/g, (id) => `"seat${seats.indexOf(JSON.parse(id))}"`);
       vi.restoreAllMocks();
-      return { moves, replies };
+      return { moves, said };
     };
-    // 发言随机源恒为 0：有候选就开口，两局里电脑自己起头的话相同，多出来的就是接话
     const quiet = play(false);
     const noisy = play(true);
-    expect(noisy.replies).toBeGreaterThan(quiet.replies);
+    expect(noisy.said).not.toEqual(quiet.said); // 电脑听到了、也接了话
     expect(quiet.moves.match(/actionChosen/g)!.length).toBeGreaterThan(10);
     expect(noisy.moves).toEqual(quiet.moves);
   });

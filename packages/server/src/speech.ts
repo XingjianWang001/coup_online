@@ -3,12 +3,14 @@
 //
 // 每个场景是一张表（条件 → 带权重的候选）加一个把公开局面翻成表里条件的函数，返回候选和发言延迟的区间；
 // Room 在对应的时刻调用它，用 speak 抽签。新场景另写一张表和一个函数，不改已有的。调参只改表里的数。
-import type { ActionType, GameEvent, PublicState, Role } from '@coup/engine';
-import type { Phrase, Reaction } from '@coup/shared';
+import { ASSASSINATE_COST, COUP_COST, FORCED_COUP_COINS, needsTarget, type ActionType, type GameEvent, type PublicState, type Role } from '@coup/engine';
+import { PHRASES, type Phrase, type Reaction } from '@coup/shared';
 import { contradicts, recall } from './computer.ts';
 
-// 候选的一条：短语，或「我有 X」（claim，X 由各场景按语境定，必须在自己仍作数的声称里，否则不算候选）
-export type Line = Phrase | 'claim';
+// 候选的一条：短语，「我有 X」（claim，X 由各场景按语境定，必须在自己仍作数的声称里，否则不算候选），
+// 或一种行动预告（真的 announce、虚晃到另一目标 feintTarget、虚晃成另一种针对性行动 feintAction），具体预告什么由各场景给出
+export type Line = Phrase | 'claim' | Announcing;
+type Announcing = 'announce' | 'feintTarget' | 'feintAction';
 type Weights = Partial<Record<Line | 'silence', number>>;
 
 // 场景表的一行：条件成立时给出带权重的候选。silence 是这一行对沉默的倍数（「多沉默」大于 1，「开口概率高」小于 1）
@@ -51,13 +53,19 @@ export interface Moment {
 }
 const NOTHING = (delayMs: readonly [number, number]): Moment => ({ options: [], delayMs });
 
-// 把合并后的候选翻成表态；claimRole 是「我有 X」的 X，不在自己仍作数的声称里时不给（这条不算候选）
-function toOptions(weights: Map<Line | 'silence', number>, claimRole: Role | undefined): Options {
+// 把合并后的候选翻成表态；claimRole 是「我有 X」的 X，不在自己仍作数的声称里时不给（这条不算候选）。
+// 预告类的一条可以对应几条具体预告（如虚晃到另外几个目标），平分这条的权重；一条也没有就不算候选
+function toOptions(weights: Map<Line | 'silence', number>, claimRole: Role | undefined, announcements: Partial<Record<Announcing, readonly Reaction[]>> = {}): Options {
   const options: Options = [];
   for (const [line, w] of weights) {
     if (line === 'silence') continue;
-    if (line !== 'claim') options.push([{ kind: 'phrase', phrase: line }, w]);
-    else if (claimRole) options.push([{ kind: 'verbalClaim', has: true, role: claimRole }, w]);
+    if ((PHRASES as readonly string[]).includes(line)) options.push([{ kind: 'phrase', phrase: line as Phrase }, w]);
+    else if (line === 'claim') {
+      if (claimRole) options.push([{ kind: 'verbalClaim', has: true, role: claimRole }, w]);
+    } else {
+      const said = announcements[line as Announcing] ?? [];
+      for (const reaction of said) options.push([reaction, w / said.length]);
+    }
   }
   options.push([null, weights.get('silence')!]);
   return options;
@@ -126,6 +134,76 @@ function lastClaimAt(events: readonly GameEvent[]): number {
   return at;
 }
 
+// 任何行动预告都要看起来说得通：自己付得起（金币到 10 只能政变），针对性行动的目标在场、不是自己（偷窃还得对方有金币可偷），
+// 非针对性行动不带目标。只看公开信息
+const COST: Partial<Record<ActionType, number>> = { coup: COUP_COST, assassinate: ASSASSINATE_COST };
+export function plausible(state: PublicState, me: string, action: ActionType, targetId?: string): boolean {
+  const { coins } = state.players.find((p) => p.id === me)!;
+  if (coins < (COST[action] ?? 0) || (coins >= FORCED_COUP_COINS && action !== 'coup')) return false;
+  if (!needsTarget(action)) return targetId === undefined;
+  const target = state.players.find((p) => p.id === targetId);
+  return !!target?.alive && target.id !== me && (action !== 'steal' || target.coins > 0);
+}
+const announcement = (action: ActionType, targetId?: string): Reaction =>
+  targetId === undefined ? { kind: 'announcement', action } : { kind: 'announcement', action, targetId };
+
+// ── 表 1：轮到自己，行动决定已作出（行动预告）──
+// 发言模块唯一的私有输入：自己刚作出、停顿之后就公开的那个决定，只用在这张表里（#58）。
+// 嘴跟着手走：这里读决定，决定不读这里
+export interface Decision {
+  action: ActionType;
+  targetId?: string;
+}
+interface OwnTurn {
+  action: ActionType;
+  forced: boolean; // 金币已到 10，人人知道必须政变
+  atAttacker: boolean; // 目标是最近打过自己的人
+  duel: boolean; // 两人对峙
+  dukeStanding: boolean; // 公爵已在自己仍作数的声称里
+  dukeElsewhere: boolean; // 有别人仍作数地声称着公爵
+}
+const FEINT = LOW; // 虚晃是小概率
+const EAGER = 0.5; // 开口概率高一些
+const TARGETED: readonly ActionType[] = ['coup', 'assassinate', 'steal'];
+const assassinateOrSteal = (s: OwnTurn) => s.action === 'assassinate' || s.action === 'steal';
+const ON_OWN_TURN: readonly Row<OwnTurn>[] = [
+  { when: (s) => s.action === 'coup' && !s.forced, say: { announce: FIRST, feintTarget: FEINT } },
+  { when: (s) => s.action === 'coup' && s.forced, say: { announce: FIRST, feintTarget: FEINT, silence: EAGER } },
+  { when: (s) => assassinateOrSteal(s) && s.atAttacker, say: { announce: HIGH, feintTarget: FEINT * LOW, feintAction: FEINT * LOW * LOW } },
+  { when: (s) => assassinateOrSteal(s) && !s.atAttacker, say: { announce: FIRST, feintTarget: FEINT, feintAction: FEINT * LOW } },
+  // 真预告的权重由上面按行动给；这一行只排除虚晃目标
+  { when: (s) => needsTarget(s.action) && s.duel, say: { announce: 1 }, exclude: ['feintTarget'] },
+  { when: (s) => s.action === 'tax' && s.dukeStanding, say: { announce: FIRST } },
+  { when: (s) => s.action === 'tax' && !s.dukeStanding, say: { announce: FIRST, silence: QUIET } },
+  { when: (s) => s.action === 'foreignAid' && s.dukeElsewhere, say: { announce: FIRST } }, // 像在试探他挡不挡
+  { when: (s) => s.action === 'foreignAid' && !s.dukeElsewhere, say: { announce: FIRST, silence: QUIET } },
+  { when: (s) => s.action === 'exchange' || s.action === 'income', say: { announce: FIRST, silence: QUIET } },
+];
+// 这张表的延迟是说完之后停多久再出手：预告此刻就说，决定在停顿之后执行
+const ON_OWN_TURN_MS = [800, 1_500] as const;
+
+// me 不是此刻选行动的当前玩家时没有候选
+export function onOwnTurn(state: PublicState, events: readonly GameEvent[], me: string, { action, targetId }: Decision): Moment {
+  if (state.phase !== 'choosingAction' || state.currentPlayerId !== me) return NOTHING(ON_OWN_TURN_MS);
+  const memory = memoryOf(state, events, me);
+  const rivals = state.players.filter((p) => p.alive && p.id !== me);
+  const situation: OwnTurn = {
+    action,
+    forced: state.players.find((p) => p.id === me)!.coins >= FORCED_COUP_COINS,
+    atAttacker: targetId !== undefined && memory.attacker === targetId,
+    duel: rivals.length === 1,
+    dukeStanding: memory.standing.get(me)?.has('duke') ?? false,
+    dukeElsewhere: rivals.some((p) => memory.standing.get(p.id)?.has('duke')),
+  };
+  const say = (a: ActionType, t?: string) => (plausible(state, me, a, t) ? [announcement(a, t)] : []);
+  const announcements = {
+    announce: say(action, targetId),
+    feintTarget: needsTarget(action) ? rivals.filter((p) => p.id !== targetId).flatMap((p) => say(action, p.id)) : [],
+    feintAction: needsTarget(action) ? TARGETED.filter((a) => a !== action).flatMap((a) => say(a, targetId)) : [],
+  };
+  return { options: toOptions(merge(ON_OWN_TURN, situation), undefined, announcements), delayMs: ON_OWN_TURN_MS };
+}
+
 // ── 表 2：自己刚作出声称（含阻挡），问询窗口还开着 ──
 interface OwnClaim {
   continuing: boolean; // 这个角色在这次声称之前就仍作数地声称着（如连续征税）
@@ -169,6 +247,59 @@ export function afterOwnClaim(state: PublicState, events: readonly GameEvent[], 
   return { options, delayMs: AFTER_OWN_CLAIM_MS };
 }
 
+// 问询窗口前段、自己还没回应时说的话（表 3 试探；表 4 里偷窃、暗杀的目标也这样）：发送时自己已回应、有人质疑或窗口已关就作废。
+// 自己放弃不换阶段，Room 换阶段时的清除管不到，所以发送时再看一眼
+const whileUndecided = (state: PublicState, me: string) => {
+  const subject = state.challengeSubject;
+  return (now: PublicState) => now.phase === 'awaitingChallenge' && now.challengeSubject === subject && !now.passed.includes(me);
+};
+
+// ── 表 3：别人作出声称（含阻挡），自己有资格质疑且尚未回应（试探）。冲着自己来的行动另见表 4 ──
+// 试探不读自己的决定，也不改变之后质疑的概率：行动策略不读这里
+interface Probe {
+  caught: boolean; // 声称者本局被抓到过诈唬
+  contradicts: boolean; // 声称矛盾
+  proven: boolean; // 声称者本局有声称被对质证明为真
+  shown: number; // 这个角色桌上的明牌张数，不算自己的暗牌
+  alsoMine: boolean; // 自己也仍作数地声称着这个角色
+  blocking?: 'mine' | 'other'; // 这次声称是阻挡：拦的是自己的还是别人的行动
+}
+const LOUD = 1 / QUIET; // 开口概率高
+// 同一声称的延续（如连续征税）与基线相同，不单写一行：重复几次候选和概率都一样
+const PROBE: readonly Row<Probe>[] = [
+  { when: (s) => !(s.caught || s.contradicts || s.proven || s.shown >= 2 || s.alsoMine || s.blocking), say: { sure: FIRST, silence: QUIET } },
+  { when: (s) => s.caught, say: { doubt: FIRST, sure: SECOND } },
+  { when: (s) => s.contradicts, say: { doubt: HIGH, sure: SECOND } },
+  { when: (s) => s.proven, say: { sure: FIRST, silence: QUIET } },
+  { when: (s) => s.shown === 2, say: { sure: FIRST, doubt: SECOND } },
+  { when: (s) => s.shown === 3, say: { doubt: FIRST, silence: LOUD } },
+  { when: (s) => s.alsoMine, say: { claim: FIRST, doubt: SECOND } },
+  { when: (s) => s.blocking === 'mine', say: { doubt: FIRST, sure: SECOND } },
+  { when: (s) => s.blocking === 'other', say: { sure: FIRST, silence: QUIET } },
+];
+// 窗口前段：电脑在问询窗口里最快 1.5 秒出手，试探多半赶在自己回应之前
+const PROBE_MS = [600, 1_400] as const;
+
+// me 不在场、是声称者、已回应、是这次行动的目标，或问询窗口没开着时没有候选
+export function probe(state: PublicState, events: readonly GameEvent[], me: string): Moment {
+  const { pending } = state;
+  const blocking = state.challengeSubject === 'block';
+  const claimantId = blocking ? pending?.blockById : pending?.actorId;
+  const eligible = state.players.find((p) => p.id === me)?.alive && claimantId !== me && !state.passed.includes(me);
+  if (state.phase !== 'awaitingChallenge' || !pending || !eligible || (!blocking && pending.targetId === me)) return NOTHING(PROBE_MS);
+  const role = blocking ? pending.blockRole! : pending.claimedRole!;
+  const memory = memoryOf(state, events, me);
+  const situation: Probe = {
+    caught: (memory.caught.get(claimantId!) ?? 0) > 0,
+    contradicts: contradicts(memory, state.players.find((p) => p.id === claimantId)!, role),
+    proven: (memory.proven.get(claimantId!) ?? 0) > 0,
+    shown: shownCount(state, role),
+    alsoMine: memory.standing.get(me)?.has(role) ?? false,
+    blocking: blocking ? (pending.actorId === me ? 'mine' : 'other') : undefined,
+  };
+  return { options: toOptions(merge(PROBE, situation), situation.alsoMine ? role : undefined), delayMs: PROBE_MS, current: whileUndecided(state, me) };
+}
+
 // ── 表 7：接话（#81）。听到短语和口头声称时回一句；听到行动预告、手下留情、好险的各行另加（#83） ──
 // 桌上通过校验的一条表态（真人和电脑的）：电脑「听到」的全部内容，由 Room.relay 按时间先后记下
 export interface Heard extends Said {
@@ -195,7 +326,7 @@ const REPLY: readonly Row<Reply>[] = [
   { when: (s) => s.heard === 'backing' && (s.caught || s.contradicts), say: { doubt: FIRST, sure: SECOND } },
   { when: (s) => s.heard === 'backing' && s.proven, say: { sure: FIRST, silence: QUIET } },
   { when: (s) => s.heard === 'backing' && s.alsoMine, say: { claim: FIRST, doubt: SECOND } },
-  { when: (s) => s.heard === 'has' && s.allShown, say: { doubt: FIRST, silence: 1 / QUIET } }, // 开口概率高
+  { when: (s) => s.heard === 'has' && s.allShown, say: { doubt: FIRST, silence: LOUD } },
   { when: (s) => s.heard === 'has' && (s.caught || s.alsoMine), say: { doubt: FIRST, claim: SECOND } },
   // 其他：我没有 X 都在这行；我有 X 是上面两行都不成立时
   { when: (s) => s.heard === 'hasNot' || (s.heard === 'has' && !s.allShown && !s.caught && !s.alsoMine), say: { sure: FIRST, doubt: SECOND, silence: QUIET } },
