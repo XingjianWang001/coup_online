@@ -1,7 +1,7 @@
 import type { ActionType, GameEvent, PublicState, PrivateState, Role, Card } from '@coup/engine';
 
 // 表态：协议里只传短语的 key、行动、角色和目标玩家 ID，文字由各端按自己的语言渲染（ADR 0008）
-export const PHRASES = ['doubt', 'sure', 'dare', 'honest', 'framed', 'mercy', 'close', 'respect'] as const;
+export const PHRASES = ['doubt', 'sure', 'dare', 'honest', 'mercy', 'close', 'respect'] as const;
 export type Phrase = (typeof PHRASES)[number];
 
 // 电脑玩家的强度：新加的一律普通，房主在大厅阶段逐个改；所有人都看得到

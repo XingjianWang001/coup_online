@@ -3,6 +3,7 @@
 //
 // 用法：node scripts/ui-check.mjs [场景.mjs] [截图目录]
 //   场景默认导出 async (ui) => {}，ui 见 main() 里的 context；不传场景时跑内置场景（真人玩家加入机器人房间并开局）。
+//   场景还可以导出 serverEnv（对象），合并进服务端的环境变量，例如 { SPEECH_RANDOM: '0' } 让电脑每个能开口的时刻都开口（见 server/src/index.ts）。
 //   环境变量：W/H 视口，MOBILE=1 手机触屏，REDUCED=1 减少动态效果，LOCALE=zh-CN|en，NO_BUILD=1 跳过构建，CHROME 浏览器路径（默认 macOS / Windows 的 Chrome 安装位置）。
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -59,7 +60,7 @@ const freePort = () => new Promise((r) => {
   const srv = createServer().listen(0, () => { const { port } = srv.address(); srv.close(() => r(port)); });
 });
 
-async function startServer() {
+async function startServer(serverEnv = {}) {
   if (!process.env.NO_BUILD) {
     const build = spawnSync('pnpm build:client', { cwd: ROOT, stdio: 'inherit', shell: true }); // Windows 上 pnpm 是 .cmd，只能经 shell 启动
     if (build.status !== 0) throw new Error('前端构建失败');
@@ -67,7 +68,7 @@ async function startServer() {
   const port = await freePort();
   const server = launch(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: join(ROOT, 'packages/server'),
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, ...serverEnv, PORT: String(port) },
   });
   let log = '';
   server.stdout.on('data', (d) => (log += d));
@@ -116,9 +117,9 @@ async function main() {
   const [scenarioPath, outArg] = process.argv.slice(2);
   const out = resolve(outArg ?? join(tmpdir(), 'coup-ui-check-shots'));
   mkdirSync(out, { recursive: true });
-  const scenario = scenarioPath ? (await import(pathToFileURL(resolve(scenarioPath)))).default : defaultScenario;
+  const { default: scenario, serverEnv } = scenarioPath ? await import(pathToFileURL(resolve(scenarioPath))) : { default: defaultScenario };
 
-  const url = await startServer();
+  const url = await startServer(serverEnv);
   const cdp = await startChrome();
   const [W, H] = [Number(process.env.W ?? 1280), Number(process.env.H ?? 800)];
   const mobile = !!process.env.MOBILE;

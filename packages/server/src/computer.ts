@@ -168,7 +168,7 @@ export interface Returned {
 
 // ponytail: 每次决定都把本局的事件（Room.gameEvents，一局内只增不减）从头数一遍。一局几百条事件、一次决定几微秒；
 // 事件多到要紧时改成随事件增量更新
-function recall(events: readonly GameEvent[], me: string, ids: readonly string[], RECIPROCITY: number, returned: readonly Returned[]): Memory {
+export function recall(events: readonly GameEvent[], me: string, ids: readonly string[], RECIPROCITY: number, returned: readonly Returned[]): Memory {
   const memory: Memory = { standing: new Map(), story: new Set(), caught: new Map(), proven: new Map(), lacking: new Map(), favor: new Map(), deck: [] };
   // 牌堆张数整局不变：每人的暗牌加明牌总是 2 张（交换选牌的片刻除外）
   const deckSize = ROLE_ORDER.length * ROLE_COPIES - 2 * ids.length;
@@ -244,6 +244,11 @@ function recall(events: readonly GameEvent[], me: string, ids: readonly string[]
   });
   return memory;
 }
+
+// 矛盾（CONTEXT.md）：仍作数的声称角色（含眼前这个）比暗牌多，或声称的是换牌以来看起来没有的角色（当众没挡过、自己丢掉的）。
+// 电脑的质疑和表态（speech.ts）用同一个判断
+export const contradicts = (memory: Memory, claimant: PublicPlayerView, role: Role) =>
+  (memory.standing.get(claimant.id)?.size ?? 0) > claimant.handCount || (memory.lacking.get(claimant.id)?.has(role) ?? false);
 
 // 电脑玩家的决策：只看真人在这个座位上能看到的东西（ADR 0013）：公开状态、自己的暗牌、本局的公开事件。此刻无需它决定时返回 null
 export function decideComputerIntent(
@@ -406,7 +411,6 @@ export function decideComputerIntent(
     // 自相矛盾：对方仍作数的声称角色（含眼前这个）比暗牌多，或声称的是换牌以来看起来没有的角色（当众没挡过、自己丢掉的），没有换牌能解释。
     // 同一角色声称几次只算一个，声称一致也不算证明
     const claimant = state.players.find((p) => p.id === claimantId)!;
-    const contradicts = (memory.standing.get(claimantId)?.size ?? 0) > claimant.handCount || lacks(claimantId, role);
     // 被证明为真的信用：每次把质疑概率打七五折，最低到 PROVEN_FLOOR。证明用的那张牌已洗回牌堆，说明不了对方现在拿着什么
     const credit = Math.max(PROVEN_FLOOR, 0.75 ** (memory.proven.get(claimantId) ?? 0));
     // 多疑程度定基调；看得见的同角色牌越多、对方本局被抓过、声称自相矛盾越可疑，被证明过略可信。
@@ -414,7 +418,7 @@ export function decideComputerIntent(
     // 没有依据的质疑多半落空（声称里诈唬的不到三成），对质又是一换一、让旁观者得利：基调再高，从不质疑的人就占了便宜
     const p = Math.min(
       DOUBT_CAP,
-      (DOUBT_BASE + DOUBT_SLOPE * temperament.suspicion) * (1 + known(role)) * (1 + (memory.caught.get(claimantId) ?? 0)) * (contradicts ? CONTRADICTION : 1) * credit,
+      (DOUBT_BASE + DOUBT_SLOPE * temperament.suspicion) * (1 + known(role)) * (1 + (memory.caught.get(claimantId) ?? 0)) * (contradicts(memory, claimant, role) ? CONTRADICTION : 1) * credit,
     );
     if (dying && !held.has('contessa')) {
       // 放弃等于认输：不质疑就留到阻挡窗口假装女伯爵。多疑的倾向质疑，爱诈唬的倾向假装；女伯爵 3 张都亮了就没人会信，只能质疑
