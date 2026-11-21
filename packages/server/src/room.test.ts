@@ -1587,6 +1587,17 @@ describe('Room 电脑赛后', () => {
     expect(events.onEmpty).toHaveBeenCalledWith(room);
   });
 
+  it('有电脑已经开口后最后一位真人离开：还没发出的赛后表态和接话（#81）一并取消', () => {
+    const { room, alice, said } = ended();
+    // 发言随机源恒为 0：两个电脑都在 1 秒醒来，先说的那条已发出，另一个的赛后表态和对它的接话还排着
+    vi.advanceTimersByTime(1_001);
+    expect(said).toHaveLength(1);
+    room.leavePlayer(alice.id, 'sock1');
+    expect(vi.getTimerCount()).toBe(1); // 只剩空房回收
+    vi.advanceTimersByTime(10_000);
+    expect(said).toHaveLength(1);
+  });
+
   it('牌局结束后电脑只发短语，发言时刻落在结束后 1～6 秒；真人获胜时输掉的电脑也会说', () => {
     const times: number[] = [];
     for (let seed = 1; seed <= 40; seed += 1) {
