@@ -3,14 +3,14 @@
 //
 // 每个场景是一张表（条件 → 带权重的候选）加一个把公开局面翻成表里条件的函数，返回候选和发言延迟的区间；
 // Room 在对应的时刻调用它，用 speak 抽签。新场景另写一张表和一个函数，不改已有的。调参只改表里的数。
-import { ASSASSINATE_COST, COUP_COST, FORCED_COUP_COINS, needsTarget, type ActionType, type GameEvent, type PublicState, type Role } from '@coup/engine';
+import { ASSASSINATE_COST, BLOCK_ROLES, COUP_COST, FORCED_COUP_COINS, needsTarget, type ActionType, type GameEvent, type PublicState, type Role } from '@coup/engine';
 import { PHRASES, type Phrase, type Reaction } from '@coup/shared';
 import { contradicts, recall } from './computer.ts';
 
 // 候选的一条：短语，「我有 X」（claim，X 由各场景按语境定，必须在自己仍作数的声称里，否则不算候选），
-// 或一种行动预告（真的 announce、虚晃到另一目标 feintTarget、虚晃成另一种针对性行动 feintAction），具体预告什么由各场景给出
+// 或一种行动预告（真的 announce、虚晃到另一目标 feintTarget、虚晃成另一种针对性行动 feintAction、反预告 counter），具体预告什么由各场景给出
 export type Line = Phrase | 'claim' | Announcing;
-type Announcing = 'announce' | 'feintTarget' | 'feintAction' | OffTurnAnnouncing;
+type Announcing = 'announce' | 'feintTarget' | 'feintAction' | 'counter' | OffTurnAnnouncing;
 type Weights = Partial<Record<Line | 'silence', number>>;
 
 // 场景表的一行：条件成立时给出带权重的候选。silence 是这一行对沉默的倍数（「多沉默」大于 1，「开口概率高」小于 1）
@@ -336,6 +336,78 @@ export function probe(state: PublicState, events: readonly GameEvent[], me: stri
     blocking: blocking ? (pending.actorId === me ? 'mine' : 'other') : undefined,
   };
   return { options: toOptions(merge(PROBE, situation), situation.alsoMine ? role : undefined), delayMs: PROBE_MS, current: whileUndecided(state, me) };
+}
+
+// 反预告：以 targetId 为目标的行动预告，在政变、暗杀、偷窃里选头一个说得通的（自己付得起，偷窃还得对方有金币）；
+// 都说不通时一条也没有，这条就不算候选。只读公开信息，不兑现也无妨。表 4 引入，结果公开后、接话时也用
+export const counterAnnouncement = (state: PublicState, me: string, targetId: string): Reaction[] =>
+  TARGETED.filter((a) => plausible(state, me, a, targetId))
+    .slice(0, 1)
+    .map((a) => announcement(a, targetId));
+
+// ── 表 4：成为偷窃、暗杀、政变的目标。偷窃、暗杀在问询窗口前段说，政变在宣布后说 ──
+interface Targeted {
+  action: ActionType;
+  blocker?: Role; // 自己仍作数地声称着、能挡这次行动的角色
+  lastCard: boolean;
+  again: number; // 第二次被同一人针对：他上次针对自己是他自己往前数第几个回合（1 是他的上一回合）；0 是近来没有
+  actorCaught: boolean; // 行动者本局被抓到过诈唬
+}
+// 第二次被同一人针对的加权随回合淡化：他上一回合刚针对过自己时全额，再早一回合的按指数减弱，更早的不算。
+// 指数小于 1 只让倍数向 1 靠拢，不会压低别的行已给的权重
+const AGAIN_FADE = [1, 0.5];
+const again = (turns: number, fade: number): Row<Targeted> => ({
+  when: (s) => s.again === turns,
+  say: { counter: HIGH ** fade, doubt: SECOND ** fade, mercy: THIRD ** fade },
+});
+const TARGETED_AT_ME: readonly Row<Targeted>[] = [
+  { when: (s) => s.action === 'steal' && !!s.blocker, say: { claim: FIRST, sure: SECOND } },
+  { when: (s) => s.action === 'steal' && !s.blocker, say: { mercy: FIRST, sure: SECOND, counter: THIRD } },
+  { when: (s) => s.action === 'assassinate' && !!s.blocker, say: { claim: FIRST, sure: SECOND } },
+  { when: (s) => s.action === 'assassinate' && !s.blocker && !s.lastCard, say: { sure: FIRST, mercy: SECOND, counter: THIRD } },
+  { when: (s) => s.action === 'assassinate' && !s.blocker && s.lastCard, say: { mercy: HIGH, sure: SECOND, doubt: THIRD } },
+  // 政变化解不了，不求手下留情
+  { when: (s) => s.action === 'coup' && !s.lastCard, say: { counter: FIRST, respect: SECOND }, exclude: ['mercy'] },
+  { when: (s) => s.action === 'coup' && s.lastCard, say: { respect: FIRST, silence: QUIET }, exclude: ['mercy'] },
+  ...AGAIN_FADE.map((fade, i) => again(i + 1, fade)),
+  { when: (s) => s.action !== 'coup' && s.actorCaught, say: { doubt: HIGH } },
+];
+// 偷窃、暗杀赶在窗口前段（电脑最快 1.5 秒回应）；政变赶在自己选丢哪张之前（最快 2 秒）
+const TARGETED_MS = [600, 1_400] as const;
+
+// me 不是此刻偷窃、暗杀（问询窗口开着、自己还没回应）或政变（轮到自己选丢哪张）的目标时没有候选
+export function targeted(state: PublicState, events: readonly GameEvent[], me: string): Moment {
+  const at = lastIndex(events, 'actionChosen');
+  const chosen = events[at];
+  if (chosen?.type !== 'actionChosen' || chosen.targetId !== me) return NOTHING(TARGETED_MS);
+  const { action, actorId } = chosen;
+  const coup = action === 'coup';
+  const open = coup
+    ? state.phase === 'choosingLoss' && state.lossPlayerId === me
+    : (action === 'steal' || action === 'assassinate') && state.phase === 'awaitingChallenge' && state.challengeSubject === 'action' && !state.passed.includes(me);
+  if (!open) return NOTHING(TARGETED_MS);
+  // 往回数行动者自己的回合，找他上一次针对自己；超出淡化的回合数就不算
+  let turns = 0;
+  for (let i = at - 1, n = 1; i >= 0 && n <= AGAIN_FADE.length; i -= 1) {
+    const e = events[i];
+    if (e.type !== 'actionChosen' || e.actorId !== actorId) continue;
+    if (e.targetId === me) {
+      turns = n;
+      break;
+    }
+    n += 1;
+  }
+  const memory = memoryOf(state, events, me);
+  const blocker = BLOCK_ROLES[action].find((r) => memory.standing.get(me)?.has(r));
+  const situation: Targeted = {
+    action,
+    blocker,
+    lastCard: state.players.find((p) => p.id === me)!.handCount === 1,
+    again: turns,
+    actorCaught: (memory.caught.get(actorId) ?? 0) > 0,
+  };
+  const options = toOptions(merge(TARGETED_AT_ME, situation), blocker, { counter: counterAnnouncement(state, me, actorId) });
+  return { options, delayMs: TARGETED_MS, current: coup ? undefined : whileUndecided(state, me) };
 }
 
 // ── 表 6：回合外的局势（没轮到自己时，只读公开信息：谁最近打过自己、各人的金币和影响力）──
