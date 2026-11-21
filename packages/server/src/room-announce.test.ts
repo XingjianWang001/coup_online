@@ -150,8 +150,8 @@ describe('Room 电脑行动预告', () => {
     expect(ended.announced()).toHaveLength(1);
     ended.room.apply((g) => forfeit(g, ended.alice.id));
     expect(ended.room.game!.phase).toBe('gameOver');
-    expect(vi.getTimerCount()).toBe(0);
     ended.room.rematch(ended.alice.id, 'sock1');
+    expect(vi.getTimerCount()).toBe(0); // 赛后的表态和揭晓（#77）在再来一局时取消
     vi.advanceTimersByTime(2_000);
     expect(ended.acted()).toEqual([]);
   });
