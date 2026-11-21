@@ -317,6 +317,29 @@ describe('表 7 接话：行动预告、手下留情、好险', () => {
       (t) => ((t.seat('a').coins = 3), t.did(chooseAction(t.g, 'a', 'assassinate', 'b')), ['a', t.hear('b', phrase('mercy'))]),
       ['silence', 'sure'],
     ],
+    [
+      '听到好险，自己的暗杀刚被阻挡（反预告偷窃他）',
+      (t) => {
+        t.seat('a').coins = 3;
+        t.did(chooseAction(t.g, 'a', 'assassinate', 'c'));
+        t.passAll('a');
+        t.did(block(t.g, 'c', 'contessa'));
+        t.passAll('c');
+        return ['a', t.hear('c', phrase('close'))];
+      },
+      ['respect', 'silence', 'steal>c'],
+    ],
+    [
+      '听到好险，自己的暗杀刚被抓到诈唬',
+      (t) => {
+        t.seat('a').coins = 3;
+        t.did(chooseAction(t.g, 'a', 'assassinate', 'b'));
+        t.did(challenge(t.g, 'b'));
+        t.did(revealShowdownCard(t.g, 'a', t.seat('a').hand.find((c) => c.role === 'duke')!.id));
+        return ['a', t.hear('b', phrase('close'))];
+      },
+      ['assassinate>b', 'respect', 'silence'], // 诈唬被抓，暗杀的钱没付出去
+    ],
   ])('%s', (_, setup, expected) => {
     const t = table();
     const [me, to] = setup(t);
@@ -342,6 +365,19 @@ describe('表 7 接话：行动预告、手下留情、好险', () => {
         return ['a', t.hear('b', phrase('mercy'))];
       },
     ],
+    ['好险，自己的偷窃得手了', (t) => (t.did(chooseAction(t.g, 'a', 'steal', 'b')), t.passAll('a'), t.did(passBlock(t.g, 'b')), ['a', t.hear('b', phrase('close'))])],
+    [
+      '好险，阻挡被抓到诈唬、自己的偷窃照样得手',
+      (t) => {
+        t.did(chooseAction(t.g, 'a', 'steal', 'b'));
+        t.passAll('a');
+        t.did(block(t.g, 'b', 'captain'));
+        t.did(challenge(t.g, 'a'));
+        t.did(revealShowdownCard(t.g, 'b', t.seat('b').hand.find((c) => c.role === 'duke')!.id));
+        return ['a', t.hear('b', phrase('close'))];
+      },
+    ],
+    ['好险，最近一次行动不是自己的', (t) => (t.income('a'), t.did(chooseAction(t.g, 'b', 'steal', 'c')), t.passAll('b'), t.did(block(t.g, 'c', 'captain')), t.passAll('c'), ['a', t.hear('c', phrase('close'))])],
     ['手下留情，牌局已结束', (t) => (t.coup('a', 'b', 'duke'), t.did(forfeit(t.g, 'c')), t.did(forfeit(t.g, 'b')), ['a', t.hear('b', phrase('mercy'))])],
   ])('表外的组合不接话：%s', (_, setup) => {
     const t = table();
