@@ -306,6 +306,17 @@ describe('表 7 接话：行动预告、手下留情、好险', () => {
     ],
     ['预告征税，自己也仍作数地声称着公爵', (t) => (t.taxed('a'), ['a', t.hear('b', announce('tax'))]), ['claim:duke', 'doubt', 'silence']],
     ['预告针对别人，预告者金币不够付', (t) => ['c', t.hear('b', announce('coup', 'a'))], ['silence', 'sure']],
+    [
+      '听到手下留情，自己刚预告了针对他的行动（再预告一遍）',
+      (t) => ((t.seat('a').coins = 7), t.hear('a', announce('coup', 'b')), ['a', t.hear('b', phrase('mercy'))]),
+      ['coup>b', 'silence', 'sure'],
+    ],
+    ['听到手下留情，自己刚发起了针对他的行动（再预告一遍）', (t) => (t.did(chooseAction(t.g, 'a', 'steal', 'b')), ['a', t.hear('b', phrase('mercy'))]), ['silence', 'steal>b', 'sure']],
+    [
+      '听到手下留情，自己刚发起了针对他的行动，再预告一遍付不起',
+      (t) => ((t.seat('a').coins = 3), t.did(chooseAction(t.g, 'a', 'assassinate', 'b')), ['a', t.hear('b', phrase('mercy'))]),
+      ['silence', 'sure'],
+    ],
   ])('%s', (_, setup, expected) => {
     const t = table();
     const [me, to] = setup(t);
@@ -321,6 +332,17 @@ describe('表 7 接话：行动预告、手下留情、好险', () => {
     ['预告偷窃别人（偷窃不花钱）', (t) => ['c', t.hear('b', announce('steal', 'a'))]],
     ['预告征税，没有前情', (t) => ['c', t.hear('b', announce('tax'))]],
     ['预告外援，自己没声称过公爵', (t) => ['c', t.hear('b', announce('foreignAid'))]],
+    ['手下留情，自己刚针对的是别人', (t) => (t.did(chooseAction(t.g, 'a', 'steal', 'c')), ['a', t.hear('b', phrase('mercy'))])],
+    [
+      '手下留情，自己的预告已是好一会儿之前',
+      (t) => {
+        t.seat('a').coins = 7;
+        t.hear('a', announce('coup', 'b'));
+        for (let i = 0; i < 6; i += 1) t.hear('c', phrase('sure'));
+        return ['a', t.hear('b', phrase('mercy'))];
+      },
+    ],
+    ['手下留情，牌局已结束', (t) => (t.coup('a', 'b', 'duke'), t.did(forfeit(t.g, 'c')), t.did(forfeit(t.g, 'b')), ['a', t.hear('b', phrase('mercy'))])],
   ])('表外的组合不接话：%s', (_, setup) => {
     const t = table();
     const [me, to] = setup(t);

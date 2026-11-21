@@ -521,6 +521,7 @@ const REPLY: readonly Row<Reply>[] = [
   { when: (s) => s.heard === 'tax' && (s.caught || s.contradicts), say: { doubt: FIRST, sure: SECOND } },
   { when: (s) => s.heard === 'tax' && s.alsoMine, say: { claim: FIRST, doubt: SECOND } },
   { when: (s) => s.heard === 'aimedElsewhere' && !s.affordable, say: { sure: FIRST, silence: QUIET } },
+  { when: (s) => s.heard === 'mercy' && s.pressing, say: { again: FIRST, sure: SECOND, silence: QUIET } },
 ];
 const REPLY_MS = [600, 2_000] as const;
 // 一句话、一句回应、一句再回应：第 MAX_DEPTH 层的话不再有电脑接
