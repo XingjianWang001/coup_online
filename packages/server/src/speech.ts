@@ -700,7 +700,8 @@ function replyOptions(state: PublicState, events: readonly GameEvent[], heard: r
   if (r.kind === 'phrase' && (r.phrase === 'mercy' || r.phrase === 'close') && !over) kind = r.phrase;
   // 替声称表态只有有资格质疑且尚未回应的接（在场、不是声称者就有资格）
   if (kind === 'backing' && state.passed.includes(me)) return [];
-  if (!kind) return [];
+  // 牌局结束后只有佩服接佩服（下面 won 也只在牌局中算）
+  if (!kind || (over && kind !== 'respect')) return [];
 
   const memory = memoryOf(state, events, me);
   // 说的是哪个角色：当前声称者替声称表态时是窗口里的角色，口头声称是它说的角色；预告征税、外援是公爵，
@@ -743,7 +744,7 @@ function replyOptions(state: PublicState, events: readonly GameEvent[], heard: r
     contradicts: !!role && contradicts(memory, state.players.find((p) => p.id === to.playerId)!, role),
     alsoMine: !!role && (memory.standing.get(me)?.has(role) ?? false),
     allShown: !!role && shownCount(state, role) === 3,
-    won: resolved?.truth && resolved.claimantId === me ? 'claimant' : resolved && !resolved.truth && challenger === me ? 'challenger' : undefined,
+    won: over ? undefined : resolved?.truth && resolved.claimantId === me ? 'claimant' : resolved && !resolved.truth && challenger === me ? 'challenger' : undefined,
     over,
     action: announced,
     affordable: !!announced && state.players.find((p) => p.id === to.playerId)!.coins >= (COST[announced] ?? 0),
