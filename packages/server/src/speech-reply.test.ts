@@ -405,6 +405,18 @@ describe('表 7 接话：行动预告、手下留情、好险', () => {
     expect(after(false, 2)).toBe(0);
   });
 
+  it('改暗牌不改变接话的选择和概率（性格不是接话的输入）', () => {
+    const flow = (t: Table) => {
+      t.taxed('a');
+      t.hear('b', announce('steal', 'a'));
+      t.income('b', 'c');
+      t.seat('b').coins = 7;
+      return [t.options('a', t.hear('b', announce('coup', 'a'))), t.options('c', t.hear('b', announce('tax'))), t.options('a', t.hear('c', announce('foreignAid')))];
+    };
+    const swapped: Record<string, Role[]> = { a: ['ambassador', 'contessa'], b: ['captain', 'captain'], c: ['assassin', 'ambassador'] };
+    expect(flow(table(swapped))).toEqual(flow(table()));
+  });
+
   it('对方金币不够付预告的行动时，候选是怀疑类的短语，不出现手下留情', () => {
     for (const action of ['coup', 'assassinate'] as const) {
       const t = table();
@@ -544,6 +556,47 @@ describe('Room 电脑接话', () => {
     for (let i = 1; i < said.length; i += 1) expect(said[i].ms - said[i - 1].ms).toBeGreaterThanOrEqual(1_500);
     expect(said.every((s) => s.by === c1)).toBe(true);
     expect(most).toBeLessThanOrEqual(4); // 回合时限 + 至多 3 条还没发出的接话
+  });
+
+  it('同一局面和行动种子下，无论听到什么预告、手下留情、好险，电脑的行动相同', () => {
+    const play = (talk: boolean) => {
+      vi.spyOn(Math, 'random').mockImplementation(lehmer(11));
+      const { room, events, people: [alice], cs: [c1, c2] } = seated(['Alice'], 2, { computerRandom: lehmer(13), computerDelayMs: () => 1_000 });
+      const TALK: Reaction[] = [announce('coup', c1), announce('assassinate', c2), announce('steal', c1), announce('tax'), announce('foreignAid'), phrase('mercy'), phrase('close')];
+      // Alice 只收入（金币到 10 就政变第一个对手），从不质疑、阻挡，对质和失去影响力时选第一张
+      for (let step = 0; step < 4_000 && room.game!.phase !== 'gameOver'; step += 1) {
+        if (talk) {
+          try {
+            room.react(alice.id, 'sock0', TALK[step % TALK.length]);
+          } catch {
+            // 预告的目标已不在
+          }
+        }
+        const g = room.game!;
+        const first = g.players.find((p) => p.id === alice.id)!.hand[0]?.id;
+        const turn = g.players.find((p) => p.id === alice.id)!.coins >= 10 ? { type: 'chooseAction', action: 'coup', targetId: g.players.find((p) => p.alive && p.id !== alice.id)!.id } : { type: 'chooseAction', action: 'income' };
+        for (const intent of [turn, { type: 'passChallenge' }, { type: 'passBlock' }, { type: 'resolveLoss', cardId: first }, { type: 'revealShowdownCard', cardId: first }]) {
+          try {
+            room.dispatch(alice.id, 'sock0', intent);
+          } catch {
+            // 此刻不该 Alice 这么做
+          }
+        }
+        vi.advanceTimersByTime(250);
+      }
+      expect(room.game!.phase).toBe('gameOver');
+      const lines = events.onReaction.mock.calls.filter(([, r]) => r.playerId !== alice.id).map(([, r]) => said(r.reaction));
+      const seats = room.game!.players.map((p) => p.id);
+      const moves = JSON.stringify(events.onBroadcast.mock.calls.flatMap(([, evs]) => evs)).replace(/"[0-9a-f]{16}"/g, (id) => `"seat${seats.indexOf(JSON.parse(id))}"`);
+      vi.restoreAllMocks();
+      return { moves, lines };
+    };
+    const quiet = play(false);
+    const noisy = play(true);
+    expect(noisy.lines).not.toEqual(quiet.lines); // 电脑听到了、也接了话
+    expect(noisy.lines.some((l) => l === 'mercy' || l.includes('>'))).toBe(true);
+    expect(quiet.moves.match(/actionChosen/g)!.length).toBeGreaterThan(10);
+    expect(noisy.moves).toEqual(quiet.moves);
   });
 
   it('同一局面和行动种子下，无论听到什么表态，电脑的行动相同', () => {
