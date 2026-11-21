@@ -410,6 +410,114 @@ export function targeted(state: PublicState, events: readonly GameEvent[], me: s
   return { options, delayMs: TARGETED_MS, current: coup ? undefined : whileUndecided(state, me) };
 }
 
+// ── 表 5：结果公开后（#82）。一次结算里的质疑结果、失去影响力、淘汰合并成一次机会 ──
+// 对质的结果在揭晓那一刻就定了谁失去影响力：质疑失败者还要自己选丢哪张，暗杀还要目标再丢一张，这些待丢的都算进这次结算，
+// 之后选牌那一下不再给机会。阻挡没人质疑、窗口关上时，阻挡成立也算一次结果
+interface Result {
+  challenge?: 'won' | 'lost'; // 自己质疑成功、失败
+  claim?: 'proven' | 'caught'; // 自己的声称被证明为真、被抓到诈唬
+  backed: boolean; // 这次声称以来自己说过来质疑我啊、我是老实人或我有 X（X 是这次声称的角色）
+  saved?: 'assassinate' | 'steal'; // 针对自己的暗杀或偷窃确实被化解
+  how?: 'unchallenged' | 'proven' | 'caught'; // 怎么化解的：自己阻挡没人质疑、自己阻挡被质疑并证明为真、行动者被别人质疑抓到
+  blocked: boolean; // 自己的行动被阻挡（阻挡成立），自己没质疑
+  hit: boolean; // 自己被政变或暗杀失去影响力，还在场（对质里丢的由上面几行管）
+  canCounter: boolean; // 金币够反击打自己的人（反预告说得通）
+  out: boolean; // 自己被淘汰（含这次结算里待丢的最后一张）
+  outed: boolean; // 自己让别人被淘汰
+  watched?: 'caught' | 'proven'; // 旁观（不是对质双方、也不是行动的目标）：别人被抓到诈唬、别人的声称被证明为真
+}
+const BACKING: readonly Line[] = ['honest', 'dare', 'claim'];
+const AFTER_RESULT: readonly Row<Result>[] = [
+  { when: (s) => s.challenge === 'lost' && !s.out, say: { respect: FIRST, silence: QUIET } },
+  { when: (s) => s.challenge === 'lost' && s.out, say: { respect: FIRST } },
+  { when: (s) => s.challenge === 'won', say: { doubt: FIRST, silence: QUIET } },
+  { when: (s) => s.claim === 'proven' && s.backed, say: { honest: FIRST, dare: SECOND } },
+  { when: (s) => s.claim === 'proven' && !s.backed, say: { honest: FIRST, silence: QUIET } },
+  { when: (s) => s.claim === 'caught' && s.backed, say: { respect: FIRST }, exclude: BACKING },
+  { when: (s) => s.claim === 'caught' && !s.backed, say: { respect: FIRST, mercy: SECOND, silence: QUIET }, exclude: BACKING },
+  { when: (s) => s.saved === 'assassinate' && s.how === 'unchallenged', say: { close: FIRST } },
+  { when: (s) => s.saved === 'assassinate' && s.how === 'proven', say: { close: FIRST, honest: SECOND } },
+  { when: (s) => s.saved === 'assassinate' && s.how === 'caught', say: { close: FIRST, respect: SECOND } },
+  { when: (s) => s.saved === 'steal', say: { close: FIRST, silence: QUIET } },
+  { when: (s) => s.blocked, say: { doubt: FIRST, silence: QUIET } },
+  { when: (s) => s.hit && s.canCounter, say: { counter: FIRST, mercy: SECOND } },
+  { when: (s) => s.hit && !s.canCounter, say: { mercy: FIRST, respect: SECOND, silence: QUIET } },
+  { when: (s) => s.out, say: { respect: FIRST, silence: QUIET } },
+  { when: (s) => s.outed, say: { respect: FIRST, silence: QUIET } },
+  { when: (s) => s.watched === 'caught', say: { doubt: FIRST, silence: QUIET } },
+  { when: (s) => s.watched === 'proven', say: { respect: FIRST, silence: QUIET } },
+];
+// 结果公开后稍停一下再说（认错、自嘲不抢在结果前头）。对质的结果另要等揭晓动画播完，由 Room 加上动画时长
+export const AFTER_RESULT_MS = [800, 2_000] as const;
+const SETTLING: readonly GameEvent['type'][] = ['influenceLost', 'eliminated', 'coinsChanged'];
+
+// batch 是 events 末尾刚由这次变化产生的几条；heard 是这次声称以来听到的表态。牌局结束后归表 8，这里没有候选
+export function afterResult(state: PublicState, events: readonly GameEvent[], batch: number, heard: readonly Heard[], me: string): Moment {
+  if (state.phase === 'gameOver') return NOTHING(AFTER_RESULT_MS);
+  const start = events.length - batch;
+  const fresh = events.slice(start);
+  const r = fresh.find((e) => e.type === 'challengeResolved');
+  const resolved = r?.type === 'challengeResolved' ? r : undefined;
+  const resolvedAt = resolved ? events.indexOf(resolved) : start;
+  const chosen = events[lastIndex(events, 'actionChosen', resolvedAt)] as Extract<GameEvent, { type: 'actionChosen' }> | undefined;
+  const claimAt = lastClaimAt(events.slice(0, resolvedAt));
+  const blockAt = lastIndex(events, 'blocked', resolvedAt);
+  const onBlock = blockAt >= 0 && blockAt === claimAt && blockAt > lastIndex(events, 'actionChosen', resolvedAt);
+  const blockerId = onBlock ? (events[blockAt] as Extract<GameEvent, { type: 'blocked' }>).blockerId : undefined;
+
+  // 这次变化里失去影响力、被淘汰的人。这次只是在丢上一次对质结果定下的那张时（质疑失败者那张，或诈唬阻挡暗杀被抓后暗杀要的那张），
+  // 已在那次结算里说过
+  let i = start - 1;
+  while (i >= 0 && SETTLING.includes(events[i].type)) i -= 1;
+  const before = events[i];
+  const first = fresh.find((e) => e.type === 'influenceLost');
+  const lostSince = (id: string) => events.slice(i, start).filter((e) => e.type === 'influenceLost' && e.playerId === id).length;
+  const folded =
+    !resolved && before?.type === 'challengeResolved' && first?.type === 'influenceLost' &&
+    (before.truth ? first.playerId === before.loserId && lostSince(first.playerId) === 0 : first.playerId === before.claimantId && lostSince(first.playerId) === 1);
+  const challengerId = resolved && (events[lastIndex(events, 'challenged', resolvedAt)] as Extract<GameEvent, { type: 'challenged' }>).challengerId;
+  // 谁让 id 失去了影响力：对质里输的是对质的另一方，否则是政变、暗杀他的行动者。没有的（弃权）不算结果
+  const culprit = (id: string) =>
+    resolved && resolved.loserId === id
+      ? id === resolved.claimantId ? challengerId : resolved.claimantId
+      : chosen && chosen.targetId === id && (chosen.action === 'coup' || chosen.action === 'assassinate') ? chosen.actorId : undefined;
+  const losers = new Set(folded ? [] : fresh.flatMap((e) => (e.type === 'influenceLost' ? [e.playerId] : [])));
+  const outs = new Set(folded ? [] : fresh.flatMap((e) => (e.type === 'eliminated' ? [e.playerId] : [])));
+  if (resolved && state.lossPlayerId) {
+    losers.add(state.lossPlayerId);
+    if (state.players.find((p) => p.id === state.lossPlayerId)!.handCount === 1) outs.add(state.lossPlayerId);
+  }
+  for (const set of [losers, outs]) for (const id of set) if (!culprit(id)) set.delete(id);
+  // 阻挡没人质疑：这次变化关掉了阻挡的问询窗口，轮到下一位
+  const stood = !resolved && onBlock && lastIndex(events, 'challenged', start) < blockAt && lastIndex(events, 'turnChanged', start) < blockAt && fresh.some((e) => e.type === 'turnChanged');
+  const threat = chosen && chosen.targetId === me && (chosen.action === 'assassinate' || chosen.action === 'steal') ? chosen.action : undefined;
+  const how: Result['how'] = stood
+    ? 'unchallenged'
+    : resolved && onBlock && resolved.truth && blockerId === me ? 'proven'
+    : resolved && !onBlock && !resolved.truth && challengerId !== me ? 'caught'
+    : undefined;
+  const claimEvent = events[claimAt] as Claim | undefined;
+  const claimRole = claimEvent && (claimEvent.type === 'blocked' ? claimEvent.role : claimEvent.claimedRole);
+  const party = resolved && (me === resolved.claimantId || me === challengerId);
+  const attacker = culprit(me);
+  const situation: Result = {
+    challenge: resolved && challengerId === me ? (resolved.truth ? 'lost' : 'won') : undefined,
+    claim: resolved?.claimantId === me ? (resolved.truth ? 'proven' : 'caught') : undefined,
+    backed: heard.some(({ playerId, reaction: x }) => playerId === me && (x.kind === 'phrase' ? x.phrase === 'dare' || x.phrase === 'honest' : x.kind === 'verbalClaim' && x.has && x.role === claimRole)),
+    saved: how && (how !== 'unchallenged' || blockerId === me) ? threat : undefined,
+    how,
+    blocked: chosen?.actorId === me && (stood || (!!resolved && onBlock && resolved.truth && challengerId !== me)),
+    hit: !resolved && losers.has(me) && !outs.has(me),
+    canCounter: !!attacker && counterAnnouncement(state, me, attacker).length > 0,
+    out: outs.has(me),
+    outed: [...outs].some((id) => id !== me && culprit(id) === me),
+    watched: resolved && !party && chosen?.targetId !== me ? (resolved.truth ? 'proven' : 'caught') : undefined,
+  };
+  if (!AFTER_RESULT.some((row) => row.when(situation))) return NOTHING(AFTER_RESULT_MS);
+  const counter = attacker && !situation.out ? counterAnnouncement(state, me, attacker) : [];
+  return { options: toOptions(merge(AFTER_RESULT, situation), undefined, { counter }), delayMs: AFTER_RESULT_MS };
+}
+
 // ── 表 6：回合外的局势（没轮到自己时，只读公开信息：谁最近打过自己、各人的金币和影响力）──
 // 预告不兑现也无妨，行动策略不读它。每种局势在刚出现时给一次机会：held 是上次看时已成立的局势，
 // Room 按电脑各记一份、开局清空；同一局势持续时不再抽签，消失后再出现算新的
