@@ -1182,8 +1182,7 @@ describe('Room 电脑翻牌前的犹豫', () => {
         return { wanders: focuses.length, revealAt, deadlineMs, draws };
       };
       const [busy, calm] = [run(0), run(0.999)];
-      expect(busy.wanders).toBeGreaterThan(calm.wanders);
-      expect(calm.wanders).toBeGreaterThanOrEqual(3); // 至少游移两次再落点
+      expect([busy.wanders, calm.wanders]).toEqual([3, 3]); // 游移两次再落点，翻牌延迟再长也不多游移
       expect(busy.revealAt).toBe(calm.revealAt);
       expect(busy.draws).toBe(calm.draws);
       expect(busy.revealAt).toBeGreaterThanOrEqual(2_000);

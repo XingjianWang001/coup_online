@@ -74,9 +74,10 @@ const COMPUTER_SPECTATED_MS = 1_000;
 // 出手延迟右偏：0～1 的均匀随机数取幂后再铺到区间上，多数时候偏快、偶尔长考，指数越大越快。
 // 问询窗口里，声称冲着自己来时想得久一些，不冲着自己来时更快。起始值，靠试玩校准
 const COMPUTER_DELAY_SKEW = { aimedAtSelf: 1.5, aimedElsewhere: 3, otherPhases: 2 };
-// 对质翻牌前的犹豫：每隔这么久（区间内均匀）换一次对准；落到要翻的那张后停这么久再翻。
-// 出手延迟最短 2 秒时也至少游移两次（550 + 550 + 250 ≤ 2000 - 600）。起始值，靠试玩校准
+// 对质翻牌前的犹豫：每隔这么久（区间内均匀）换一次对准，最多游移这么多次（多了显得做作）；落到要翻的那张后停这么久再翻。
+// 出手延迟最短 2 秒时也游移得满两次（550 + 550 + 250 ≤ 2000 - 600）。起始值，靠试玩校准
 const WANDER_GAP_MS = [250, 550] as const;
+const WANDER_MAX = 2;
 const LAND_HOLD_MS = 600;
 // 电脑获胜后的赛后揭晓：结束后这么久按概率揭第一张暗牌，之后每隔这么久按概率揭下一张。起始值，靠试玩校准
 const POST_GAME_REVEAL_MS = 3_000;
@@ -519,7 +520,7 @@ export class Room {
       });
     const gap = () => WANDER_GAP_MS[0] + this.speechRandom() * (WANDER_GAP_MS[1] - WANDER_GAP_MS[0]);
     let last: number | null = null;
-    for (let at = gap(); at + WANDER_GAP_MS[0] <= landAt; at += gap()) {
+    for (let at = gap(), n = 0; n < WANDER_MAX && at + WANDER_GAP_MS[0] <= landAt; at += gap(), n += 1) {
       // 每次换到另一张：只剩一张时一直是它，只对准一次
       const slot: number = last === null ? Math.floor(this.speechRandom() * handSize) : (last + 1 + Math.floor(this.speechRandom() * (handSize - 1))) % handSize;
       if (slot !== last) focusAt(at, () => slot);
