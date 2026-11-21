@@ -61,6 +61,8 @@ describe('Room 电脑试探', () => {
   // 一个电脑对着 Alice 的征税：记下它说没说、质疑还是放弃、什么时候出手，以及窗口的时限
   function respond(computerRandom: number, speechRandom: number) {
     const { room, events, computerId, tax } = probeTable({ computerRandom: () => computerRandom, speechRandom: () => speechRandom });
+    // 发牌不受注入的随机源控制：固定电脑的暗牌，两局才只差在说没说话
+    room.game!.players.find((p) => p.id === computerId)!.hand.forEach((c, i) => (c.role = (['captain', 'contessa'] as Role[])[i]));
     const log: string[] = [];
     let movedAt = 0;
     // 只记出手之前的：放弃之后轮到电脑，它会为自己的回合另说话
