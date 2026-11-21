@@ -10,13 +10,14 @@ import {
   passChallenge,
   publicState,
   resolveLoss,
+  revealPostGameCard,
   revealShowdownCard,
   type GameEvent,
   type GameState,
   type Role,
 } from '@coup/engine';
 import type { Reaction } from '@coup/shared';
-import { afterOwnClaim, merge, onOwnTurn, plausible, probe, type Decision, type Options, type Row } from './speech.ts';
+import { afterGame, afterOwnClaim, merge, offTurn, onOwnTurn, plausible, probe, type Decision, type Options, type Row } from './speech.ts';
 
 describe('场景表的合并', () => {
   it('成立的行合并候选：同一条的权重相乘，写了排除的不出现，沉默始终在候选里；不成立的行不算', () => {
@@ -180,6 +181,71 @@ describe('表 2：自己刚作出声称，问询窗口还开着', () => {
     expect(t.options()).toEqual([]);
     t.tax();
     expect(t.options('b')).toEqual([]);
+  });
+});
+
+describe('表 8：牌局结束后', () => {
+  // a 获胜：a 政变 b，b 政变 c，c 政变 b（b 出局），a 政变 c（c 最后出局）。claimed 时 a 先征税一回合，最后声称的是公爵
+  function finished(claimed = false) {
+    const t = table();
+    if (claimed) taxedBefore(t);
+    t.coup('a', 'b', 'duke');
+    t.coup('b', 'c', 'duke');
+    t.coup('c', 'b', 'assassin');
+    t.coup('a', 'c', 'contessa');
+    expect(t.g.winnerId).toBe('a');
+    const reveal = (...slots: number[]) => slots.forEach((slot) => t.did(revealPostGameCard(t.g, 'a', t.seat('a').hand[slot].id)));
+    const setHand = (roles: Role[]) => t.seat('a').hand.forEach((c, i) => (c.role = roles[i]));
+    const options = (me: string) => afterGame(publicState(t.g), t.events, me).options;
+    return { ...t, reveal, setHand, options };
+  }
+  type Finished = ReturnType<typeof finished>;
+
+  // a 的暗牌依次是公爵、队长
+  it.each<[string, (f: Finished) => void, string, string[]]>([
+    ['未获胜，最后一个被淘汰', () => {}, 'c', ['respect', 'silence']],
+    ['未获胜，更早被淘汰', () => {}, 'b', ['respect', 'silence']],
+    ['未获胜，获胜者揭晓的牌不是他最后声称的角色（加最后被淘汰）', (f) => f.reveal(1), 'c', ['doubt', 'respect', 'silence']],
+    ['未获胜，获胜者揭晓的牌不是他最后声称的角色（加更早被淘汰）', (f) => f.reveal(1), 'b', ['doubt', 'respect', 'silence']],
+    ['获胜，揭晓之前', () => {}, 'a', ['respect', 'silence']],
+    ['获胜，揭晓的牌里有自己本局声称过的角色', (f) => f.reveal(0), 'a', ['honest', 'respect', 'silence']],
+    ['获胜，两张都已揭晓，都不是自己最后声称的角色', (f) => (f.setHand(['captain', 'contessa']), f.reveal(0, 1)), 'a', ['dare', 'respect', 'silence']],
+  ])('%s', (_, setup, me, expected) => {
+    const f = finished(true);
+    setup(f);
+    const options = f.options(me);
+    expect(labels(options)).toEqual(expected);
+    for (const [reaction, weight] of options) {
+      expect(weight).toBeGreaterThan(0);
+      expect(reaction === null || reaction.kind === 'phrase').toBe(true); // 只发短语
+    }
+  });
+
+  it('最后一个被淘汰的比更早被淘汰的更想说佩服；获胜者揭晓之前多沉默', () => {
+    const f = finished(true);
+    const respect = (options: Options) => options.find(([r]) => r !== null && label(r) === 'respect')![1];
+    expect(respect(f.options('c'))).toBeGreaterThan(respect(f.options('b')));
+    expect(silenceShare(f.options('c'))).toBeLessThan(silenceShare(f.options('b')));
+    expect(silenceShare(f.options('a'))).toBeGreaterThan(0.5);
+  });
+
+  it('获胜者本局没作过声称：揭晓什么都不算诈唬，也不算老实', () => {
+    const f = finished();
+    f.reveal(0, 1);
+    expect(labels(f.options('c'))).toEqual(['respect', 'silence']);
+    expect(labels(f.options('a'))).toEqual(['silence']);
+  });
+
+  it('只看已公开的揭晓结果：揭晓之前改获胜者的暗牌，各人的候选都不变', () => {
+    const honest = finished(true);
+    const bluffing = finished(true);
+    bluffing.setHand(['contessa', 'contessa']);
+    for (const me of IDS) expect(bluffing.options(me)).toEqual(honest.options(me));
+  });
+
+  it('牌局没结束时没有候选', () => {
+    const t = table();
+    expect(afterGame(publicState(t.g), t.events, 'a').options).toEqual([]);
   });
 });
 
@@ -490,5 +556,123 @@ describe('表 3：别人作出声称，自己有资格质疑且尚未回应（�
     const later = probes(challenged).current!;
     challenged.did(challenge(challenged.g, 'c'));
     expect(later(publicState(challenged.g))).toBe(false);
+  });
+});
+
+describe('表 6：回合外的局势', () => {
+  // 预告写作 行动:目标；只列开口的候选（沉默另看）
+  const name = (r: Reaction | null) => (r?.kind === 'announcement' ? [r.action, r.targetId].filter(Boolean).join(':') : label(r));
+  const spoken = (options: Options) => options.filter(([r]) => r).map(([r]) => name(r)).sort();
+  // 先看一眼记下已成立的局势，change 之后再看：只有刚出现的局势给机会
+  const after = (t: Table, change: () => void, me = 'a') => {
+    const { held } = offTurn(publicState(t.g), t.events, me, new Set());
+    change();
+    return offTurn(publicState(t.g), t.events, me, held);
+  };
+  const coins = (t: Table, id: string, n: number) => () => void (t.seat(id).coins = n);
+  const loseCard = (t: Table, id: string) => void t.seat(id).revealed.push(t.seat(id).hand.pop()!);
+  // b 偷 a，没人质疑、a 不阻挡：轮到 c
+  const bStoleFromA = (t: Table) => {
+    t.income('a');
+    t.did(chooseAction(t.g, 'b', 'steal', 'a'));
+    t.passAll('b');
+    t.did(passBlock(t.g, 'a'));
+  };
+  // c 被 b 政变两次出局，a、b 两人对峙；a 收入后轮到 b
+  const duel = (t: Table) => {
+    t.income('a');
+    t.coup('b', 'c', 'duke');
+    t.income('c', 'a');
+    t.coup('b', 'c', 'contessa');
+    t.income('a');
+  };
+
+  it.each<[string, (t: Table) => () => void, string[]]>([
+    ['自己金币刚到 7，有最近打过自己的人：预告政变他', (t) => (bStoleFromA(t), (t.seat('c').coins = 6), coins(t, 'a', 7)), ['coup:b']], // 领先者是 c
+    ['自己金币刚到 7，没有：预告政变领先者', (t) => (t.income('a'), (t.seat('c').coins = 5), coins(t, 'a', 7)), ['coup:c']],
+    ['自己金币够 3、刚被人打：预告暗杀他', (t) => (t.income('a'), (t.seat('b').coins = 3), () => t.did(chooseAction(t.g, 'b', 'assassinate', 'a'))), ['assassinate:b']],
+    ['有对手金币到 10，多人局：手下留情', (t) => (t.income('a'), coins(t, 'b', 10)), ['mercy']],
+    ['两人对峙，对手够政变，自己只剩 1 点影响力：手下留情、佩服', (t) => (duel(t), loseCard(t, 'a'), coins(t, 'b', 7)), ['mercy', 'respect']],
+    ['两人对峙，自己够政变，对手只剩 1 点影响力：预告政变', (t) => (duel(t), (t.seat('a').coins = 7), () => loseCard(t, 'b')), ['coup:b']],
+  ])('%s', (_, setup, expected) => {
+    const t = table();
+    const { moment } = after(t, setup(t));
+    expect(t.g.currentPlayerId).not.toBe('a');
+    expect(spoken(moment.options)).toEqual(expected);
+    for (const [, weight] of moment.options) expect(weight).toBeGreaterThan(0);
+    expect(moment.options.at(-1)![0]).toBeNull(); // 沉默有概率
+  });
+
+  it('多沉默：只有「对手够政变、自己只剩 1 点」那一行开口概率不低', () => {
+    const rich = table();
+    rich.income('a');
+    const plead = table();
+    duel(plead);
+    loseCard(plead, 'a');
+    expect(silenceShare(after(plead, coins(plead, 'b', 7)).moment.options)).toBeLessThan(silenceShare(after(rich, coins(rich, 'b', 10)).moment.options));
+  });
+
+  it('同一局势持续时不重复触发；消失后再出现算新的', () => {
+    const t = table();
+    t.income('a');
+    const first = after(t, coins(t, 'a', 7));
+    expect(spoken(first.moment.options)).toEqual(['coup:b']);
+    const again = offTurn(publicState(t.g), t.events, 'a', first.held);
+    expect(spoken(again.moment.options)).toEqual([]);
+    t.seat('a').coins = 5;
+    const gone = offTurn(publicState(t.g), t.events, 'a', again.held);
+    t.seat('a').coins = 8;
+    expect(spoken(offTurn(publicState(t.g), t.events, 'a', gone.held).moment.options)).toEqual(['coup:b']);
+  });
+
+  it('轮到自己时不给机会，也不算用掉：轮完之后还成立就给', () => {
+    const t = table();
+    const mine = after(t, coins(t, 'a', 7));
+    expect(spoken(mine.moment.options)).toEqual([]);
+    t.income('a');
+    expect(spoken(offTurn(publicState(t.g), t.events, 'a', mine.held).moment.options)).toEqual(['coup:b']);
+  });
+
+  it('目标：最近打过自己的人已出局时预告政变领先者；领先者先比影响力、再比金币', () => {
+    const t = table();
+    bStoleFromA(t);
+    t.seat('b').alive = false;
+    t.seat('c').coins = 1;
+    expect(spoken(after(t, coins(t, 'a', 7)).moment.options)).toEqual(['coup:c']);
+
+    const u = table();
+    u.income('a');
+    loseCard(u, 'c');
+    u.seat('c').coins = 6;
+    expect(spoken(after(u, coins(u, 'a', 7)).moment.options)).toEqual(['coup:b']);
+  });
+
+  it('金币够付预告的行动：不够 3 时刚被打也不预告暗杀；两人对峙时对手到 10 不算「多人局」那一行', () => {
+    const t = table();
+    t.income('a');
+    t.seat('a').coins = 2;
+    t.seat('b').coins = 3;
+    expect(spoken(after(t, () => t.did(chooseAction(t.g, 'b', 'assassinate', 'a'))).moment.options)).toEqual([]);
+
+    const d = table();
+    duel(d);
+    expect(spoken(after(d, coins(d, 'b', 10)).moment.options)).toEqual([]);
+  });
+
+  it('自己出局后没有候选', () => {
+    const t = table();
+    t.income('a');
+    t.seat('a').alive = false;
+    expect(spoken(after(t, coins(t, 'b', 10)).moment.options)).toEqual([]);
+  });
+
+  it('信息边界：公开经历相同时，暗牌不同不改变表态的候选和概率', () => {
+    const run = (hands: Record<string, Role[]>) => {
+      const g: GameState = createGame(IDS.map((id) => ({ id, name: id })), { startingPlayerId: 'a', hands });
+      const { held } = offTurn(publicState(g), [], 'b', new Set());
+      g.players[1].coins = 7;
+      return offTurn(publicState(g), [], 'b', held);
+    };
+    expect(run({ a: ['captain', 'captain'], b: ['duke', 'duke'], c: ['contessa', 'contessa'] })).toEqual(run({ a: ['duke', 'assassin'], b: ['captain', 'ambassador'], c: ['duke', 'contessa'] }));
   });
 });

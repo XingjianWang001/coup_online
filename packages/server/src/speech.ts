@@ -10,7 +10,7 @@ import { contradicts, recall } from './computer.ts';
 // 候选的一条：短语，「我有 X」（claim，X 由各场景按语境定，必须在自己仍作数的声称里，否则不算候选），
 // 或一种行动预告（真的 announce、虚晃到另一目标 feintTarget、虚晃成另一种针对性行动 feintAction、反预告 counter），具体预告什么由各场景给出
 export type Line = Phrase | 'claim' | Announcing;
-type Announcing = 'announce' | 'feintTarget' | 'feintAction' | 'counter';
+type Announcing = 'announce' | 'feintTarget' | 'feintAction' | 'counter' | OffTurnAnnouncing;
 type Weights = Partial<Record<Line | 'silence', number>>;
 
 // 场景表的一行：条件成立时给出带权重的候选。silence 是这一行对沉默的倍数（「多沉默」大于 1，「开口概率高」小于 1）
@@ -247,6 +247,44 @@ export function afterOwnClaim(state: PublicState, events: readonly GameEvent[], 
   return { options, delayMs: AFTER_OWN_CLAIM_MS };
 }
 
+// ── 表 8：牌局结束后（只发短语） ──
+interface AfterGame {
+  won: boolean;
+  lastOut: boolean; // 自己是最后一个被淘汰的
+  shown: number; // 获胜者已揭晓几张
+  bluffShown: boolean; // 获胜者揭晓的牌里没有他最后声称的角色（他本局没声称过就不算）
+  honestShown: boolean; // 获胜者揭晓的牌里有他本局声称过的角色
+}
+const AFTER_GAME: readonly Row<AfterGame>[] = [
+  { when: (s) => !s.won && s.lastOut, say: { respect: HIGH } },
+  { when: (s) => !s.won && !s.lastOut, say: { respect: FIRST, silence: QUIET } },
+  { when: (s) => !s.won && s.bluffShown, say: { respect: FIRST, doubt: SECOND } },
+  { when: (s) => s.won && s.shown === 0, say: { respect: FIRST, silence: QUIET } },
+  { when: (s) => s.won && s.honestShown, say: { honest: FIRST, respect: SECOND } },
+  { when: (s) => s.won && s.shown === 2 && s.bluffShown, say: { dare: FIRST, respect: SECOND } },
+];
+// 每位电脑在结束后这段时间里各醒来一次（Room 抽时刻），按那时已公开的揭晓结果决定说不说，说就当即说
+export const AFTER_GAME_MS = [1_000, 6_000] as const;
+const AT_ONCE = [0, 0] as const;
+
+// 牌局没结束时没有候选。只读公开的揭晓结果，不读获胜者的暗牌
+export function afterGame(state: PublicState, events: readonly GameEvent[], me: string): Moment {
+  const winner = state.winnerId;
+  if (state.phase !== 'gameOver' || !winner) return NOTHING(AT_ONCE);
+  const claims = events.flatMap((e) =>
+    e.type === 'actionChosen' && e.actorId === winner && e.claimedRole ? [e.claimedRole] : e.type === 'blocked' && e.blockerId === winner ? [e.role] : [],
+  );
+  const shown = state.players.find((p) => p.id === winner)!.postGameRevealed.map((r) => r.role);
+  const situation: AfterGame = {
+    won: me === winner,
+    lastOut: events.filter((e) => e.type === 'eliminated').at(-1)?.playerId === me,
+    shown: shown.length,
+    bluffShown: shown.length > 0 && claims.length > 0 && !shown.includes(claims.at(-1)!),
+    honestShown: shown.some((r) => claims.includes(r)),
+  };
+  return { options: toOptions(merge(AFTER_GAME, situation), undefined), delayMs: AT_ONCE };
+}
+
 // 问询窗口前段、自己还没回应时说的话（表 3 试探；表 4 里偷窃、暗杀的目标也这样）：发送时自己已回应、有人质疑或窗口已关就作废。
 // 自己放弃不换阶段，Room 换阶段时的清除管不到，所以发送时再看一眼
 const whileUndecided = (state: PublicState, me: string) => {
@@ -370,6 +408,63 @@ export function targeted(state: PublicState, events: readonly GameEvent[], me: s
   };
   const options = toOptions(merge(TARGETED_AT_ME, situation), blocker, { counter: counterAnnouncement(state, me, actorId) });
   return { options, delayMs: TARGETED_MS, current: coup ? undefined : whileUndecided(state, me) };
+}
+
+// ── 表 6：回合外的局势（没轮到自己时，只读公开信息：谁最近打过自己、各人的金币和影响力）──
+// 预告不兑现也无妨，行动策略不读它。每种局势在刚出现时给一次机会：held 是上次看时已成立的局势，
+// Room 按电脑各记一份、开局清空；同一局势持续时不再抽签，消失后再出现算新的
+type OffTurnAnnouncing = 'warnCoup' | 'warnAssassinate'; // 预告政变（最近打过自己的人，没有则领先者；对峙时就是对手）、预告暗杀刚打自己的人
+interface OffTurn {
+  coins7: boolean; // 自己金币刚到 7
+  attacker: boolean; // 有最近打过自己、还在场的人
+  hit: boolean; // 刚被人打（被偷窃、暗杀、政变的目标）；金币够不够 3 由预告说不说得通来管
+  rich: boolean; // 多人局，有对手金币刚到 10：自己可能是他被迫政变的目标
+  threatened: boolean; // 两人对峙，对手够政变，自己只剩 1 点影响力
+  threatening: boolean; // 两人对峙，自己够政变，对手只剩 1 点影响力
+}
+const OFF_TURN: readonly Row<OffTurn>[] = [
+  { when: (s) => s.coins7 && s.attacker, say: { warnCoup: FIRST, silence: QUIET } },
+  { when: (s) => s.coins7 && !s.attacker, say: { warnCoup: FIRST, silence: QUIET } },
+  { when: (s) => s.hit, say: { warnAssassinate: FIRST, silence: QUIET } },
+  { when: (s) => s.rich, say: { mercy: FIRST, silence: QUIET } },
+  { when: (s) => s.threatened, say: { mercy: FIRST, respect: SECOND } },
+  { when: (s) => s.threatening, say: { warnCoup: FIRST, silence: QUIET } },
+];
+// 局势刚出现就说；换阶段或换行动者时 Room 清掉没说出的，电脑在任何阶段最快 1.5 秒出手
+const OFF_TURN_MS = [500, 1_800] as const;
+
+// 轮到自己时（表 1 的事）不看也不更新 held：轮完之后还成立就算刚出现。自己出局或牌局结束后没有候选
+export function offTurn(state: PublicState, events: readonly GameEvent[], me: string, held: ReadonlySet<string>): { held: ReadonlySet<string>; moment: Moment } {
+  const self = state.players.find((p) => p.id === me);
+  if (state.phase === 'gameOver' || !self?.alive) return { held: new Set(), moment: NOTHING(OFF_TURN_MS) };
+  if (state.currentPlayerId === me) return { held, moment: NOTHING(OFF_TURN_MS) };
+  const rivals = state.players.filter((p) => p.alive && p.id !== me);
+  const [rival] = rivals.length === 1 ? rivals : [];
+  const hitAt = events.reduce((at, e, i) => (e.type === 'actionChosen' && e.targetId === me ? i : at), -1);
+  // 局势带上身份：每次被打、每位到 10 的对手各算一种
+  const now = new Set<string>();
+  if (self.coins >= COUP_COST) now.add('coins7');
+  if (hitAt >= 0) now.add(`hit:${hitAt}`);
+  if (!rival) for (const p of rivals.filter((p) => p.coins >= FORCED_COUP_COINS)) now.add(`rich:${p.id}`);
+  if (rival && rival.coins >= COUP_COST && self.handCount === 1) now.add('threatened');
+  if (rival && self.coins >= COUP_COST && rival.handCount === 1) now.add('threatening');
+  const fresh = [...now].filter((k) => !held.has(k));
+  const memory = memoryOf(state, events, me);
+  const attacker = rivals.find((p) => p.id === memory.attacker);
+  // 领先者：影响力最多、其次金币最多；ponytail: 再平手取座次靠前的
+  const leader = rivals.reduce((a, b) => (b.handCount > a.handCount || (b.handCount === a.handCount && b.coins > a.coins) ? b : a));
+  const situation: OffTurn = {
+    coins7: fresh.includes('coins7'),
+    attacker: !!attacker,
+    hit: fresh.some((k) => k.startsWith('hit:')),
+    rich: fresh.some((k) => k.startsWith('rich:')),
+    threatened: fresh.includes('threatened'),
+    threatening: fresh.includes('threatening'),
+  };
+  const say = (a: ActionType, t?: string) => (plausible(state, me, a, t) ? [announcement(a, t)] : []);
+  // 最近打过自己的人就是刚打自己的人：局内记忆记的是最后一次以自己为目标的行动者
+  const options = toOptions(merge(OFF_TURN, situation), undefined, { warnCoup: say('coup', (attacker ?? leader).id), warnAssassinate: say('assassinate', memory.attacker) });
+  return { held: now, moment: { options, delayMs: OFF_TURN_MS } };
 }
 
 // ── 表 7：接话（#81）。听到短语和口头声称时回一句；听到行动预告、手下留情、好险的各行另加（#83） ──
