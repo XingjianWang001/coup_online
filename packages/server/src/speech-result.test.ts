@@ -43,7 +43,7 @@ function table() {
     // 对质中 who 亮出 role（没有就亮第一张）
     reveal: (who: string, role: Role) => t.did(revealShowdownCard(g, who, (t.seat(who).hand.find((c) => c.role === role) ?? t.seat(who).hand[0]).id)),
     lose: (who: string) => t.did(resolveLoss(g, who, t.seat(who).hand[0].id)),
-    says: (playerId: string, reaction: Reaction) => t.heard.push({ playerId, reaction, at: 0, depth: 0 }),
+    says: (playerId: string, reaction: Reaction) => t.heard.push({ playerId, reaction, at: 0, depth: 0, seen: events.length }),
     options: (me: string) => afterResult(publicState(g), events, t.batch, t.heard, me).options,
   };
   return t;

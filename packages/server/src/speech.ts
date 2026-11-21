@@ -10,7 +10,7 @@ import { contradicts, recall } from './computer.ts';
 // 候选的一条：短语，「我有 X」（claim，X 由各场景按语境定，必须在自己仍作数的声称里，否则不算候选），
 // 或一种行动预告（真的 announce、虚晃到另一目标 feintTarget、虚晃成另一种针对性行动 feintAction、反预告 counter），具体预告什么由各场景给出
 export type Line = Phrase | 'claim' | Announcing;
-type Announcing = 'announce' | 'feintTarget' | 'feintAction' | 'counter' | OffTurnAnnouncing;
+type Announcing = 'announce' | 'feintTarget' | 'feintAction' | 'counter' | 'again' | OffTurnAnnouncing; // again：听到手下留情时再预告一遍同一目标（表 7）
 type Weights = Partial<Record<Line | 'silence', number>>;
 
 // 场景表的一行：条件成立时给出带权重的候选。silence 是这一行对沉默的倍数（「多沉默」大于 1，「开口概率高」小于 1）
@@ -575,14 +575,17 @@ export function offTurn(state: PublicState, events: readonly GameEvent[], me: st
   return { held: now, moment: { options, delayMs: OFF_TURN_MS } };
 }
 
-// ── 表 7：接话（#81）。听到短语和口头声称时回一句；听到行动预告、手下留情、好险的各行另加（#83） ──
+// ── 表 7：接话（#81）。听到短语和口头声称时回一句；听到行动预告、手下留情、好险的各行是 #83 加的 ──
 // 桌上通过校验的一条表态（真人和电脑的）：电脑「听到」的全部内容，由 Room.relay 按时间先后记下
 export interface Heard extends Said {
   depth: number; // 接话的层数：自己起头的是 0，回应第 n 层的是 n + 1。只在服务器里记，不进协议
+  seen: number; // 听到时本局已有几条公开事件：拿预告和之后的公开行动比，看兑没兑现
 }
 // 表态不带对象（ADR 0012）：先从公开语境认出听到的是哪一类、是不是冲着自己来，认不出的不接
 interface Reply {
-  heard: 'doubt' | 'backing' | 'has' | 'hasNot' | 'respect'; // 你确定？/我信你个鬼；当前声称者替声称表态；窗口之外的我有 X / 我没有 X；佩服
+  // 你确定？/我信你个鬼；当前声称者替声称表态；窗口之外的我有 X / 我没有 X；佩服；
+  // 预告针对自己、针对别人、预告征税、外援（#83）；手下留情、好险（#83，牌局中）
+  heard: 'doubt' | 'backing' | 'has' | 'hasNot' | 'respect' | 'aimed' | 'aimedElsewhere' | 'tax' | 'foreignAid' | 'mercy' | 'close';
   claimant: boolean; // 自己是当前问询窗口的声称者
   continuing: boolean; // 自己是声称者，这次声称之前就仍作数地声称着这个角色（如连续征税）
   settled: boolean; // 最近一次声称是自己的、没人质疑、已过了问询窗口，或自己刚发过口头声称
@@ -593,7 +596,14 @@ interface Reply {
   allShown: boolean; // 说的这个角色 3 张都已是明牌
   won?: 'claimant' | 'challenger'; // 自己刚赢下一次对质：作为被证明为真的声称者，或作为质疑者
   over: boolean; // 牌局已结束
+  action?: ActionType; // 听到的行动预告是什么行动
+  affordable: boolean; // 预告者金币够付预告的行动
+  broken: number; // 说话者上次针对自己的预告没兑现：从没兑现的那次行动算起，是他自己的第几个回合（1 是那次）；0 是没有
+  pressing: boolean; // 自己刚预告或刚发起了针对说话者的行动
+  foiled: boolean; // 自己是刚才没得手的行动者
 }
+// 预告针对自己的 X：自己仍作数地声称着、能挡它的角色（「我有 X」的 X）记在 alsoMine
+const aimed = (action: ActionType, s: Reply) => s.heard === 'aimed' && s.action === action;
 const REPLY: readonly Row<Reply>[] = [
   { when: (s) => s.heard === 'doubt' && s.claimant && (s.continuing || s.proven), say: { dare: FIRST, claim: SECOND, honest: THIRD } },
   { when: (s) => s.heard === 'doubt' && s.claimant && (!s.continuing || s.caught), say: { honest: FIRST, claim: SECOND, silence: QUIET } },
@@ -608,6 +618,21 @@ const REPLY: readonly Row<Reply>[] = [
   { when: (s) => s.heard === 'respect' && s.won === 'claimant', say: { honest: FIRST, respect: SECOND } },
   { when: (s) => s.heard === 'respect' && s.won === 'challenger', say: { respect: FIRST, doubt: SECOND } },
   { when: (s) => s.heard === 'respect' && s.over, say: { respect: FIRST } },
+  { when: (s) => aimed('coup', s) && s.affordable, say: { mercy: FIRST, counter: SECOND, respect: THIRD } },
+  { when: (s) => aimed('coup', s) && !s.affordable, say: { sure: FIRST, doubt: SECOND } },
+  { when: (s) => aimed('assassinate', s) && s.affordable && s.alsoMine, say: { claim: FIRST, sure: SECOND } },
+  { when: (s) => aimed('assassinate', s) && s.affordable && !s.alsoMine, say: { mercy: FIRST, sure: SECOND, counter: THIRD } },
+  { when: (s) => aimed('assassinate', s) && !s.affordable, say: { doubt: FIRST, sure: SECOND } },
+  { when: (s) => aimed('steal', s) && s.alsoMine, say: { claim: FIRST, sure: SECOND } },
+  { when: (s) => aimed('steal', s) && !s.alsoMine, say: { mercy: FIRST, counter: SECOND } },
+  // 同一人上次针对自己的预告没兑现：和表 4 的「第二次被同一人针对」一样按他自己的回合淡化
+  ...AGAIN_FADE.map((fade, i): Row<Reply> => ({ when: (s) => s.heard === 'aimed' && s.broken === i + 1, say: { doubt: HIGH ** fade } })),
+  { when: (s) => s.heard === 'foreignAid' && s.alsoMine, say: { claim: FIRST, sure: SECOND } },
+  { when: (s) => s.heard === 'tax' && (s.caught || s.contradicts), say: { doubt: FIRST, sure: SECOND } },
+  { when: (s) => s.heard === 'tax' && s.alsoMine, say: { claim: FIRST, doubt: SECOND } },
+  { when: (s) => s.heard === 'aimedElsewhere' && !s.affordable, say: { sure: FIRST, silence: QUIET } },
+  { when: (s) => s.heard === 'mercy' && s.pressing, say: { again: FIRST, sure: SECOND, silence: QUIET } },
+  { when: (s) => s.heard === 'close' && s.foiled, say: { respect: FIRST, counter: SECOND, silence: QUIET } },
 ];
 const REPLY_MS = [600, 2_000] as const;
 // 一句话、一句回应、一句再回应：第 MAX_DEPTH 层的话不再有电脑接
@@ -645,13 +670,22 @@ function replyOptions(state: PublicState, events: readonly GameEvent[], heard: r
   let kind: Reply['heard'] | undefined;
   if (r.kind === 'phrase') kind = r.phrase === 'sure' || r.phrase === 'doubt' ? 'doubt' : r.phrase === 'respect' ? 'respect' : byClaimant && (r.phrase === 'dare' || r.phrase === 'honest') ? 'backing' : undefined;
   else if (r.kind === 'verbalClaim') kind = byClaimant ? (r.has ? 'backing' : undefined) : r.has ? 'has' : 'hasNot';
+  else if (r.kind === 'announcement') kind = r.targetId === me ? 'aimed' : r.targetId ? 'aimedElsewhere' : r.action === 'tax' || r.action === 'foreignAid' ? r.action : undefined;
+  if (r.kind === 'phrase' && (r.phrase === 'mercy' || r.phrase === 'close') && !over) kind = r.phrase;
   // 替声称表态只有有资格质疑且尚未回应的接（在场、不是声称者就有资格）
   if (kind === 'backing' && state.passed.includes(me)) return [];
   if (!kind) return [];
 
-  // 说的是哪个角色：当前声称者替声称表态时是窗口里的角色，口头声称是它说的角色
-  const role = kind === 'backing' ? windowRole : r.kind === 'verbalClaim' ? r.role : undefined;
   const memory = memoryOf(state, events, me);
+  // 说的是哪个角色：当前声称者替声称表态时是窗口里的角色，口头声称是它说的角色；预告征税、外援是公爵，
+  // 预告针对自己是自己仍作数地声称着、能挡它的角色
+  const announced = r.kind === 'announcement' ? r.action : undefined;
+  const role =
+    kind === 'backing' ? windowRole
+    : r.kind === 'verbalClaim' ? r.role
+    : kind === 'tax' || kind === 'foreignAid' ? 'duke'
+    : kind === 'aimed' ? BLOCK_ROLES[announced!].find((x) => memory.standing.get(me)?.has(x))
+    : undefined;
   const claimAt = lastClaimAt(events);
   const claim = events[claimAt] as Claim | undefined;
   // 自己的声称已经生效：最近一次声称是自己的，没人质疑，问询窗口已过
@@ -665,7 +699,14 @@ function replyOptions(state: PublicState, events: readonly GameEvent[], heard: r
   const resolvedAt = lastIndex(events, 'challengeResolved');
   const resolved = resolvedAt > lastIndex(events, 'actionChosen') ? (events[resolvedAt] as Extract<GameEvent, { type: 'challengeResolved' }>) : undefined;
   const challenger = resolved && (events[lastIndex(events, 'challenged', resolvedAt)] as Extract<GameEvent, { type: 'challenged' }>).challengerId;
-  const subject = claimantId === me ? me : to.playerId;
+  const subject = kind === 'doubt' && claimantId === me ? me : to.playerId;
+  // 手下留情：自己刚预告了针对说话者的行动，或最近一次行动是自己针对他的；再预告一遍同一目标（说得通才算候选）
+  const actAt = lastIndex(events, 'actionChosen');
+  const act = events[actAt] as Extract<GameEvent, { type: 'actionChosen' }> | undefined;
+  const pressed =
+    mine?.reaction.kind === 'announcement' && mine.reaction.targetId === to.playerId && to.at - mine.at <= JUST_SAID_MS ? [mine.reaction]
+    : act?.actorId === me && act.targetId === to.playerId ? [announcement(act.action, to.playerId)]
+    : [];
   const situation: Reply = {
     heard: kind,
     claimant: claimantId === me,
@@ -678,11 +719,35 @@ function replyOptions(state: PublicState, events: readonly GameEvent[], heard: r
     allShown: !!role && shownCount(state, role) === 3,
     won: resolved?.truth && resolved.claimantId === me ? 'claimant' : resolved && !resolved.truth && challenger === me ? 'challenger' : undefined,
     over,
+    action: announced,
+    affordable: !!announced && state.players.find((p) => p.id === to.playerId)!.coins >= (COST[announced] ?? 0),
+    broken: kind === 'aimed' ? broken(events, heard.slice(0, at), to.playerId, me) : 0,
+    pressing: pressed.length > 0,
+    foiled: act?.actorId === me && foiled(events.slice(actAt + 1), me),
   };
   if (!REPLY.some((row) => row.when(situation))) return [];
   // 「我有 X」的 X：回冲着自己的怀疑时是自己的声称（刚说的口头声称优先），其余是说的那个角色
   const x = kind === 'doubt' ? (justClaimed ?? (claimantId === me ? windowRole : settledRole)) : role;
-  return halve(toOptions(merge(REPLY, situation), x && memory.standing.get(me)?.has(x) ? x : undefined), to.depth);
+  const again = pressed.filter((a) => a.kind === 'announcement' && plausible(state, me, a.action, a.targetId));
+  const announcements = { counter: counterAnnouncement(state, me, to.playerId), again };
+  return halve(toOptions(merge(REPLY, situation), x && memory.standing.get(me)?.has(x) ? x : undefined, announcements), to.depth);
+}
+
+// 预告没兑现的记忆，只来自公开信息：speaker 上一次针对 me 的预告（earlier 里，按时间先后）之后，他的下一个行动不是预告的那个。
+// 返回从那次行动算起是他自己的第几个回合（1 是那次）；没有这样的预告、还没行动过或兑现了是 0
+function broken(events: readonly GameEvent[], earlier: readonly Heard[], speaker: string, me: string): number {
+  const last = earlier.filter((h) => h.playerId === speaker && h.reaction.kind === 'announcement' && h.reaction.targetId === me).at(-1);
+  if (last?.reaction.kind !== 'announcement') return 0;
+  const acts = events.slice(last.seen).filter((e) => e.type === 'actionChosen' && e.actorId === speaker) as Extract<GameEvent, { type: 'actionChosen' }>[];
+  const kept = acts[0]?.action === last.reaction.action && acts[0].targetId === me;
+  return kept ? 0 : acts.length;
+}
+
+// 自己最近一次行动没得手（after 是那之后的事件）：被抓到诈唬，或被阻挡且阻挡没被推翻
+function foiled(after: readonly GameEvent[], me: string): boolean {
+  const caught = (id: string) => after.some((e) => e.type === 'challengeResolved' && e.claimantId === id && !e.truth);
+  const blocked = after.find((e) => e.type === 'blocked');
+  return caught(me) || (blocked?.type === 'blocked' && !caught(blocked.blockerId));
 }
 
 // 每深一层开口概率减半，候选之间的比例不变：开口的权重合计 N、沉默 S 时，沉默换成 N + 2S

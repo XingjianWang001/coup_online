@@ -800,7 +800,7 @@ export class Room {
     this.lastReactionAt.set(playerId, now);
     const relayed = { playerId, reaction: parsed };
     this.events.onReaction(this, relayed);
-    const heard = { ...relayed, at: now, depth };
+    const heard = { ...relayed, at: now, depth, seen: this.gameEvents.length };
     this.heard.push(heard);
     this.answer(heard);
     return relayed;
@@ -809,7 +809,11 @@ export class Room {
   // 接话（表 7）：每条通过校验的表态，其余电脑都听到，各自从公开语境判断要不要回一句。行动策略不听表态
   private answer(to: Heard): void {
     const state = publicState(this.game!);
-    for (const id of this.players.keys()) this.say(id, replyTo(state, this.gameEvents, this.heard, to, id));
+    for (const id of this.players.keys()) {
+      // 旁观加速时不预告（反预告、再预告一遍）
+      const moment = replyTo(state, this.gameEvents, this.heard, to, id);
+      this.say(id, this.humanAlive() ? moment : { ...moment, options: moment.options.filter(([r]) => r?.kind !== 'announcement') });
+    }
   }
 
   getPublicState() {

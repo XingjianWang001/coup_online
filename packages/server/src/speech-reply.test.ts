@@ -2,14 +2,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   COUP_COST,
+  block,
   challenge,
   chooseAction,
   createGame,
   forfeit,
+  passBlock,
   passChallenge,
   publicState,
   resolveLoss,
   revealShowdownCard,
+  type ActionType,
   type GameEvent,
   type GameState,
   type Role,
@@ -52,7 +55,7 @@ function table(hands = HANDS) {
       did(revealShowdownCard(g, by, cardOf(by, reveal)));
     },
     hear(playerId: string, reaction: Reaction, depth = 0): Heard {
-      const line = { playerId, reaction, at: (clock += 1_000), depth };
+      const line = { playerId, reaction, at: (clock += 1_000), depth, seen: events.length };
       heard.push(line);
       return line;
     },
@@ -255,6 +258,174 @@ describe('表 7 接话：短语和口头声称', () => {
   });
 });
 
+// 行动预告、手下留情、好险的接话（#83）：预告写成 动作>目标
+const announce = (action: ActionType, targetId?: string): Reaction => (targetId ? { kind: 'announcement', action, targetId } : { kind: 'announcement', action });
+const said = (r: Reaction | null) => (r?.kind === 'announcement' ? `${r.action}${r.targetId ? `>${r.targetId}` : ''}` : label(r));
+const saids = (options: Options) => options.map(([r]) => said(r)).sort();
+
+describe('表 7 接话：行动预告、手下留情、好险', () => {
+  it.each<[string, (t: Table) => [me: string, to: Heard], string[]]>([
+    ['预告政变自己，对方金币够 7（反预告偷窃他）', (t) => ((t.seat('b').coins = 7), ['a', t.hear('b', announce('coup', 'a'))]), ['mercy', 'respect', 'silence', 'steal>b']],
+    ['预告政变自己，对方金币不够', (t) => ['a', t.hear('b', announce('coup', 'a'))], ['doubt', 'silence', 'sure']],
+    [
+      '预告暗杀自己，对方金币够 3，自己仍作数地声称过女伯爵',
+      (t) => {
+        t.seat('a').coins = 3;
+        t.did(chooseAction(t.g, 'a', 'assassinate', 'c'));
+        t.passAll('a');
+        t.did(block(t.g, 'c', 'contessa'));
+        t.passAll('c');
+        t.seat('b').coins = 3;
+        return ['c', t.hear('b', announce('assassinate', 'c'))];
+      },
+      ['claim:contessa', 'silence', 'sure'],
+    ],
+    ['预告暗杀自己，对方金币够 3，自己没声称过（反预告暗杀他）', (t) => ((t.seat('b').coins = 3), (t.seat('a').coins = 3), ['a', t.hear('b', announce('assassinate', 'a'))]), ['assassinate>b', 'mercy', 'silence', 'sure']],
+    ['预告暗杀自己，对方金币不够', (t) => ['a', t.hear('b', announce('assassinate', 'a'))], ['doubt', 'silence', 'sure']],
+    [
+      '预告偷窃自己，自己仍作数地声称过队长',
+      (t) => (t.did(chooseAction(t.g, 'a', 'steal', 'b')), t.passAll('a'), t.did(passBlock(t.g, 'b')), ['a', t.hear('c', announce('steal', 'a'))]),
+      ['claim:captain', 'silence', 'sure'],
+    ],
+    ['预告偷窃自己，没声称过（反预告偷窃他）', (t) => ['a', t.hear('b', announce('steal', 'a'))], ['mercy', 'silence', 'steal>b']],
+    ['预告外援，自己仍作数地声称过公爵', (t) => (t.taxed('a'), ['a', t.hear('b', announce('foreignAid'))]), ['claim:duke', 'silence', 'sure']],
+    ['预告征税，预告者被抓过', (t) => (bCaught(t), ['c', t.hear('b', announce('tax'))]), ['doubt', 'silence', 'sure']],
+    [
+      '预告征税，声称矛盾（仍作数的声称比暗牌多）',
+      (t) => {
+        t.income('a');
+        t.taxed('b');
+        t.income('c', 'a');
+        t.did(chooseAction(t.g, 'b', 'steal', 'a'));
+        t.passAll('b');
+        t.did(passBlock(t.g, 'a'));
+        t.coup('c', 'b', 'assassin');
+        return ['a', t.hear('b', announce('tax'))];
+      },
+      ['doubt', 'silence', 'sure'],
+    ],
+    ['预告征税，自己也仍作数地声称着公爵', (t) => (t.taxed('a'), ['a', t.hear('b', announce('tax'))]), ['claim:duke', 'doubt', 'silence']],
+    ['预告针对别人，预告者金币不够付', (t) => ['c', t.hear('b', announce('coup', 'a'))], ['silence', 'sure']],
+    [
+      '听到手下留情，自己刚预告了针对他的行动（再预告一遍）',
+      (t) => ((t.seat('a').coins = 7), t.hear('a', announce('coup', 'b')), ['a', t.hear('b', phrase('mercy'))]),
+      ['coup>b', 'silence', 'sure'],
+    ],
+    ['听到手下留情，自己刚发起了针对他的行动（再预告一遍）', (t) => (t.did(chooseAction(t.g, 'a', 'steal', 'b')), ['a', t.hear('b', phrase('mercy'))]), ['silence', 'steal>b', 'sure']],
+    [
+      '听到手下留情，自己刚发起了针对他的行动，再预告一遍付不起',
+      (t) => ((t.seat('a').coins = 3), t.did(chooseAction(t.g, 'a', 'assassinate', 'b')), ['a', t.hear('b', phrase('mercy'))]),
+      ['silence', 'sure'],
+    ],
+    [
+      '听到好险，自己的暗杀刚被阻挡（反预告偷窃他）',
+      (t) => {
+        t.seat('a').coins = 3;
+        t.did(chooseAction(t.g, 'a', 'assassinate', 'c'));
+        t.passAll('a');
+        t.did(block(t.g, 'c', 'contessa'));
+        t.passAll('c');
+        return ['a', t.hear('c', phrase('close'))];
+      },
+      ['respect', 'silence', 'steal>c'],
+    ],
+    [
+      '听到好险，自己的暗杀刚被抓到诈唬',
+      (t) => {
+        t.seat('a').coins = 3;
+        t.did(chooseAction(t.g, 'a', 'assassinate', 'b'));
+        t.did(challenge(t.g, 'b'));
+        t.did(revealShowdownCard(t.g, 'a', t.seat('a').hand.find((c) => c.role === 'duke')!.id));
+        return ['a', t.hear('b', phrase('close'))];
+      },
+      ['assassinate>b', 'respect', 'silence'], // 诈唬被抓，暗杀的钱没付出去
+    ],
+  ])('%s', (_, setup, expected) => {
+    const t = table();
+    const [me, to] = setup(t);
+    const options = t.options(me, to);
+    expect(saids(options)).toEqual(expected);
+    for (const [, weight] of options) expect(weight).toBeGreaterThan(0);
+  });
+
+  it.each<[string, (t: Table) => [me: string, to: Heard]]>([
+    ['预告收入', (t) => ['b', t.hear('a', announce('income'))]],
+    ['预告交换', (t) => (t.taxed('a'), ['a', t.hear('b', announce('exchange'))])],
+    ['预告针对别人，金币够付', (t) => ((t.seat('b').coins = 7), ['c', t.hear('b', announce('coup', 'a'))])],
+    ['预告偷窃别人（偷窃不花钱）', (t) => ['c', t.hear('b', announce('steal', 'a'))]],
+    ['预告征税，没有前情', (t) => ['c', t.hear('b', announce('tax'))]],
+    ['预告外援，自己没声称过公爵', (t) => ['c', t.hear('b', announce('foreignAid'))]],
+    ['手下留情，自己刚针对的是别人', (t) => (t.did(chooseAction(t.g, 'a', 'steal', 'c')), ['a', t.hear('b', phrase('mercy'))])],
+    [
+      '手下留情，自己的预告已是好一会儿之前',
+      (t) => {
+        t.seat('a').coins = 7;
+        t.hear('a', announce('coup', 'b'));
+        for (let i = 0; i < 6; i += 1) t.hear('c', phrase('sure'));
+        return ['a', t.hear('b', phrase('mercy'))];
+      },
+    ],
+    ['好险，自己的偷窃得手了', (t) => (t.did(chooseAction(t.g, 'a', 'steal', 'b')), t.passAll('a'), t.did(passBlock(t.g, 'b')), ['a', t.hear('b', phrase('close'))])],
+    [
+      '好险，阻挡被抓到诈唬、自己的偷窃照样得手',
+      (t) => {
+        t.did(chooseAction(t.g, 'a', 'steal', 'b'));
+        t.passAll('a');
+        t.did(block(t.g, 'b', 'captain'));
+        t.did(challenge(t.g, 'a'));
+        t.did(revealShowdownCard(t.g, 'b', t.seat('b').hand.find((c) => c.role === 'duke')!.id));
+        return ['a', t.hear('b', phrase('close'))];
+      },
+    ],
+    ['好险，最近一次行动不是自己的', (t) => (t.income('a'), t.did(chooseAction(t.g, 'b', 'steal', 'c')), t.passAll('b'), t.did(block(t.g, 'c', 'captain')), t.passAll('c'), ['a', t.hear('c', phrase('close'))])],
+    ['手下留情，牌局已结束', (t) => (t.coup('a', 'b', 'duke'), t.did(forfeit(t.g, 'c')), t.did(forfeit(t.g, 'b')), ['a', t.hear('b', phrase('mercy'))])],
+  ])('表外的组合不接话：%s', (_, setup) => {
+    const t = table();
+    const [me, to] = setup(t);
+    expect(t.options(me, to)).toEqual([]);
+  });
+
+  it('预告没兑现的记忆：同一人上次针对自己的预告没兑现，我信你个鬼的权重升高，随他的回合淡化', () => {
+    const doubtOf = (options: Options) => options.find(([r]) => said(r) === 'doubt')?.[1] ?? 0;
+    // b 预告偷窃 a，然后 kept 时真的偷，否则收入；之后每轮 b 又收入 extra 次，再预告一遍
+    const after = (kept: boolean, extra: number) => {
+      const t = table();
+      t.income('a');
+      t.hear('b', announce('steal', 'a'));
+      if (kept) t.did(chooseAction(t.g, 'b', 'steal', 'a')), t.passAll('b'), t.did(passBlock(t.g, 'a'));
+      else t.income('b');
+      for (let i = 0; i < extra; i += 1) t.income('c', 'a', 'b');
+      t.income('c', 'a');
+      return doubtOf(t.options('a', t.hear('b', announce('steal', 'a'))));
+    };
+    expect(after(true, 0)).toBe(0);
+    expect(after(false, 0)).toBeGreaterThan(0);
+    expect(after(false, 1)).toBeGreaterThan(0);
+    expect(after(false, 1)).toBeLessThan(after(false, 0));
+    expect(after(false, 2)).toBe(0);
+  });
+
+  it('改暗牌不改变接话的选择和概率（性格不是接话的输入）', () => {
+    const flow = (t: Table) => {
+      t.taxed('a');
+      t.hear('b', announce('steal', 'a'));
+      t.income('b', 'c');
+      t.seat('b').coins = 7;
+      return [t.options('a', t.hear('b', announce('coup', 'a'))), t.options('c', t.hear('b', announce('tax'))), t.options('a', t.hear('c', announce('foreignAid')))];
+    };
+    const swapped: Record<string, Role[]> = { a: ['ambassador', 'contessa'], b: ['captain', 'captain'], c: ['assassin', 'ambassador'] };
+    expect(flow(table(swapped))).toEqual(flow(table()));
+  });
+
+  it('对方金币不够付预告的行动时，候选是怀疑类的短语，不出现手下留情', () => {
+    for (const action of ['coup', 'assassinate'] as const) {
+      const t = table();
+      const options = t.options('a', t.hear('b', announce(action, 'a')));
+      expect(saids(options).filter((l) => l !== 'silence').every((l) => l === 'sure' || l === 'doubt')).toBe(true);
+    }
+  });
+});
+
 function makeRoom(options?: RoomOptions) {
   const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
   const events = { onBroadcast: vi.fn(), onEmpty: vi.fn(), onReaction: vi.fn(), onShowdownFocus: vi.fn() };
@@ -304,6 +475,21 @@ describe('Room 电脑接话', () => {
       expect(lines(start)).toEqual([]);
       vi.advanceTimersByTime(2_000);
       expect(lines(start)).toEqual([{ by: c1, line: 'sure', ms: at }]);
+    }
+  });
+
+  it('听到手下留情，刚偷窃他的电脑再预告一遍；房里的真人全被淘汰时不预告', () => {
+    for (const spectating of [false, true]) {
+      const { room, people: [alice], cs: [c1, c2], lines } = seated(['Alice'], 2);
+      room.apply((g) => (spectating ? forfeit(g, alice.id) : chooseAction(g, alice.id, 'income'))); // 轮到 c1
+      const start = Date.now();
+      room.apply((g) => chooseAction(g, c1, 'steal', c2)); // c2 被偷窃、没声称过队长或大使：先说手下留情
+      vi.advanceTimersByTime(5_000);
+      expect(lines(start).map(({ by, line }) => [by, line])).toEqual([
+        [c1, 'honest'], // 首次声称队长
+        [c2, 'mercy'],
+        ...(spectating ? [[c1, 'sure']] : [[c1, 'steal'], [c2, 'mercy']]), // 又听到预告偷窃自己：再回一句，已是第三句
+      ]);
     }
   });
 
@@ -370,6 +556,47 @@ describe('Room 电脑接话', () => {
     for (let i = 1; i < said.length; i += 1) expect(said[i].ms - said[i - 1].ms).toBeGreaterThanOrEqual(1_500);
     expect(said.every((s) => s.by === c1)).toBe(true);
     expect(most).toBeLessThanOrEqual(4); // 回合时限 + 至多 3 条还没发出的接话
+  });
+
+  it('同一局面和行动种子下，无论听到什么预告、手下留情、好险，电脑的行动相同', () => {
+    const play = (talk: boolean) => {
+      vi.spyOn(Math, 'random').mockImplementation(lehmer(11));
+      const { room, events, people: [alice], cs: [c1, c2] } = seated(['Alice'], 2, { computerRandom: lehmer(13), computerDelayMs: () => 1_000 });
+      const TALK: Reaction[] = [announce('coup', c1), announce('assassinate', c2), announce('steal', c1), announce('tax'), announce('foreignAid'), phrase('mercy'), phrase('close')];
+      // Alice 只收入（金币到 10 就政变第一个对手），从不质疑、阻挡，对质和失去影响力时选第一张
+      for (let step = 0; step < 4_000 && room.game!.phase !== 'gameOver'; step += 1) {
+        if (talk) {
+          try {
+            room.react(alice.id, 'sock0', TALK[step % TALK.length]);
+          } catch {
+            // 预告的目标已不在
+          }
+        }
+        const g = room.game!;
+        const first = g.players.find((p) => p.id === alice.id)!.hand[0]?.id;
+        const turn = g.players.find((p) => p.id === alice.id)!.coins >= 10 ? { type: 'chooseAction', action: 'coup', targetId: g.players.find((p) => p.alive && p.id !== alice.id)!.id } : { type: 'chooseAction', action: 'income' };
+        for (const intent of [turn, { type: 'passChallenge' }, { type: 'passBlock' }, { type: 'resolveLoss', cardId: first }, { type: 'revealShowdownCard', cardId: first }]) {
+          try {
+            room.dispatch(alice.id, 'sock0', intent);
+          } catch {
+            // 此刻不该 Alice 这么做
+          }
+        }
+        vi.advanceTimersByTime(250);
+      }
+      expect(room.game!.phase).toBe('gameOver');
+      const lines = events.onReaction.mock.calls.filter(([, r]) => r.playerId !== alice.id).map(([, r]) => said(r.reaction));
+      const seats = room.game!.players.map((p) => p.id);
+      const moves = JSON.stringify(events.onBroadcast.mock.calls.flatMap(([, evs]) => evs)).replace(/"[0-9a-f]{16}"/g, (id) => `"seat${seats.indexOf(JSON.parse(id))}"`);
+      vi.restoreAllMocks();
+      return { moves, lines };
+    };
+    const quiet = play(false);
+    const noisy = play(true);
+    expect(noisy.lines).not.toEqual(quiet.lines); // 电脑听到了、也接了话
+    expect(noisy.lines.some((l) => l === 'mercy' || l.includes('>'))).toBe(true);
+    expect(quiet.moves.match(/actionChosen/g)!.length).toBeGreaterThan(10);
+    expect(noisy.moves).toEqual(quiet.moves);
   });
 
   it('同一局面和行动种子下，无论听到什么表态，电脑的行动相同', () => {
