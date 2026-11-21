@@ -1,8 +1,14 @@
-// ui-check 场景：电脑玩家开口（#72）。真人独自建房、加 1 个电脑、开局；真人只收入，不阻挡，电脑作出声称时先不回应。
+// ui-check 场景：电脑玩家开口（#72）。真人独自建房、加 1 个电脑、开局；真人先手拿外援，电脑用真有的公爵阻挡，真人先不回应。
 // 断言：电脑作出声称、问询窗口还开着时（真人这边有「不质疑」可点），电脑座位的铭牌亮起它的表态。
-// 服务端以 SPEECH_RANDOM=0 启动：电脑每次作出声称都开口，声称后 0.5 秒说。电脑自己选行动，要等它某一回合作出声称。
+// 用阻挡而不等电脑自己回合的声称：轮到它时 SPEECH_RANDOM=0 总先预告，声称后的那句落在 1.5 秒限流里被丢掉（#76）。
+// 服务端以 SPEECH_RANDOM=0 启动（声称后 0.5 秒说）；发牌、先手固定，COMPUTER_RANDOM=0.999 让电脑有公爵就阻挡、不藏牌。
 // 用法：pnpm ui-check scripts/ui-check-speech.mjs [截图目录]；英文加 LOCALE=en
-export const serverEnv = { SPEECH_RANDOM: '0' };
+export const serverEnv = {
+  SPEECH_RANDOM: '0',
+  STARTING_PLAYER_RANDOM: '0',
+  HANDS: JSON.stringify([['captain', 'contessa'], ['duke', 'duke']]),
+  COMPUTER_RANDOM: '0.999',
+};
 
 export default async function speechScenario(ui) {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -21,7 +27,7 @@ export default async function speechScenario(ui) {
   await ui.evaluate(`document.querySelector('.showcase-overlay').click()`);
   await ui.waitFor('.seat.opponent .name');
 
-  // 电脑每回合 2～6 秒出手，多数回合会声称角色：给 60 s
+  // 电脑在阻挡窗口里最多 5 秒出手：给 60 s
   const seen = `(() => {
     const plate = document.querySelector('.seat.opponent .nameplate.speaking');
     const open = [...document.querySelectorAll('.controls-body button:not(:disabled)')].some((b) => /^(Do not challenge|不质疑)$/.test(b.textContent.trim()));
@@ -31,7 +37,7 @@ export default async function speechScenario(ui) {
   for (let i = 0; i < 600 && !said; i += 1) {
     said = await ui.evaluate(seen);
     if (said) break;
-    await clickIf('^(Income|收入)$');
+    await clickIf('^(Foreign Aid|外援)$');
     await clickIf('^(Do not block|不阻挡)$');
     await sleep(100);
   }

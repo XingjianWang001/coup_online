@@ -221,11 +221,12 @@ describe('表 5：结果公开后', () => {
   it('信息边界：只改暗牌，候选和概率都不变', () => {
     const t = table();
     taxChallenged(t, 'duke');
-    const before = IDS.map((id) => afterResult(publicState(t.g), t.events, t.batch, t.heard, id));
+    const look = () => IDS.map((id) => afterResult(publicState(t.g), t.events, t.batch, t.heard, id)).map(({ options, delayMs }) => ({ options, delayMs }));
+    const before = look();
     t.seat('b').hand.forEach((c) => (c.role = 'ambassador'));
     t.seat('c').hand.forEach((c) => (c.role = 'assassin'));
     t.seat('a').hand.forEach((c) => (c.role = 'captain'));
-    expect(IDS.map((id) => afterResult(publicState(t.g), t.events, t.batch, t.heard, id))).toEqual(before);
+    expect(look()).toEqual(before);
   });
 
   it('弃权（离开、断线）不是结果：弃权者和别人都没有候选', () => {

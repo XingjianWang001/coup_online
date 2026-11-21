@@ -16,13 +16,22 @@ const __dirname = fileURLToPath(new URL('.', import.meta.url));
 // 前端构建产物路径（相对 packages/server）
 const CLIENT_DIST = join(__dirname, '../../client/dist');
 
-// 浏览器验证用（scripts/ui-check.mjs）：SPEECH_RANDOM=0 让电脑表态的随机源恒为这个数，每个能开口的时刻都开口、按最短延迟说
+// 以下环境变量只供测试：由 scripts/ui-check.mjs 按场景的 serverEnv 设置，生产环境从不设置。
+// SPEECH_RANDOM=0 让电脑表态的随机源恒为这个数，每个能开口的时刻都开口、按最短延迟说
 const SPEECH_RANDOM = process.env.SPEECH_RANDOM === undefined ? undefined : Number(process.env.SPEECH_RANDOM);
 // COMPUTER_DELAY_MS=300 让电脑每一步都只等这么久（替换默认区间和旁观加速），要打完一整局的场景放得进 ui-check 的时限
 const COMPUTER_DELAY_MS = process.env.COMPUTER_DELAY_MS === undefined ? undefined : Number(process.env.COMPUTER_DELAY_MS);
+// STARTING_PLAYER_RANDOM=0 让最先入座的人先手；HANDS 按入座顺序发牌（JSON，如 [["duke","duke"],["contessa","captain"]]）
+const STARTING_PLAYER_RANDOM = process.env.STARTING_PLAYER_RANDOM === undefined ? undefined : Number(process.env.STARTING_PLAYER_RANDOM);
+const HANDS = process.env.HANDS === undefined ? undefined : (JSON.parse(process.env.HANDS) as RoomOptions['hands']);
+// COMPUTER_RANDOM=0.999 让电脑行动的随机源恒为这个数：几乎从不质疑，有真牌就阻挡
+const COMPUTER_RANDOM = process.env.COMPUTER_RANDOM === undefined ? undefined : Number(process.env.COMPUTER_RANDOM);
 const roomOptions: RoomOptions = {
   ...(SPEECH_RANDOM !== undefined && { speechRandom: () => SPEECH_RANDOM }),
   ...(COMPUTER_DELAY_MS !== undefined && { computerDelayMs: () => COMPUTER_DELAY_MS }),
+  ...(STARTING_PLAYER_RANDOM !== undefined && { startingPlayerRandom: () => STARTING_PLAYER_RANDOM }),
+  ...(HANDS && { hands: HANDS }),
+  ...(COMPUTER_RANDOM !== undefined && { computerRandom: () => COMPUTER_RANDOM }),
 };
 
 const repo = new InMemoryGameRepository();

@@ -176,6 +176,19 @@ describe('表 7 接话：短语和口头声称', () => {
     for (const [, weight] of options) expect(weight).toBeGreaterThan(0);
   });
 
+  it('牌局结束后只有佩服接佩服：怀疑不接，刚赢下对质也不说我是老实人', () => {
+    const doubted = table();
+    doubted.taxed('a'); // a 的声称已经生效
+    ['b', 'c'].forEach((id) => doubted.did(forfeit(doubted.g, id)));
+    expect(doubted.g.phase).toBe('gameOver');
+    expect(doubted.options('a', doubted.hear('b', phrase('sure')))).toEqual([]);
+    const won = table();
+    won.challengedTax('a', 'b', 'duke');
+    ['b', 'c'].forEach((id) => won.did(forfeit(won.g, id)));
+    expect(won.g.phase).toBe('gameOver');
+    expect(labels(won.options('a', won.hear('b', phrase('respect'))))).toEqual(['respect', 'silence']);
+  });
+
   it('多沉默与开口概率高：首次声称比延续更少开口；3 张明牌时比其他更想开口', () => {
     const first = table();
     first.tax('a');

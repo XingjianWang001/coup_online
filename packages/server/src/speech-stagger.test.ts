@@ -66,9 +66,9 @@ describe('Room 电脑表态错峰', () => {
     vi.advanceTimersByTime(600);
     allow(c2); // 1.1 秒窗口结束
     expect(room.game!.phase).toBe('choosingAction');
-    expect(vi.getTimerCount()).toBe(1); // 只剩 Alice 回合的时限
     vi.advanceTimersByTime(2_000);
     expect(sentAt).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(1); // 只剩 Alice 回合的时限：带 current 的试探不随换阶段清除，到点自己作废
   });
 
   it('顺延期间真人都离开、牌局作废，顺延的表态取消，只剩空房回收的计时器', () => {

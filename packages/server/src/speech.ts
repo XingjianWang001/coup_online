@@ -48,7 +48,9 @@ export type Options = (readonly [Reaction | null, number])[];
 export interface Moment {
   options: Options;
   delayMs: readonly [number, number]; // 从此刻起多久之后说
-  current?: (state: PublicState) => boolean; // 到点发送时语境还在不在；不给的只靠换阶段、换行动者时的清除
+  // 到点发送时语境还在不在。给了的换阶段、换行动者时 Room 不清它，全靠它判断，所以它自己要写全「还算不算数」；
+  // 不给的只靠换阶段、换行动者时的清除
+  current?: (state: PublicState) => boolean;
   depth?: number; // 接话的层数（表 7）：回应第 n 层的这句是第 n + 1 层；不是接话的是 0
 }
 const NOTHING = (delayMs: readonly [number, number]): Moment => ({ options: [], delayMs });
@@ -94,7 +96,7 @@ export interface Said {
 }
 
 // 顺延后比原定时刻晚过这么久就取消：说的是眼前的事，晚到就过时了，也不排长队。
-// 换阶段或换行动者时 clearTimer 已经把这期间的表态清掉，这里兜住同一阶段里排得太久的（例如牌局结束后几个电脑都要说）
+// 只管不带 current 的表态（Room 把带 current 的截止时刻记作 Infinity）：带的由 current 判断还算不算数，例如牌局结束后几个电脑都要说
 const MAX_LATE_MS = 2_000;
 
 // 到点时决定这条表态现在说（0）、再等多久，还是取消（null）：离全桌上一条电脑表态（lastAt）不足间隔就顺延。dueAt 是原定时刻
@@ -123,16 +125,24 @@ export function temper(moment: Moment, me: string, said: readonly Said[], now: n
   return { ...moment, options };
 }
 
-// 公开前情复用电脑的局内记忆（computer.ts 的 recall）：不给它自己放回牌堆的牌，它得出的就只依赖公开事件
-const memoryOf = (state: PublicState, events: readonly GameEvent[], me: string) => recall(events, me, state.players.map((p) => p.id), 0, []);
+// 公开前情复用电脑的局内记忆（computer.ts 的 recall）：不给它自己放回牌堆的牌，它得出的就只依赖公开事件。
+// 「谁最近打过自己」随回合淡化，只在发言里：和表 4 的「第二次被同一人针对」一样，他之后自己的回合超出 AGAIN_FADE 就不算。
+// ponytail: 用到它的都是有无两档的条件，淡化只取了截止，不按回合减权重
+function memoryOf(state: PublicState, events: readonly GameEvent[], me: string) {
+  const memory = recall(events, me, state.players.map((p) => p.id), 0, []);
+  const { attacker } = memory;
+  return { ...memory, attacker: attacker && aimedAgo(events, events.length, attacker, me) ? attacker : undefined };
+}
 const shownCount = (state: PublicState, role: Role) => state.players.reduce((n, p) => n + p.revealed.filter((r) => r === role).length, 0);
-// 最近一次声称（行动或阻挡）的事件下标，没有时是 -1
-function lastClaimAt(events: readonly GameEvent[]): number {
-  let at = events.length - 1;
-  const claims = (e: GameEvent) => e.type === 'blocked' || (e.type === 'actionChosen' && !!e.claimedRole);
-  while (at >= 0 && !claims(events[at])) at -= 1;
+// end 之前最后一条这类事件（或符合条件的事件）的下标，没有时是 -1（服务器的 TS lib 里没有 findLastIndex）
+function lastIndex(events: readonly GameEvent[], match: GameEvent['type'] | ((e: GameEvent) => boolean), end = events.length): number {
+  const matches = typeof match === 'string' ? (e: GameEvent) => e.type === match : match;
+  let at = end - 1;
+  while (at >= 0 && !matches(events[at])) at -= 1;
   return at;
 }
+// 声称：行动声称角色，或阻挡
+const isClaim = (e: GameEvent) => e.type === 'blocked' || (e.type === 'actionChosen' && !!e.claimedRole);
 
 // 任何行动预告都要看起来说得通：自己付得起（金币到 10 只能政变），针对性行动的目标在场、不是自己（偷窃还得对方有金币可偷），
 // 非针对性行动不带目标。只看公开信息
@@ -233,7 +243,7 @@ export function afterOwnClaim(state: PublicState, events: readonly GameEvent[], 
   if (state.phase !== 'awaitingChallenge' || !pending || (blocking ? pending.blockById : pending.actorId) !== me) return NOTHING(AFTER_OWN_CLAIM_MS);
   const role = blocking ? pending.blockRole! : pending.claimedRole!;
   // 这次声称的事件是最后一条 actionChosen 或 blocked：在它之前就作数的才算延续
-  const before = memoryOf(state, events.slice(0, lastClaimAt(events)), me);
+  const before = memoryOf(state, events.slice(0, lastIndex(events, isClaim)), me);
   const now = memoryOf(state, events, me);
   const situation: OwnClaim = {
     continuing: before.standing.get(me)?.has(role) ?? false,
@@ -282,14 +292,22 @@ export function afterGame(state: PublicState, events: readonly GameEvent[], me: 
     bluffShown: shown.length > 0 && claims.length > 0 && !shown.includes(claims.at(-1)!),
     honestShown: shown.some((r) => claims.includes(r)),
   };
-  return { options: toOptions(merge(AFTER_GAME, situation), undefined), delayMs: AT_ONCE };
+  // 再来一局之前都算数：几个电脑同时醒来时顺延得再晚也陆续说完（「可能多人陆续说」）
+  return { options: toOptions(merge(AFTER_GAME, situation), undefined), delayMs: AT_ONCE, current: (now) => now.phase === 'gameOver' };
 }
 
+// 从此刻起还没换过回合。events 在 Room 里是本局只增不减的同一个数组，到点时已含这期间的事
+const thisTurn = (events: readonly GameEvent[]) => {
+  const seen = events.length;
+  return () => !events.slice(seen).some((e) => e.type === 'turnChanged');
+};
+
 // 问询窗口前段、自己还没回应时说的话（表 3 试探；表 4 里偷窃、暗杀的目标也这样）：发送时自己已回应、有人质疑或窗口已关就作废。
-// 自己放弃不换阶段，Room 换阶段时的清除管不到，所以发送时再看一眼
-const whileUndecided = (state: PublicState, me: string) => {
+// 窗口关了又在下一回合开出同一种窗口也不算
+const whileUndecided = (state: PublicState, events: readonly GameEvent[], me: string) => {
   const subject = state.challengeSubject;
-  return (now: PublicState) => now.phase === 'awaitingChallenge' && now.challengeSubject === subject && !now.passed.includes(me);
+  const sameTurn = thisTurn(events);
+  return (now: PublicState) => now.phase === 'awaitingChallenge' && now.challengeSubject === subject && !now.passed.includes(me) && sameTurn();
 };
 
 // ── 表 3：别人作出声称（含阻挡），自己有资格质疑且尚未回应（试探）。冲着自己来的行动另见表 4 ──
@@ -335,7 +353,7 @@ export function probe(state: PublicState, events: readonly GameEvent[], me: stri
     alsoMine: memory.standing.get(me)?.has(role) ?? false,
     blocking: blocking ? (pending.actorId === me ? 'mine' : 'other') : undefined,
   };
-  return { options: toOptions(merge(PROBE, situation), situation.alsoMine ? role : undefined), delayMs: PROBE_MS, current: whileUndecided(state, me) };
+  return { options: toOptions(merge(PROBE, situation), situation.alsoMine ? role : undefined), delayMs: PROBE_MS, current: whileUndecided(state, events, me) };
 }
 
 // 反预告：以 targetId 为目标的行动预告，在政变、暗杀、偷窃里选头一个说得通的（自己付得起，偷窃还得对方有金币）；
@@ -356,6 +374,16 @@ interface Targeted {
 // 第二次被同一人针对的加权随回合淡化：他上一回合刚针对过自己时全额，再早一回合的按指数减弱，更早的不算。
 // 指数小于 1 只让倍数向 1 靠拢，不会压低别的行已给的权重
 const AGAIN_FADE = [1, 0.5];
+// 往回数 actorId 自己的回合（1 是 end 之前他的最近一个回合），找他最近一次针对 me 的行动；超出淡化的回合数就不算（0）
+function aimedAgo(events: readonly GameEvent[], end: number, actorId: string, me: string): number {
+  for (let i = end - 1, n = 1; i >= 0 && n <= AGAIN_FADE.length; i -= 1) {
+    const e = events[i];
+    if (e.type !== 'actionChosen' || e.actorId !== actorId) continue;
+    if (e.targetId === me) return n;
+    n += 1;
+  }
+  return 0;
+}
 const again = (turns: number, fade: number): Row<Targeted> => ({
   when: (s) => s.again === turns,
   say: { counter: HIGH ** fade, doubt: SECOND ** fade, mercy: THIRD ** fade },
@@ -386,28 +414,17 @@ export function targeted(state: PublicState, events: readonly GameEvent[], me: s
     ? state.phase === 'choosingLoss' && state.lossPlayerId === me
     : (action === 'steal' || action === 'assassinate') && state.phase === 'awaitingChallenge' && state.challengeSubject === 'action' && !state.passed.includes(me);
   if (!open) return NOTHING(TARGETED_MS);
-  // 往回数行动者自己的回合，找他上一次针对自己；超出淡化的回合数就不算
-  let turns = 0;
-  for (let i = at - 1, n = 1; i >= 0 && n <= AGAIN_FADE.length; i -= 1) {
-    const e = events[i];
-    if (e.type !== 'actionChosen' || e.actorId !== actorId) continue;
-    if (e.targetId === me) {
-      turns = n;
-      break;
-    }
-    n += 1;
-  }
   const memory = memoryOf(state, events, me);
   const blocker = BLOCK_ROLES[action].find((r) => memory.standing.get(me)?.has(r));
   const situation: Targeted = {
     action,
     blocker,
     lastCard: state.players.find((p) => p.id === me)!.handCount === 1,
-    again: turns,
+    again: aimedAgo(events, at, actorId, me),
     actorCaught: (memory.caught.get(actorId) ?? 0) > 0,
   };
   const options = toOptions(merge(TARGETED_AT_ME, situation), blocker, { counter: counterAnnouncement(state, me, actorId) });
-  return { options, delayMs: TARGETED_MS, current: coup ? undefined : whileUndecided(state, me) };
+  return { options, delayMs: TARGETED_MS, current: coup ? undefined : whileUndecided(state, events, me) };
 }
 
 // ── 表 5：结果公开后（#82）。一次结算里的质疑结果、失去影响力、淘汰合并成一次机会 ──
@@ -460,7 +477,7 @@ export function afterResult(state: PublicState, events: readonly GameEvent[], ba
   const resolved = r?.type === 'challengeResolved' ? r : undefined;
   const resolvedAt = resolved ? events.indexOf(resolved) : start;
   const chosen = events[lastIndex(events, 'actionChosen', resolvedAt)] as Extract<GameEvent, { type: 'actionChosen' }> | undefined;
-  const claimAt = lastClaimAt(events.slice(0, resolvedAt));
+  const claimAt = lastIndex(events, isClaim, resolvedAt);
   const blockAt = lastIndex(events, 'blocked', resolvedAt);
   const onBlock = blockAt >= 0 && blockAt === claimAt && blockAt > lastIndex(events, 'actionChosen', resolvedAt);
   const blockerId = onBlock ? (events[blockAt] as Extract<GameEvent, { type: 'blocked' }>).blockerId : undefined;
@@ -515,8 +532,16 @@ export function afterResult(state: PublicState, events: readonly GameEvent[], ba
   };
   if (!AFTER_RESULT.some((row) => row.when(situation))) return NOTHING(AFTER_RESULT_MS);
   const counter = attacker && !situation.out ? counterAnnouncement(state, me, attacker) : [];
-  return { options: toOptions(merge(AFTER_RESULT, situation), undefined, { counter }), delayMs: AFTER_RESULT_MS };
+  // 说到下一次结算为止：选丢哪张（这次结算里待丢的）、下一位行动都不算，下一次行动之后的对质结果、失去影响力、阻挡才算；牌局结束归表 8
+  const seen = events.length;
+  const current = (now: PublicState) => {
+    const later = events.slice(seen);
+    const next = later.findIndex((e) => e.type === 'actionChosen');
+    return now.phase !== 'gameOver' && (next < 0 || !later.slice(next).some((e) => NEXT_RESULT.includes(e.type)));
+  };
+  return { options: toOptions(merge(AFTER_RESULT, situation), undefined, { counter }), delayMs: AFTER_RESULT_MS, current };
 }
+const NEXT_RESULT: readonly GameEvent['type'][] = ['challengeResolved', 'influenceLost', 'blocked'];
 
 // ── 表 6：回合外的局势（没轮到自己时，只读公开信息：谁最近打过自己、各人的金币和影响力）──
 // 预告不兑现也无妨，行动策略不读它。每种局势在刚出现时给一次机会：held 是上次看时已成立的局势，
@@ -641,18 +666,17 @@ const MAX_DEPTH = 2;
 const JUST_SAID_MS = 6_000;
 
 // 听到 to 之后 me 回什么。heard 是本局听到的全部表态（含 to，按时间先后）。
-// 返回的 current 到点时用同一份 events、heard 再判断一次：Room 里两者都是本局只增不减的同一个数组，到点时已含这期间的事
+// 返回的 current 到点时用同一份 events、heard 再判断一次：Room 里两者都是本局只增不减的同一个数组，到点时已含这期间的事。
+// 在问询窗口里听到的，窗口关了就作废；其余的（如轮到谁时的行动预告）说到这一回合结束，预告的行动执行了也还算
 export function replyTo(state: PublicState, events: readonly GameEvent[], heard: readonly Heard[], to: Heard, me: string): Moment {
-  const current = (now: PublicState) => replyOptions(now, events, heard, to, me).length > 0;
+  const subject = state.phase === 'awaitingChallenge' ? state.challengeSubject : null;
+  const sameTurn = thisTurn(events);
+  const inWindow = (now: PublicState) => !subject || (now.phase === 'awaitingChallenge' && now.challengeSubject === subject);
+  const current = (now: PublicState) => sameTurn() && inWindow(now) && replyOptions(now, events, heard, to, me).length > 0;
   return { options: replyOptions(state, events, heard, to, me), delayMs: REPLY_MS, depth: to.depth + 1, current };
 }
 
 type Claim = Extract<GameEvent, { type: 'actionChosen' | 'blocked' }>;
-function lastIndex(events: readonly GameEvent[], type: GameEvent['type'], end = events.length): number {
-  let at = end - 1;
-  while (at >= 0 && events[at].type !== type) at -= 1;
-  return at;
-}
 
 function replyOptions(state: PublicState, events: readonly GameEvent[], heard: readonly Heard[], to: Heard, me: string): Options {
   const over = state.phase === 'gameOver';
@@ -674,7 +698,8 @@ function replyOptions(state: PublicState, events: readonly GameEvent[], heard: r
   if (r.kind === 'phrase' && (r.phrase === 'mercy' || r.phrase === 'close') && !over) kind = r.phrase;
   // 替声称表态只有有资格质疑且尚未回应的接（在场、不是声称者就有资格）
   if (kind === 'backing' && state.passed.includes(me)) return [];
-  if (!kind) return [];
+  // 牌局结束后只有佩服接佩服（下面 won 也只在牌局中算）
+  if (!kind || (over && kind !== 'respect')) return [];
 
   const memory = memoryOf(state, events, me);
   // 说的是哪个角色：当前声称者替声称表态时是窗口里的角色，口头声称是它说的角色；预告征税、外援是公爵，
@@ -686,7 +711,7 @@ function replyOptions(state: PublicState, events: readonly GameEvent[], heard: r
     : kind === 'tax' || kind === 'foreignAid' ? 'duke'
     : kind === 'aimed' ? BLOCK_ROLES[announced!].find((x) => memory.standing.get(me)?.has(x))
     : undefined;
-  const claimAt = lastClaimAt(events);
+  const claimAt = lastIndex(events, isClaim);
   const claim = events[claimAt] as Claim | undefined;
   // 自己的声称已经生效：最近一次声称是自己的，没人质疑，问询窗口已过
   const settledRole =
@@ -717,7 +742,7 @@ function replyOptions(state: PublicState, events: readonly GameEvent[], heard: r
     contradicts: !!role && contradicts(memory, state.players.find((p) => p.id === to.playerId)!, role),
     alsoMine: !!role && (memory.standing.get(me)?.has(role) ?? false),
     allShown: !!role && shownCount(state, role) === 3,
-    won: resolved?.truth && resolved.claimantId === me ? 'claimant' : resolved && !resolved.truth && challenger === me ? 'challenger' : undefined,
+    won: over ? undefined : resolved?.truth && resolved.claimantId === me ? 'claimant' : resolved && !resolved.truth && challenger === me ? 'challenger' : undefined,
     over,
     action: announced,
     affordable: !!announced && state.players.find((p) => p.id === to.playerId)!.coins >= (COST[announced] ?? 0),

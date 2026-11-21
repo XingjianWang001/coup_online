@@ -2,8 +2,14 @@
 // Bot 只按自己真有的牌声称，Me 每次都质疑 Bot、每次都输，两次后出局但留在房里看；Bot 随后离开，两个电脑打完。
 // 断言：电脑获胜后，获胜者的暗牌在约 3 秒、再隔约 2 秒时逐张翻开；输掉的电脑座位上出现短语。
 // 服务端以 SPEECH_RANDOM=0 启动（电脑每个能开口的时刻都开口、赛后揭晓两张都揭，结束后 1 秒说），COMPUTER_DELAY_MS=300 让电脑快走。
+// 发牌和先手固定（入座顺序 Bot、Ada、Alan、Me）：Bot 有两张公爵、先手，在谁都付不起暗杀之前连征两次税，Me 质疑两次就出局
 // 用法：pnpm ui-check scripts/ui-check-after-game.mjs [截图目录]；英文加 LOCALE=en
-export const serverEnv = { SPEECH_RANDOM: '0', COMPUTER_DELAY_MS: '300' };
+export const serverEnv = {
+  SPEECH_RANDOM: '0',
+  COMPUTER_DELAY_MS: '300',
+  STARTING_PLAYER_RANDOM: '0',
+  HANDS: JSON.stringify([['duke', 'duke'], ['captain', 'ambassador'], ['assassin', 'captain'], ['contessa', 'contessa']]),
+};
 
 export default async function afterGameScenario(ui) {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -64,7 +70,6 @@ export default async function afterGameScenario(ui) {
     await meStep();
     await sleep(150);
   }
-  // Bot 抽到两张女伯爵（没有能声称的行动）或先被电脑打出局时会走到这里：重跑即可
   assert(!meOf(bot.state.pub).alive, `Me 没有出局：Bot 手牌 ${bot.state.hand.map((c) => c.role)}，局面 ${JSON.stringify(bot.state.pub.players.map((p) => [p.name, p.handCount]))}`);
   assert(bot.state.pub.phase !== 'gameOver', `Me 出局时牌局已结束：${bot.state.pub.winnerId}`);
   bot.intent({ type: 'leaveRoom' });
