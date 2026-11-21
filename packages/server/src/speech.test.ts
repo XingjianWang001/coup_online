@@ -10,13 +10,14 @@ import {
   passChallenge,
   publicState,
   resolveLoss,
+  revealPostGameCard,
   revealShowdownCard,
   type GameEvent,
   type GameState,
   type Role,
 } from '@coup/engine';
 import type { Reaction } from '@coup/shared';
-import { afterOwnClaim, merge, offTurn, onOwnTurn, plausible, probe, type Decision, type Options, type Row } from './speech.ts';
+import { afterGame, afterOwnClaim, merge, offTurn, onOwnTurn, plausible, probe, type Decision, type Options, type Row } from './speech.ts';
 
 describe('场景表的合并', () => {
   it('成立的行合并候选：同一条的权重相乘，写了排除的不出现，沉默始终在候选里；不成立的行不算', () => {
@@ -180,6 +181,71 @@ describe('表 2：自己刚作出声称，问询窗口还开着', () => {
     expect(t.options()).toEqual([]);
     t.tax();
     expect(t.options('b')).toEqual([]);
+  });
+});
+
+describe('表 8：牌局结束后', () => {
+  // a 获胜：a 政变 b，b 政变 c，c 政变 b（b 出局），a 政变 c（c 最后出局）。claimed 时 a 先征税一回合，最后声称的是公爵
+  function finished(claimed = false) {
+    const t = table();
+    if (claimed) taxedBefore(t);
+    t.coup('a', 'b', 'duke');
+    t.coup('b', 'c', 'duke');
+    t.coup('c', 'b', 'assassin');
+    t.coup('a', 'c', 'contessa');
+    expect(t.g.winnerId).toBe('a');
+    const reveal = (...slots: number[]) => slots.forEach((slot) => t.did(revealPostGameCard(t.g, 'a', t.seat('a').hand[slot].id)));
+    const setHand = (roles: Role[]) => t.seat('a').hand.forEach((c, i) => (c.role = roles[i]));
+    const options = (me: string) => afterGame(publicState(t.g), t.events, me).options;
+    return { ...t, reveal, setHand, options };
+  }
+  type Finished = ReturnType<typeof finished>;
+
+  // a 的暗牌依次是公爵、队长
+  it.each<[string, (f: Finished) => void, string, string[]]>([
+    ['未获胜，最后一个被淘汰', () => {}, 'c', ['respect', 'silence']],
+    ['未获胜，更早被淘汰', () => {}, 'b', ['respect', 'silence']],
+    ['未获胜，获胜者揭晓的牌不是他最后声称的角色（加最后被淘汰）', (f) => f.reveal(1), 'c', ['doubt', 'respect', 'silence']],
+    ['未获胜，获胜者揭晓的牌不是他最后声称的角色（加更早被淘汰）', (f) => f.reveal(1), 'b', ['doubt', 'respect', 'silence']],
+    ['获胜，揭晓之前', () => {}, 'a', ['respect', 'silence']],
+    ['获胜，揭晓的牌里有自己本局声称过的角色', (f) => f.reveal(0), 'a', ['honest', 'respect', 'silence']],
+    ['获胜，两张都已揭晓，都不是自己最后声称的角色', (f) => (f.setHand(['captain', 'contessa']), f.reveal(0, 1)), 'a', ['dare', 'respect', 'silence']],
+  ])('%s', (_, setup, me, expected) => {
+    const f = finished(true);
+    setup(f);
+    const options = f.options(me);
+    expect(labels(options)).toEqual(expected);
+    for (const [reaction, weight] of options) {
+      expect(weight).toBeGreaterThan(0);
+      expect(reaction === null || reaction.kind === 'phrase').toBe(true); // 只发短语
+    }
+  });
+
+  it('最后一个被淘汰的比更早被淘汰的更想说佩服；获胜者揭晓之前多沉默', () => {
+    const f = finished(true);
+    const respect = (options: Options) => options.find(([r]) => r !== null && label(r) === 'respect')![1];
+    expect(respect(f.options('c'))).toBeGreaterThan(respect(f.options('b')));
+    expect(silenceShare(f.options('c'))).toBeLessThan(silenceShare(f.options('b')));
+    expect(silenceShare(f.options('a'))).toBeGreaterThan(0.5);
+  });
+
+  it('获胜者本局没作过声称：揭晓什么都不算诈唬，也不算老实', () => {
+    const f = finished();
+    f.reveal(0, 1);
+    expect(labels(f.options('c'))).toEqual(['respect', 'silence']);
+    expect(labels(f.options('a'))).toEqual(['silence']);
+  });
+
+  it('只看已公开的揭晓结果：揭晓之前改获胜者的暗牌，各人的候选都不变', () => {
+    const honest = finished(true);
+    const bluffing = finished(true);
+    bluffing.setHand(['contessa', 'contessa']);
+    for (const me of IDS) expect(bluffing.options(me)).toEqual(honest.options(me));
+  });
+
+  it('牌局没结束时没有候选', () => {
+    const t = table();
+    expect(afterGame(publicState(t.g), t.events, 'a').options).toEqual([]);
   });
 });
 
