@@ -64,7 +64,8 @@ export default async function afterGameScenario(ui) {
     await meStep();
     await sleep(150);
   }
-  assert(!meOf(bot.state.pub).alive, '60 s 内 Me 没有出局');
+  // Bot 抽到两张女伯爵（没有能声称的行动）或先被电脑打出局时会走到这里：重跑即可
+  assert(!meOf(bot.state.pub).alive, `Me 没有出局：Bot 手牌 ${bot.state.hand.map((c) => c.role)}，局面 ${JSON.stringify(bot.state.pub.players.map((p) => [p.name, p.handCount]))}`);
   assert(bot.state.pub.phase !== 'gameOver', `Me 出局时牌局已结束：${bot.state.pub.winnerId}`);
   bot.intent({ type: 'leaveRoom' });
   console.log('Me 已出局，Bot 离开，剩两个电脑');
@@ -75,6 +76,7 @@ export default async function afterGameScenario(ui) {
       name: s.querySelector('.name').textContent.trim(),
       computer: !!s.querySelector('.computer-badge'),
       revealed: s.querySelectorAll('.card.post-game-revealed').length,
+      lost: s.querySelectorAll('.card.unavailable').length,
       says: s.querySelector('.nameplate.speaking')?.textContent ?? null,
     }));
     return { seats, over: !![...document.querySelectorAll('button')].find((b) => /^(Play again|再来一局)$/.test(b.textContent.trim())) };
@@ -102,11 +104,13 @@ export default async function afterGameScenario(ui) {
   console.log(JSON.stringify(timeline, null, 1));
   const winner = view.seats.find((s) => s.revealed > 0);
   assert(winner?.computer, `获胜的电脑没有揭晓暗牌：${JSON.stringify(view.seats)}`);
+  // 获胜者只剩一张暗牌时只抽一次、只揭一张
+  const hidden = 2 - winner.lost;
   const firstAt = timeline.find((t) => t.revealed >= 1)?.at;
   const secondAt = timeline.find((t) => t.revealed >= 2)?.at;
-  assert(firstAt !== undefined && secondAt !== undefined, `应逐张揭晓两张：${JSON.stringify(timeline)}`);
-  assert(secondAt - firstAt >= 1_500, `两张不是隔约 2 秒揭晓：${firstAt} → ${secondAt}`);
+  assert(winner.revealed === hidden, `应逐张揭晓全部 ${hidden} 张暗牌：${JSON.stringify(timeline)}`);
+  assert(hidden === 1 || secondAt - firstAt >= 1_500, `两张不是隔约 2 秒揭晓：${firstAt} → ${secondAt}`);
   const loser = view.seats.find((s) => s.computer && s !== winner);
   assert(timeline.some((t) => t.said.some((line) => line.startsWith(loser.name))), `输掉的电脑 ${loser.name} 座位上没有出现短语：${JSON.stringify(timeline)}`);
-  console.log('获胜的电脑', winner.name, '在', firstAt, '和', secondAt, 'ms 揭晓；输掉的电脑', loser.name, '开口');
+  console.log('获胜的电脑', winner.name, '有', hidden, '张暗牌，在', firstAt, secondAt ?? '', 'ms 揭晓；输掉的电脑', loser.name, '开口');
 }
