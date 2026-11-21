@@ -30,7 +30,7 @@ import type { GameRepository } from './repository.ts';
 import { PHRASES, STRENGTHS, type LobbyPlayer, type Phrase, type Reaction, type Strength } from '@coup/shared';
 import { ClientError } from './errors.ts';
 import { TUNINGS, decideComputerIntent, drawTemperament, type ComputerIntent, type Returned, type Temperament } from './computer.ts';
-import { afterOwnClaim, onOwnTurn, probe, replyTo, speak, stagger, temper, type Heard, type Moment, type Said } from './speech.ts';
+import { afterOwnClaim, onOwnTurn, probe, replyTo, speak, stagger, targeted, temper, type Heard, type Moment, type Said } from './speech.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
@@ -524,6 +524,9 @@ export class Room {
       const state = publicState(g);
       for (const id of this.players.keys()) this.say(id, probe(state, this.gameEvents, id));
     }
+    // 表 4：电脑成为偷窃、暗杀（问询窗口前段）或政变（宣布后）的目标
+    const aimed = events.find((e) => e.type === 'actionChosen' && e.targetId);
+    if (aimed?.type === 'actionChosen') this.say(aimed.targetId!, targeted(publicState(g), this.gameEvents, aimed.targetId!));
   }
 
   // 电脑抽签决定说不说；说的话到点经和真人相同的校验与限流发出。计时器随 clearTimer 一起清

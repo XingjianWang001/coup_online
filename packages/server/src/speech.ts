@@ -339,7 +339,7 @@ const TARGETED_MS = [600, 1_400] as const;
 
 // me 不是此刻偷窃、暗杀（问询窗口开着、自己还没回应）或政变（轮到自己选丢哪张）的目标时没有候选
 export function targeted(state: PublicState, events: readonly GameEvent[], me: string): Moment {
-  const at = events.findLastIndex((e) => e.type === 'actionChosen');
+  const at = lastIndex(events, 'actionChosen');
   const chosen = events[at];
   if (chosen?.type !== 'actionChosen' || chosen.targetId !== me) return NOTHING(TARGETED_MS);
   const { action, actorId } = chosen;
