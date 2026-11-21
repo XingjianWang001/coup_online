@@ -1088,9 +1088,20 @@ button.reaction-toggle:hover:not(:disabled) {
 
 .reaction-grid > p {
   grid-column: 1 / -1;
+  flex-basis: 100%;
   margin: 0;
   color: var(--text-2);
   font-size: 14px;
+}
+
+/* 短语共 7 句，等宽网格的末行总会剩空格：改成可伸展的折行，每行都撑到右边缘（桌面 4+3，手机 2+2+2+1） */
+.reaction-grid--phrase {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.reaction-grid--phrase > button {
+  flex: 1 1 22%;
 }
 
 .reaction-name {
@@ -2257,6 +2268,9 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
   }
   .reaction-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .reaction-grid--phrase > button {
+    flex-basis: 40%;
   }
   .reaction-grid--verbalClaim {
     grid-template-columns: 1fr;

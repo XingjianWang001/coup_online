@@ -1,13 +1,15 @@
 // packages/server/src/room.test.ts
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Room, type RoomOptions } from './room.ts';
-import { forfeit, type GameState } from '@coup/engine';
+import { challenge, chooseAction, forfeit, type GameEvent, type GameState, type Role } from '@coup/engine';
 import type { GameRepository } from './repository.ts';
+import type { Reaction } from '@coup/shared';
 
 function makeRoom(options?: RoomOptions) {
   const repo = { save: vi.fn(), delete: vi.fn() } as unknown as GameRepository;
-  const events = { onBroadcast: vi.fn(), onEmpty: vi.fn() };
-  const room = new Room('ABC123', '', repo, events, options);
+  const events = { onBroadcast: vi.fn(), onEmpty: vi.fn(), onReaction: vi.fn(), onShowdownFocus: vi.fn() };
+  // 电脑默认不开口：轮到它时的行动预告会把出手推后 0.8～1.5 秒，要量出手时刻的用例不该随 Math.random 时有时无
+  const room = new Room('ABC123', '', repo, events, { speechRandom: () => 0.999_999, ...options });
   return { room, repo, events };
 }
 
@@ -928,10 +930,137 @@ describe('Room 电脑出手', () => {
     room.startGame(alice.id, 'sock1');
     for (let step = 0; step < 2_000 && room.game!.phase !== 'gameOver'; step += 1) vi.advanceTimersToNextTimer();
     expect(room.game!.phase).toBe('gameOver');
+    vi.advanceTimersByTime(10_000); // 赛后的表态和揭晓（#77）说完、揭完
     expect(vi.getTimerCount()).toBe(0);
     // 默认行动只会收入或政变：出现别的行动，说明是电脑自己在出手，而不是超时替它出
     const chosen = events.onBroadcast.mock.calls.flatMap(([, evs]) => evs).filter((e) => e.type === 'actionChosen' && e.actorId !== alice.id);
     expect(chosen.some((e) => e.action !== 'income' && e.action !== 'coup')).toBe(true);
+  });
+
+  // 出手节奏（#73）。把随机源固定成 u，在 0～1 上均匀取 100 个 u 各量一次：得到的就是延迟分布的 100 个等概率样本
+  const QUANTILES = Array.from({ length: 100 }, (_, i) => (i + 0.5) / 100);
+  const mean = (xs: number[]) => xs.reduce((a, b) => a + b) / xs.length;
+  const median = (xs: number[]) => {
+    const sorted = [...xs].sort((a, b) => a - b);
+    return (sorted[xs.length / 2 - 1] + sorted[xs.length / 2]) / 2;
+  };
+  // Alice 先手，其后是 Bob（如有）和 1 个电脑
+  function table(options: RoomOptions, withBob = true) {
+    vi.useFakeTimers();
+    vi.clearAllTimers(); // 一个用例里连开多桌：上一桌留下的计时器不带过来
+    const made = makeRoom({ startingPlayerRandom: () => 0, ...options });
+    const alice = made.room.addPlayer('Alice', 'sock1');
+    const bob = withBob ? made.room.addPlayer('Bob', 'sock2') : undefined;
+    made.room.addComputer(alice.id, 'sock1');
+    made.room.startGame(alice.id, 'sock1');
+    return { ...made, alice, bob, computerId: made.room.playerList.find((p) => p.isComputer)!.id };
+  }
+  // 电脑的出手是最近的计时器（阶段时限至少 20 秒）：走到它，返回等了多久
+  function untilComputerMoves() {
+    const before = Date.now();
+    vi.advanceTimersToNextTimer();
+    return Date.now() - before;
+  }
+
+  it('选行动的延迟右偏：都在 2～6 秒内，中位数低于区间中点 4 秒，仍有超过中点的长考', () => {
+    const delays = QUANTILES.map((u) => {
+      const { room, events, alice, computerId } = table({ computerRandom: () => u }, false);
+      room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' });
+      const delay = untilComputerMoves();
+      expect(events.onBroadcast).toHaveBeenLastCalledWith(room, expect.arrayContaining([expect.objectContaining({ type: 'actionChosen', actorId: computerId })]));
+      return delay;
+    });
+    expect(Math.min(...delays)).toBeGreaterThanOrEqual(2_000);
+    expect(Math.max(...delays)).toBeLessThanOrEqual(6_000);
+    expect(median(delays)).toBeLessThan(4_000);
+    expect(Math.max(...delays)).toBeGreaterThan(4_000);
+  });
+
+  type Table = ReturnType<typeof table>;
+  const income = ({ room }: Table, id: string, socketId: string) => room.dispatch(id, socketId, { type: 'chooseAction', action: 'income' });
+  it.each<[string, (t: Table) => void, (t: Table) => void]>([
+    [
+      '偷窃的声称，目标是电脑或是 Bob',
+      ({ room, alice, computerId }) => room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'steal', targetId: computerId }),
+      ({ room, alice, bob }) => room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'steal', targetId: bob!.id }),
+    ],
+    [
+      'Alice 声称公爵阻挡外援，拦的是电脑的或是 Bob 的',
+      (t) => {
+        income(t, t.alice.id, 'sock1');
+        income(t, t.bob!.id, 'sock2');
+        t.room.apply((g) => chooseAction(g, t.computerId, 'foreignAid'));
+        t.room.dispatch(t.alice.id, 'sock1', { type: 'block', role: 'duke' });
+      },
+      (t) => {
+        income(t, t.alice.id, 'sock1');
+        t.room.dispatch(t.bob!.id, 'sock2', { type: 'chooseAction', action: 'foreignAid' });
+        t.room.dispatch(t.alice.id, 'sock1', { type: 'block', role: 'duke' });
+      },
+    ],
+  ])('问询窗口里冲着自己来的声称出手更慢（%s）：两边都在 1.5～5 秒内、中位数低于中点 3.25 秒，冲着自己来的平均更慢', (_, aimedAtComputer, aimedElsewhere) => {
+    const sample = (claim: (t: Table) => void) =>
+      QUANTILES.map((u) => {
+        const t = table({ computerRandom: () => u });
+        claim(t);
+        expect(t.room.game!.phase).toBe('awaitingChallenge');
+        const delay = untilComputerMoves();
+        expect(t.room.game!.phase === 'showdown' || t.room.game!.passed.includes(t.computerId)).toBe(true); // 电脑质疑了，或放弃了
+        return delay;
+      });
+    const [aimed, elsewhere] = [sample(aimedAtComputer), sample(aimedElsewhere)];
+    for (const delays of [aimed, elsewhere]) {
+      expect(Math.min(...delays)).toBeGreaterThanOrEqual(1_500);
+      expect(Math.max(...delays)).toBeLessThanOrEqual(5_000);
+      expect(median(delays)).toBeLessThan(3_250);
+      expect(Math.max(...delays)).toBeGreaterThan(3_250);
+    }
+    expect(mean(aimed)).toBeGreaterThan(mean(elsewhere));
+  });
+
+  // 把一位玩家的暗牌换成指定角色：和牌堆或别人手里的牌对调，整副牌不变
+  function giveHand(g: GameState, id: string, roles: Role[]) {
+    const hand = g.players.find((p) => p.id === id)!.hand;
+    const piles = [hand, g.deck, ...g.players.filter((p) => p.id !== id).map((p) => p.hand)];
+    roles.forEach((role, slot) => {
+      for (const pile of piles) {
+        const at = pile.findIndex((c, i) => c.role === role && (pile !== hand || i >= slot));
+        if (at < 0) continue;
+        [hand[slot], pile[at]] = [pile[at], hand[slot]];
+        return;
+      }
+    });
+  }
+
+  it.each<[string, (t: Table) => void, Role[], Role[]]>([
+    ['质疑窗口：Alice 声称公爵征税', ({ room, alice }) => room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'tax' }), ['duke', 'duke'], ['captain', 'contessa']],
+    ['阻挡窗口：Alice 拿外援', ({ room, alice }) => room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'foreignAid' }), ['duke', 'contessa'], ['captain', 'contessa']],
+  ])('出手快慢不泄露暗牌（%s）：公开局面相同时改暗牌不改变延迟，最终质疑或阻挡的和放弃的等得一样久', (_, open, oneHand, otherHand) => {
+    const sample = (roles: Role[]) =>
+      QUANTILES.map((u) => {
+        const t = table({ computerRandom: () => u });
+        giveHand(t.room.game!, t.computerId, roles);
+        open(t);
+        const delay = untilComputerMoves();
+        const moved: GameEvent[] = t.events.onBroadcast.mock.lastCall![1];
+        const spoke = moved.some((e) => e.type === 'challenged' || e.type === 'blocked');
+        expect(spoke || t.room.game!.passed.includes(t.computerId)).toBe(true); // 电脑质疑或阻挡了，或放弃了
+        return { delay, spoke };
+      });
+    const [one, other] = [sample(oneHand), sample(otherHand)];
+    expect(one.map((s) => s.delay)).toEqual(other.map((s) => s.delay));
+    // 同一个随机数下，一手牌质疑（阻挡）了，另一手牌放弃了
+    expect(one.some((s, i) => s.spoke !== other[i].spoke)).toBe(true);
+  });
+
+  it.each(['电脑', 'Bob'])('排一次出手只抽一个随机数（偷窃的目标是%s）：注入延迟时不抽，电脑随机源的调用恰好少 1 次', (target) => {
+    const draws = (options: RoomOptions) => {
+      let count = 0;
+      const { room, alice, bob, computerId } = table({ computerRandom: () => ((count += 1), 0.5), ...options });
+      room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'steal', targetId: target === 'Bob' ? bob!.id : computerId });
+      return count;
+    };
+    expect(draws({}) - draws({ computerDelayMs: () => 0 })).toBe(1);
   });
 });
 
@@ -981,6 +1110,141 @@ describe('Room 对质悬停同步', () => {
   });
 });
 
+describe('Room 电脑翻牌前的犹豫', () => {
+  afterEach(() => vi.useRealTimers());
+
+  const lehmer = (seed: number) => () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  // Alice 先手、电脑第二：电脑声称公爵征税，Alice 质疑，走到电脑翻牌。
+  // 返回对质开始后全房间收到的电脑对准（带时刻）、翻牌时刻和翻开的牌位
+  function showdown(options: RoomOptions, roles?: Role[]) {
+    vi.useFakeTimers();
+    vi.clearAllTimers();
+    const made = makeRoom({ startingPlayerRandom: () => 0, ...options });
+    const { room, events } = made;
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    const computerId = room.playerList.find((p) => p.isComputer)!.id;
+    room.startGame(alice.id, 'sock1');
+    const hand = room.game!.players.find((p) => p.id === computerId)!.hand;
+    // 只改角色、不对调牌：整副牌的构成和这场对质无关
+    if (roles) {
+      room.game!.deck.push(...hand.splice(roles.length));
+      roles.forEach((role, i) => (hand[i].role = role));
+    }
+    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' });
+    room.apply((g) => chooseAction(g, computerId, 'tax'));
+    const start = Date.now();
+    const focuses: { at: number; slot: number | null }[] = [];
+    events.onShowdownFocus.mockImplementation((_, focus: { slot: number | null }) => focuses.push({ at: Date.now() - start, ...focus }));
+    room.dispatch(alice.id, 'sock1', { type: 'challenge' });
+    const deadlineMs = room.getDeadlineMs();
+    while (room.game!.phase === 'showdown') vi.advanceTimersToNextTimer();
+    const revealAt = Date.now() - start;
+    const resolved = events.onBroadcast.mock.lastCall![1].find((e: GameEvent) => e.type === 'challengeResolved');
+    return { ...made, alice, computerId, focuses, revealAt, deadlineMs, slot: resolved.slot as number };
+  }
+
+  it('两张暗牌：翻牌前全房间收到对准，在两个牌位之间移动，最后一次落在翻开的那张上', () => {
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const { focuses, revealAt, slot } = showdown({ speechRandom: lehmer(seed) });
+      expect(new Set(focuses.map((f) => f.slot))).toEqual(new Set([0, 1]));
+      expect(focuses.at(-1)!.slot).toBe(slot);
+      expect(focuses.at(-1)!.at).toBeLessThan(revealAt);
+    }
+  });
+
+  it('只剩一张暗牌：只对准它', () => {
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const { focuses } = showdown({ speechRandom: lehmer(seed) }, ['captain']);
+      expect(focuses.length).toBeGreaterThan(0);
+      expect(focuses.every((f) => f.slot === 0)).toBe(true);
+    }
+  });
+
+  it('固定发言种子，改暗牌：落点之前的游移序列和时刻不变，落点随翻开的牌变', () => {
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const options = { computerRandom: () => 0.5, speechRandom: lehmer(seed) };
+      const first = showdown({ ...options, speechRandom: lehmer(seed) }, ['duke', 'captain']);
+      const second = showdown({ ...options, speechRandom: lehmer(seed) }, ['contessa', 'duke']);
+      expect([first.slot, second.slot]).toEqual([0, 1]);
+      expect(second.focuses.slice(0, -1)).toEqual(first.focuses.slice(0, -1));
+      expect(second.focuses.at(-1)!.at).toBe(first.focuses.at(-1)!.at);
+      expect(second.revealAt).toBe(first.revealAt);
+    }
+  });
+
+  it('游移多寡不改变翻牌时刻和行动随机源的抽取：翻牌仍在 2～4 秒内，对质时限仍是 20 秒', () => {
+    for (let i = 0; i < 100; i += 1) {
+      const u = (i + 0.5) / 100;
+      const run = (speech: number) => {
+        let draws = 0;
+        const { focuses, revealAt, deadlineMs } = showdown({ computerRandom: () => ((draws += 1), u), speechRandom: () => speech }, ['duke', 'captain']);
+        return { wanders: focuses.length, revealAt, deadlineMs, draws };
+      };
+      const [busy, calm] = [run(0), run(0.999)];
+      expect([busy.wanders, calm.wanders]).toEqual([3, 3]); // 游移两次再落点，翻牌延迟再长也不多游移
+      expect(busy.revealAt).toBe(calm.revealAt);
+      expect(busy.draws).toBe(calm.draws);
+      expect(busy.revealAt).toBeGreaterThanOrEqual(2_000);
+      expect(busy.revealAt).toBeLessThanOrEqual(4_000);
+      expect(busy.deadlineMs).toBe(20_000);
+    }
+  });
+
+  it('对质结束后不再对准；电脑犹豫时牌局结束、再来一局、牌局作废都不留计时器', () => {
+    const { events, focuses } = showdown({ speechRandom: lehmer(1) });
+    const count = focuses.length;
+    vi.advanceTimersByTime(60_000);
+    expect(focuses.length).toBe(count);
+
+    // 对质开始 1 秒：电脑还在游移
+    const begin = (computers: number) => {
+      vi.useFakeTimers();
+      vi.clearAllTimers();
+      const made = makeRoom({ startingPlayerRandom: () => 0 });
+      const alice = made.room.addPlayer('Alice', 'sock1');
+      for (let i = 0; i < computers; i += 1) made.room.addComputer(alice.id, 'sock1');
+      const computerId = made.room.playerList.find((p) => p.isComputer)!.id;
+      made.room.startGame(alice.id, 'sock1');
+      made.room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' });
+      made.room.apply((g) => chooseAction(g, computerId, 'tax'));
+      made.room.dispatch(alice.id, 'sock1', { type: 'challenge' });
+      vi.advanceTimersByTime(1_000);
+      expect(made.room.game!.phase).toBe('showdown');
+      return { ...made, alice, computerId };
+    };
+    const ended = begin(1);
+    ended.room.apply((g) => forfeit(g, ended.computerId));
+    expect(ended.room.game!.phase).toBe('gameOver');
+    expect(vi.getTimerCount()).toBe(1); // 只剩输掉的电脑赛后醒来的那一次（#77）
+    ended.room.rematch(ended.alice.id, 'sock1');
+    expect(vi.getTimerCount()).toBe(0);
+
+    const voided = begin(2); // Alice 走后还剩两个电脑，牌局没结束，作废
+    voided.room.leavePlayer(voided.alice.id, 'sock1');
+    expect(voided.room.game).toBeNull();
+    expect(vi.getTimerCount()).toBe(1); // 只剩空房回收
+    expect(events.onShowdownFocus).toHaveBeenCalledTimes(count);
+  });
+
+  it('房里的真人全被淘汰、电脑 1 秒一步时不游移', () => {
+    vi.useFakeTimers();
+    const { room, events } = makeRoom({ startingPlayerRandom: () => 0 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    const [first, second] = room.playerList.filter((p) => p.isComputer).map((p) => p.id);
+    room.startGame(alice.id, 'sock1');
+    room.apply((g) => forfeit(g, alice.id));
+    room.apply((g) => chooseAction(g, first, 'tax'));
+    room.apply((g) => challenge(g, second));
+    expect(room.game!.showdown?.claimantId).toBe(first);
+    vi.advanceTimersByTime(1_000);
+    expect(room.game!.phase).not.toBe('showdown');
+    expect(events.onShowdownFocus).not.toHaveBeenCalled();
+  });
+});
+
 describe('Room 表态', () => {
   afterEach(() => vi.useRealTimers());
 
@@ -1019,6 +1283,7 @@ describe('Room 表态', () => {
       null,
       'sure',
       { kind: 'phrase', phrase: '随便写点什么' },
+      { kind: 'phrase', phrase: 'framed' }, // 「冤枉啊」已从预设里删除
       { kind: 'phrase' },
       { kind: 'chat', text: 'hello' },
       { kind: 'announcement', action: 'nap' },
@@ -1059,7 +1324,7 @@ describe('Room 表态', () => {
     room.apply((g) => forfeit(g, carol.id));
     expect(room.react(carol.id, 'sock3', claim)).toBeNull();
     expect(room.react(carol.id, 'sock3', income)).toBeNull();
-    expect(room.react(carol.id, 'sock3', { kind: 'phrase', phrase: 'framed' })).not.toBeNull();
+    expect(room.react(carol.id, 'sock3', { kind: 'phrase', phrase: 'mercy' })).not.toBeNull();
 
     room.apply((g) => forfeit(g, alice.id));
     expect(room.game?.phase).toBe('gameOver');
@@ -1083,5 +1348,303 @@ describe('Room 表态', () => {
     const { room, bob } = playingRoom();
     room.addPlayer('Bob', 'sock2b', { id: bob.id, secret: bob.secret });
     expect(() => room.react(bob.id, 'sock2', { kind: 'phrase', phrase: 'sure' })).toThrow();
+  });
+});
+
+describe('Room 电脑表态', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  // Alice 先手，其后是 1 个电脑。Alice 收入后轮到电脑，测试让它直接声称公爵征税（不等它自己决定）
+  function claimTable(options: RoomOptions = {}) {
+    vi.useFakeTimers();
+    vi.clearAllTimers();
+    const made = makeRoom({ startingPlayerRandom: () => 0, speechRandom: () => 0, ...options });
+    const alice = made.room.addPlayer('Alice', 'sock1');
+    made.room.addComputer(alice.id, 'sock1');
+    made.room.startGame(alice.id, 'sock1');
+    const computerId = made.room.playerList.find((p) => p.isComputer)!.id;
+    const income = () => made.room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'income' });
+    income();
+    const claim = () => made.room.apply((g) => chooseAction(g, computerId, 'tax'));
+    // Alice 不质疑，征税结算，Alice 再收入，又轮到电脑
+    const nextRound = () => {
+      made.room.dispatch(alice.id, 'sock1', { type: 'passChallenge' });
+      income();
+    };
+    return { ...made, alice, computerId, claim, nextRound };
+  }
+  type Events = ReturnType<typeof makeRoom>['events'];
+  const spoken = (events: Events, id: string) => events.onReaction.mock.calls.filter(([, r]) => r.playerId === id).map(([, r]) => r.reaction);
+
+  it('电脑作出声称后、问询窗口还开着时，从表态出口发给全房间；不改变牌局，不进事件记录', () => {
+    const { room, events, computerId, claim } = claimTable();
+    claim();
+    const game = room.game;
+    events.onBroadcast.mockClear();
+    vi.advanceTimersByTime(1_500);
+    expect(events.onReaction).toHaveBeenCalledTimes(1);
+    expect(events.onReaction).toHaveBeenCalledWith(room, { playerId: computerId, reaction: expect.objectContaining({ kind: expect.stringMatching(/^(phrase|verbalClaim)$/) }) });
+    expect(room.game).toBe(game);
+    expect(room.game!.phase).toBe('awaitingChallenge');
+    expect(events.onBroadcast).not.toHaveBeenCalled();
+  });
+
+  it('真人的表态也从同一个出口发给全房间', () => {
+    const { room, events, alice } = claimTable();
+    room.react(alice.id, 'sock1', { kind: 'phrase', phrase: 'sure' });
+    expect(events.onReaction).toHaveBeenCalledWith(room, { playerId: alice.id, reaction: { kind: 'phrase', phrase: 'sure' } });
+  });
+
+  it('发出前问询窗口已结束则取消，不留计时器', () => {
+    const { room, events, alice, claim } = claimTable();
+    claim();
+    room.dispatch(alice.id, 'sock1', { type: 'passChallenge' });
+    expect(vi.getTimerCount()).toBe(1); // 只剩 Alice 回合的时限
+    vi.advanceTimersByTime(1_500);
+    expect(events.onReaction).not.toHaveBeenCalled();
+  });
+
+  it('牌局作废、牌局结束（之后再来一局）时取消未发出的表态', () => {
+    const voided = claimTable();
+    voided.claim();
+    voided.room.leavePlayer(voided.alice.id, 'sock1');
+    expect(vi.getTimerCount()).toBe(1); // 只剩空房回收
+    vi.advanceTimersByTime(1_500);
+    expect(voided.events.onReaction).not.toHaveBeenCalled();
+
+    const ended = claimTable();
+    ended.claim();
+    ended.room.apply((g) => forfeit(g, ended.alice.id));
+    expect(ended.room.game!.phase).toBe('gameOver');
+    expect(vi.getTimerCount()).toBe(3); // 只剩赛后（#77）：获胜的电脑醒来一次、两次揭晓
+    ended.room.rematch(ended.alice.id, 'sock1');
+    vi.advanceTimersByTime(1_500);
+    expect(ended.events.onReaction).not.toHaveBeenCalled();
+  });
+
+  it('电脑也受每位玩家 1.5 秒的限流', () => {
+    // 发言随机源恒为 0：每次声称都开口，都在声称后 0.5 秒
+    const { events, computerId, claim, nextRound } = claimTable();
+    claim();
+    vi.advanceTimersByTime(500);
+    expect(spoken(events, computerId)).toHaveLength(1);
+    nextRound();
+    claim();
+    vi.advanceTimersByTime(500); // 离上一条 0.5 秒：丢弃
+    expect(spoken(events, computerId)).toHaveLength(1);
+    nextRound();
+    vi.advanceTimersByTime(500);
+    claim();
+    vi.advanceTimersByTime(500); // 离上一条 1.5 秒
+    expect(spoken(events, computerId)).toHaveLength(2);
+  });
+
+  // 把电脑的暗牌改成指定角色（只为造出不同的暗牌，整副牌对不对不要紧）
+  const setHand = (room: Room, id: string, roles: Role[]) => room.game!.players.find((p) => p.id === id)!.hand.forEach((c, i) => (c.role = roles[i]));
+
+  it('信息边界：公开经历和发言随机源相同时，改暗牌和性格，说什么、什么时候说都不变；暗牌里有没有公爵，说「我有公爵」的概率相同', () => {
+    const QUANTILES = Array.from({ length: 50 }, (_, i) => (i + 0.5) / 50);
+    const sample = (roles: Role[], computerRandom: number) =>
+      QUANTILES.map((u) => {
+        const { room, events, computerId, claim } = claimTable({ speechRandom: () => u, computerRandom: () => computerRandom });
+        setHand(room, computerId, roles);
+        claim();
+        const at = Date.now();
+        let said: [number, unknown] | null = null;
+        events.onReaction.mockImplementation((_, r) => (said = [Date.now() - at, r.reaction]));
+        vi.advanceTimersByTime(1_500);
+        return said;
+      });
+    const honest = sample(['duke', 'duke'], 0.1);
+    const bluffing = sample(['captain', 'contessa'], 0.9);
+    expect(bluffing).toEqual(honest);
+    expect(honest).toContainEqual([expect.any(Number), { kind: 'verbalClaim', has: true, role: 'duke' }]);
+    expect(honest).toContainEqual(null); // 也有沉默的时候
+  });
+
+  it('启停发言、真人刷不刷表态，电脑的行动和行动随机源的抽取都不变', () => {
+    // 零延迟、1 位真人（只靠默认行动）加 3 个电脑打到 gameOver；洗牌和默认政变的目标也固定下来
+    const run = (speechRandom: () => number, spam: boolean) => {
+      vi.useFakeTimers();
+      vi.clearAllTimers();
+      let seed = 7;
+      vi.spyOn(Math, 'random').mockImplementation(() => (seed = (seed * 48271) % 2147483647) / 2147483647);
+      let draw = 1;
+      const draws: number[] = [];
+      const computerRandom = () => (draws.push((draw = (draw * 16807) % 2147483647)), draw / 2147483647);
+      const { room, events } = makeRoom({ startingPlayerRandom: () => 0, computerRandom, computerDelayMs: () => 0, speechRandom });
+      const alice = room.addPlayer('Alice', 'sock1');
+      for (let i = 0; i < 3; i += 1) room.addComputer(alice.id, 'sock1');
+      room.startGame(alice.id, 'sock1');
+      for (let step = 0; step < 5_000 && room.game!.phase !== 'gameOver'; step += 1) {
+        vi.advanceTimersToNextTimer();
+        if (spam) room.react(alice.id, 'sock1', { kind: 'phrase', phrase: 'doubt' });
+      }
+      expect(room.game!.phase).toBe('gameOver');
+      const computerSpoke = events.onReaction.mock.calls.some(([, r]) => r.playerId !== alice.id);
+      // 玩家 id 每间房都是新抽的：换成座位号再比
+      const seats = [...room.players.keys()];
+      const moves = JSON.stringify(events.onBroadcast.mock.calls.flatMap(([, evs]) => evs)).replace(/"[0-9a-f]{16}"/g, (id) => `seat${seats.indexOf(JSON.parse(id))}`);
+      vi.restoreAllMocks(); // 也清掉上面这些 vi.fn 的调用记录，所以先取出来
+      return { moves, draws, computerSpoke };
+    };
+    const talkative = run(() => 0, true);
+    const silent = run(() => 0.999_999, false);
+    expect(talkative.computerSpoke).toBe(true);
+    expect(silent.computerSpoke).toBe(false);
+    expect(talkative.moves).toEqual(silent.moves);
+    expect(talkative.draws).toEqual(silent.draws);
+  });
+});
+
+describe('Room 电脑赛后', () => {
+  afterEach(() => vi.useRealTimers());
+
+  const lehmer = (seed: number) => () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+  // Alice 先手，其后 computerCount 个电脑。除第一个电脑外的电脑先弃权出局，再让 Alice 弃权：第一个电脑获胜，Alice 最后出局、仍在房里。
+  // humanWins 时反过来：电脑全部弃权，Alice 获胜
+  function ended(options: RoomOptions = {}, { computerCount = 2, humanWins = false, beforeEnd = (_room: Room, _winnerId: string) => {} } = {}) {
+    vi.useFakeTimers();
+    vi.clearAllTimers();
+    const made = makeRoom({ startingPlayerRandom: () => 0, speechRandom: () => 0, ...options });
+    const { room, events } = made;
+    const alice = room.addPlayer('Alice', 'sock1');
+    for (let i = 0; i < computerCount; i += 1) room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    const [winnerId, ...loserIds] = room.playerList.filter((p) => p.isComputer).map((p) => p.id);
+    beforeEnd(room, winnerId);
+    for (const id of humanWins ? [winnerId, ...loserIds] : loserIds) room.apply((g) => forfeit(g, id));
+    if (!humanWins) room.apply((g) => forfeit(g, alice.id));
+    expect(room.game!.phase).toBe('gameOver');
+    const endedAt = Date.now();
+    const reveals: number[] = [];
+    const said: { at: number; playerId: string; reaction: Reaction }[] = [];
+    events.onBroadcast.mockImplementation((_, evs: GameEvent[]) => evs.forEach((e) => e.type === 'postGameRevealed' && reveals.push(Date.now() - endedAt)));
+    events.onReaction.mockImplementation((_, r) => said.push({ at: Date.now() - endedAt, ...r }));
+    return { ...made, alice, winnerId, loserIds, reveals, said };
+  }
+
+  it('电脑获胜约 3 秒后揭晓第一张暗牌，再隔约 2 秒揭晓第二张；走和真人获胜者相同的路径，揭晓完不留计时器', () => {
+    const { room, winnerId, reveals } = ended();
+    vi.advanceTimersByTime(10_000);
+    expect(reveals).toEqual([3_000, 5_000]);
+    expect(room.getPublicState()!.players.find((p) => p.id === winnerId)!.postGameRevealed).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('揭不揭按概率：两张都揭、只揭一张、一张不揭都会出现', () => {
+    const counts = new Set<number>();
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const { reveals } = ended({ speechRandom: lehmer(seed) });
+      vi.advanceTimersByTime(10_000);
+      counts.add(reveals.length);
+    }
+    expect([...counts].sort()).toEqual([0, 1, 2]);
+  });
+
+  it('只剩一张暗牌时只抽一次', () => {
+    const loseOne = (room: Room, winnerId: string) => {
+      const p = room.game!.players.find((gp) => gp.id === winnerId)!;
+      p.revealed.push(p.hand.pop()!);
+    };
+    const one = ended({}, { beforeEnd: loseOne });
+    vi.advanceTimersByTime(10_000);
+    expect(one.reveals).toEqual([3_000]);
+    // 每次揭不揭各抽一次：两张时比一张时多抽一次
+    const draws = (beforeEnd?: typeof loseOne) => {
+      let count = 0;
+      ended({ speechRandom: () => ((count += 1), 0.999) }, beforeEnd && { beforeEnd });
+      vi.advanceTimersByTime(10_000);
+      return count;
+    };
+    expect(draws() - draws(loseOne)).toBe(1);
+  });
+
+  it('再来一局后不再有揭晓和表态，不留计时器，不跨牌局', () => {
+    const { room, alice, reveals, said } = ended();
+    vi.advanceTimersByTime(3_000);
+    expect(reveals).toHaveLength(1);
+    const spoken = said.length;
+    room.rematch(alice.id, 'sock1');
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(10_000);
+    expect(reveals).toHaveLength(1);
+    expect(said).toHaveLength(spoken);
+  });
+
+  it('牌局结束后最后一位真人离开：房间清理前不再有揭晓和表态，只剩空房回收计时', () => {
+    const { room, events, alice, reveals, said } = ended();
+    room.leavePlayer(alice.id, 'sock1');
+    expect(vi.getTimerCount()).toBe(1);
+    vi.advanceTimersByTime(5 * 60_000);
+    expect(reveals).toEqual([]);
+    expect(said).toEqual([]);
+    expect(events.onEmpty).toHaveBeenCalledWith(room);
+  });
+
+  it('有电脑已经开口后最后一位真人离开：还没发出的赛后表态和接话（#81）一并取消', () => {
+    const { room, alice, said } = ended();
+    // 发言随机源恒为 0：两个电脑都在 1 秒醒来，先说的那条已发出，另一个的赛后表态和对它的接话还排着
+    vi.advanceTimersByTime(1_001);
+    expect(said).toHaveLength(1);
+    room.leavePlayer(alice.id, 'sock1');
+    expect(vi.getTimerCount()).toBe(1); // 只剩空房回收
+    vi.advanceTimersByTime(10_000);
+    expect(said).toHaveLength(1);
+  });
+
+  it('牌局结束后电脑只发短语，发言时刻落在结束后 1～6 秒；真人获胜时输掉的电脑也会说', () => {
+    const times: number[] = [];
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const { said } = ended({ speechRandom: lehmer(seed) }, { computerCount: 1, humanWins: true });
+      vi.advanceTimersByTime(10_000);
+      for (const s of said) {
+        expect(s.reaction.kind).toBe('phrase');
+        times.push(s.at);
+      }
+    }
+    expect(times.length).toBeGreaterThan(0);
+    expect(Math.min(...times)).toBeGreaterThanOrEqual(1_000);
+    expect(Math.max(...times)).toBeLessThanOrEqual(6_000);
+  });
+
+  it('每位电脑独立决定：可能没人说，也可能多人陆续说', () => {
+    const speakers = new Set<number>();
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const { said } = ended({ speechRandom: lehmer(seed) }, { computerCount: 3 });
+      vi.advanceTimersByTime(10_000);
+      expect(said.every((s) => s.reaction.kind === 'phrase')).toBe(true);
+      speakers.add(new Set(said.map((s) => s.playerId)).size);
+    }
+    expect(speakers.has(0)).toBe(true);
+    expect([...speakers].some((n) => n >= 2)).toBe(true);
+  });
+
+  it('5 个电脑都在 1 秒醒来都要说：错峰顺延得再晚也陆续说完，不因晚到取消', () => {
+    const { said, winnerId, loserIds } = ended({}, { computerCount: 5 });
+    vi.advanceTimersByTime(15_000);
+    expect(new Set(said.map((s) => s.playerId))).toEqual(new Set([winnerId, ...loserIds]));
+    expect(said.every((s) => s.reaction.kind === 'phrase')).toBe(true);
+    for (let i = 1; i < said.length; i += 1) expect(said[i].at - said[i - 1].at).toBeGreaterThanOrEqual(800);
+  });
+
+  it('获胜电脑的表态只取决于已公开的揭晓结果：揭晓之前改它的暗牌，它说什么、什么时候说都不变', () => {
+    const before = (roles: Role[], seed: number) => {
+      const setHand = (room: Room, winnerId: string) => room.game!.players.find((p) => p.id === winnerId)!.hand.forEach((c, i) => (c.role = roles[i]));
+      const { said, winnerId } = ended({ speechRandom: lehmer(seed) }, { beforeEnd: setHand });
+      vi.advanceTimersByTime(3_000 - 1); // 第一次揭晓之前
+      return said.filter((s) => s.playerId === winnerId).map(({ at, reaction }) => [at, reaction]);
+    };
+    let spoke = false;
+    for (let seed = 1; seed <= 20; seed += 1) {
+      const honest = before(['duke', 'captain'], seed);
+      expect(before(['contessa', 'contessa'], seed)).toEqual(honest);
+      spoke ||= honest.length > 0;
+    }
+    expect(spoke).toBe(true);
   });
 });
