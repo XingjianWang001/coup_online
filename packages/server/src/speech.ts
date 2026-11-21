@@ -475,18 +475,19 @@ export function afterResult(state: PublicState, events: readonly GameEvent[], ba
   const folded =
     !resolved && before?.type === 'challengeResolved' && first?.type === 'influenceLost' &&
     (before.truth ? first.playerId === before.loserId && lostSince(first.playerId) === 0 : first.playerId === before.claimantId && lostSince(first.playerId) === 1);
+  const challengerId = resolved && (events[lastIndex(events, 'challenged', resolvedAt)] as Extract<GameEvent, { type: 'challenged' }>).challengerId;
+  // 谁让 id 失去了影响力：对质里输的是对质的另一方，否则是政变、暗杀他的行动者。没有的（弃权）不算结果
+  const culprit = (id: string) =>
+    resolved && resolved.loserId === id
+      ? id === resolved.claimantId ? challengerId : resolved.claimantId
+      : chosen && chosen.targetId === id && (chosen.action === 'coup' || chosen.action === 'assassinate') ? chosen.actorId : undefined;
   const losers = new Set(folded ? [] : fresh.flatMap((e) => (e.type === 'influenceLost' ? [e.playerId] : [])));
   const outs = new Set(folded ? [] : fresh.flatMap((e) => (e.type === 'eliminated' ? [e.playerId] : [])));
   if (resolved && state.lossPlayerId) {
     losers.add(state.lossPlayerId);
     if (state.players.find((p) => p.id === state.lossPlayerId)!.handCount === 1) outs.add(state.lossPlayerId);
   }
-  const challengerId = resolved && (events[lastIndex(events, 'challenged', resolvedAt)] as Extract<GameEvent, { type: 'challenged' }>).challengerId;
-  // 谁让 id 失去了影响力：对质里输的是对质的另一方，否则是政变、暗杀他的行动者
-  const culprit = (id: string) =>
-    resolved && resolved.loserId === id
-      ? id === resolved.claimantId ? challengerId : resolved.claimantId
-      : chosen && chosen.targetId === id && (chosen.action === 'coup' || chosen.action === 'assassinate') ? chosen.actorId : undefined;
+  for (const set of [losers, outs]) for (const id of set) if (!culprit(id)) set.delete(id);
   // 阻挡没人质疑：这次变化关掉了阻挡的问询窗口，轮到下一位
   const stood = !resolved && onBlock && lastIndex(events, 'challenged', start) < blockAt && lastIndex(events, 'turnChanged', start) < blockAt && fresh.some((e) => e.type === 'turnChanged');
   const threat = chosen && chosen.targetId === me && (chosen.action === 'assassinate' || chosen.action === 'steal') ? chosen.action : undefined;

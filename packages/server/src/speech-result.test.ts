@@ -6,6 +6,7 @@ import {
   challenge,
   chooseAction,
   createGame,
+  forfeit,
   passBlock,
   passChallenge,
   publicState,
@@ -225,6 +226,12 @@ describe('表 5：结果公开后', () => {
     t.seat('c').hand.forEach((c) => (c.role = 'assassin'));
     t.seat('a').hand.forEach((c) => (c.role = 'captain'));
     expect(IDS.map((id) => afterResult(publicState(t.g), t.events, t.batch, t.heard, id))).toEqual(before);
+  });
+
+  it('弃权（离开、断线）不是结果：弃权者和别人都没有候选', () => {
+    const t = table();
+    t.did(forfeit(t.g, 'c'));
+    for (const id of IDS) expect(t.options(id)).toEqual([]);
   });
 
   it('没有结果时没有候选：声称、放弃、收入', () => {
