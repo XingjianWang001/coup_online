@@ -1775,6 +1775,25 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   white-space: nowrap;
 }
 
+/* 牌面风格「图腾」：插画自带边框和英文角色名，整幅铺满 3:4；角标、圆章不显示，角色名只留给读屏。
+   只有画了的角色有规则，其余角色照旧按默认风格。插画只在命中规则时才下载。 */
+:root[data-card-style='totem'] .big-card.card--captain {
+  /* ponytail: 占位画是 3:4，对质翻牌时比 5:7 的牌背矮一截；换上 5:7 的画后删掉这行 */
+  aspect-ratio: 3 / 4;
+  border: 0;
+  background: #201b33 url('/card-styles/totem/captain.svg') center / cover;
+}
+:root[data-card-style='totem'] .big-card.card--captain::before,
+:root[data-card-style='totem'] .big-card.card--captain > .glyph,
+:root[data-card-style='totem'] .big-card.card--captain > .medallion { display: none; }
+:root[data-card-style='totem'] .big-card.card--captain > .big-card-name {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
 /* 功能说明：悬浮 / 键盘聚焦 / 点按显示，角色同色气泡 */
 .showcase-tip {
   --surface: var(--tip);
