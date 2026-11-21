@@ -517,6 +517,10 @@ const REPLY: readonly Row<Reply>[] = [
   { when: (s) => aimed('assassinate', s) && !s.affordable, say: { doubt: FIRST, sure: SECOND } },
   { when: (s) => aimed('steal', s) && s.alsoMine, say: { claim: FIRST, sure: SECOND } },
   { when: (s) => aimed('steal', s) && !s.alsoMine, say: { mercy: FIRST, counter: SECOND } },
+  { when: (s) => s.heard === 'foreignAid' && s.alsoMine, say: { claim: FIRST, sure: SECOND } },
+  { when: (s) => s.heard === 'tax' && (s.caught || s.contradicts), say: { doubt: FIRST, sure: SECOND } },
+  { when: (s) => s.heard === 'tax' && s.alsoMine, say: { claim: FIRST, doubt: SECOND } },
+  { when: (s) => s.heard === 'aimedElsewhere' && !s.affordable, say: { sure: FIRST, silence: QUIET } },
 ];
 const REPLY_MS = [600, 2_000] as const;
 // 一句话、一句回应、一句再回应：第 MAX_DEPTH 层的话不再有电脑接

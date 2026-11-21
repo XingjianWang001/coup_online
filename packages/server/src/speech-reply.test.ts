@@ -288,12 +288,51 @@ describe('表 7 接话：行动预告、手下留情、好险', () => {
       ['claim:captain', 'silence', 'sure'],
     ],
     ['预告偷窃自己，没声称过（反预告偷窃他）', (t) => ['a', t.hear('b', announce('steal', 'a'))], ['mercy', 'silence', 'steal>b']],
+    ['预告外援，自己仍作数地声称过公爵', (t) => (t.taxed('a'), ['a', t.hear('b', announce('foreignAid'))]), ['claim:duke', 'silence', 'sure']],
+    ['预告征税，预告者被抓过', (t) => (bCaught(t), ['c', t.hear('b', announce('tax'))]), ['doubt', 'silence', 'sure']],
+    [
+      '预告征税，声称矛盾（仍作数的声称比暗牌多）',
+      (t) => {
+        t.income('a');
+        t.taxed('b');
+        t.income('c', 'a');
+        t.did(chooseAction(t.g, 'b', 'steal', 'a'));
+        t.passAll('b');
+        t.did(passBlock(t.g, 'a'));
+        t.coup('c', 'b', 'assassin');
+        return ['a', t.hear('b', announce('tax'))];
+      },
+      ['doubt', 'silence', 'sure'],
+    ],
+    ['预告征税，自己也仍作数地声称着公爵', (t) => (t.taxed('a'), ['a', t.hear('b', announce('tax'))]), ['claim:duke', 'doubt', 'silence']],
+    ['预告针对别人，预告者金币不够付', (t) => ['c', t.hear('b', announce('coup', 'a'))], ['silence', 'sure']],
   ])('%s', (_, setup, expected) => {
     const t = table();
     const [me, to] = setup(t);
     const options = t.options(me, to);
     expect(saids(options)).toEqual(expected);
     for (const [, weight] of options) expect(weight).toBeGreaterThan(0);
+  });
+
+  it.each<[string, (t: Table) => [me: string, to: Heard]]>([
+    ['预告收入', (t) => ['b', t.hear('a', announce('income'))]],
+    ['预告交换', (t) => (t.taxed('a'), ['a', t.hear('b', announce('exchange'))])],
+    ['预告针对别人，金币够付', (t) => ((t.seat('b').coins = 7), ['c', t.hear('b', announce('coup', 'a'))])],
+    ['预告偷窃别人（偷窃不花钱）', (t) => ['c', t.hear('b', announce('steal', 'a'))]],
+    ['预告征税，没有前情', (t) => ['c', t.hear('b', announce('tax'))]],
+    ['预告外援，自己没声称过公爵', (t) => ['c', t.hear('b', announce('foreignAid'))]],
+  ])('表外的组合不接话：%s', (_, setup) => {
+    const t = table();
+    const [me, to] = setup(t);
+    expect(t.options(me, to)).toEqual([]);
+  });
+
+  it('对方金币不够付预告的行动时，候选是怀疑类的短语，不出现手下留情', () => {
+    for (const action of ['coup', 'assassinate'] as const) {
+      const t = table();
+      const options = t.options('a', t.hear('b', announce(action, 'a')));
+      expect(saids(options).filter((l) => l !== 'silence').every((l) => l === 'sure' || l === 'doubt')).toBe(true);
+    }
   });
 });
 
