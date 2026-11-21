@@ -385,6 +385,26 @@ describe('表 7 接话：行动预告、手下留情、好险', () => {
     expect(t.options(me, to)).toEqual([]);
   });
 
+  it('预告没兑现的记忆：同一人上次针对自己的预告没兑现，我信你个鬼的权重升高，随他的回合淡化', () => {
+    const doubtOf = (options: Options) => options.find(([r]) => said(r) === 'doubt')?.[1] ?? 0;
+    // b 预告偷窃 a，然后 kept 时真的偷，否则收入；之后每轮 b 又收入 extra 次，再预告一遍
+    const after = (kept: boolean, extra: number) => {
+      const t = table();
+      t.income('a');
+      t.hear('b', announce('steal', 'a'));
+      if (kept) t.did(chooseAction(t.g, 'b', 'steal', 'a')), t.passAll('b'), t.did(passBlock(t.g, 'a'));
+      else t.income('b');
+      for (let i = 0; i < extra; i += 1) t.income('c', 'a', 'b');
+      t.income('c', 'a');
+      return doubtOf(t.options('a', t.hear('b', announce('steal', 'a'))));
+    };
+    expect(after(true, 0)).toBe(0);
+    expect(after(false, 0)).toBeGreaterThan(0);
+    expect(after(false, 1)).toBeGreaterThan(0);
+    expect(after(false, 1)).toBeLessThan(after(false, 0));
+    expect(after(false, 2)).toBe(0);
+  });
+
   it('对方金币不够付预告的行动时，候选是怀疑类的短语，不出现手下留情', () => {
     for (const action of ['coup', 'assassinate'] as const) {
       const t = table();

@@ -517,6 +517,8 @@ const REPLY: readonly Row<Reply>[] = [
   { when: (s) => aimed('assassinate', s) && !s.affordable, say: { doubt: FIRST, sure: SECOND } },
   { when: (s) => aimed('steal', s) && s.alsoMine, say: { claim: FIRST, sure: SECOND } },
   { when: (s) => aimed('steal', s) && !s.alsoMine, say: { mercy: FIRST, counter: SECOND } },
+  // 同一人上次针对自己的预告没兑现：和表 4 的「第二次被同一人针对」一样按他自己的回合淡化
+  ...AGAIN_FADE.map((fade, i): Row<Reply> => ({ when: (s) => s.heard === 'aimed' && s.broken === i + 1, say: { doubt: HIGH ** fade } })),
   { when: (s) => s.heard === 'foreignAid' && s.alsoMine, say: { claim: FIRST, sure: SECOND } },
   { when: (s) => s.heard === 'tax' && (s.caught || s.contradicts), say: { doubt: FIRST, sure: SECOND } },
   { when: (s) => s.heard === 'tax' && s.alsoMine, say: { claim: FIRST, doubt: SECOND } },
