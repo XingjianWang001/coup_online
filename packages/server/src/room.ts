@@ -30,7 +30,7 @@ import type { GameRepository } from './repository.ts';
 import { PHRASES, STRENGTHS, type LobbyPlayer, type Phrase, type Reaction, type Strength } from '@coup/shared';
 import { ClientError } from './errors.ts';
 import { TUNINGS, decideComputerIntent, drawTemperament, type ComputerIntent, type Returned, type Temperament } from './computer.ts';
-import { afterOwnClaim, offTurn, onOwnTurn, probe, speak, stagger, temper, type Moment, type Said } from './speech.ts';
+import { afterOwnClaim, offTurn, onOwnTurn, probe, replyTo, speak, stagger, temper, type Heard, type Moment, type Said } from './speech.ts';
 
 const ACTION_TIMEOUT_MS = 60_000;
 const WINDOW_TIMEOUT_MS = 20_000;
@@ -160,8 +160,8 @@ export class Room {
   private computerTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // 电脑还没发出的表态和对质时的对准
   private speechTimers = new Set<ReturnType<typeof setTimeout>>();
-  // 电脑本局已发出的表态（错峰、降温、重复降权用），开局清空
-  private computerSpeech: Said[] = [];
+  // 本局通过校验的全部表态（真人和电脑的，按时间先后）：电脑「听到」的就是这些，开局清空
+  private heard: Heard[] = [];
   // 每位电脑上次看时已成立的回合外局势（表 6），开局清空：同一局势只在刚出现时给一次机会
   private offTurnHeld = new Map<string, ReadonlySet<string>>();
   // 电脑玩家本局的性格，和它的局内记忆所依据的本局公开事件：每次开局重抽、清空，不带到下一局
@@ -384,7 +384,7 @@ export class Room {
     this.gameNumber += 1;
     this.temperaments = new Map(entries.filter((p) => p.isComputer).map((p) => [p.id, drawTemperament(this.computerRandom, TUNINGS[p.strength!])]));
     this.gameEvents = [];
-    this.computerSpeech = [];
+    this.heard = [];
     this.offTurnHeld.clear();
     this.returned.clear();
     this.repo.save(this.code, this.game);
@@ -545,21 +545,26 @@ export class Room {
     if (!this.players.get(id)?.isComputer) return;
     const speech = speak(temper(moment, id, this.computerSpeech, Date.now()), this.speechRandom);
     if (!speech) return;
-    this.sayLater(id, speech.reaction, speech.delayMs, Date.now() + speech.delayMs, moment.current);
+    this.sayLater(id, speech.reaction, speech.delayMs, Date.now() + speech.delayMs, moment.current, moment.depth);
+  }
+
+  // 电脑本局已发出的表态（错峰、降温、重复降权用）
+  private get computerSpeech(): Said[] {
+    return this.heard.filter((h) => this.players.get(h.playerId)?.isComputer);
   }
 
   // 到点时离全桌上一条电脑表态太近就顺延、晚太多就取消（stagger）。顺延的计时器也在 speechTimers 里，照样随 clearTimer 取消
-  private sayLater(id: string, reaction: Reaction, ms: number, dueAt: number, current?: Moment['current']): void {
+  private sayLater(id: string, reaction: Reaction, ms: number, dueAt: number, current?: Moment['current'], depth = 0): void {
     const t = setTimeout(() => {
       this.speechTimers.delete(t);
       const now = Date.now();
       const wait = stagger(now, this.computerSpeech.at(-1)?.at, dueAt, this.speechRandom);
       if (wait === null) return;
-      if (wait > 0) return this.sayLater(id, reaction, wait, dueAt, current);
+      if (wait > 0) return this.sayLater(id, reaction, wait, dueAt, current, depth);
       try {
-        // 有的话只在发送时语境还在才说（例如自己已放弃）：不换阶段的变化，clearTimer 管不到
+        // 有的话只在发送时语境还在才说（例如自己已放弃、已回应）：不换阶段的变化，clearTimer 管不到
         if (current && !current(publicState(this.game!))) return;
-        if (this.relay(id, reaction)) this.computerSpeech.push({ playerId: id, reaction, at: now });
+        this.relay(id, reaction, depth);
       } catch (e) {
         console.error('computer speech error', e);
       }
@@ -581,7 +586,6 @@ export class Room {
         const speech = speak(temper(onOwnTurn(publicState(this.game!), this.gameEvents, id, intent), id, this.computerSpeech, now), this.speechRandom);
         // 被限流丢掉的预告不算说过：不停顿
         if (speech && this.relay(id, speech.reaction)) {
-          this.computerSpeech.push({ playerId: id, reaction: speech.reaction, at: now });
           this.computerTimers.set(id, setTimeout(() => this.computerAct(id, intent, true), speech.delayMs));
           return;
         }
@@ -716,7 +720,8 @@ export class Room {
   }
 
   // 表态的内核，不看连接：电脑没有连接，走这里而不伪造 socket。通过的经 onReaction 发给整个房间
-  private relay(playerId: string, reaction: unknown): { playerId: string; reaction: Reaction } | null {
+  // depth 是接话的层数（只在服务器里记）：真人的和电脑起头的是 0
+  private relay(playerId: string, reaction: unknown, depth = 0): { playerId: string; reaction: Reaction } | null {
     const g = this.game;
     if (!g) throw new ClientError({ code: 'gameNotStarted' });
     const parsed = parseReaction(reaction);
@@ -735,7 +740,16 @@ export class Room {
     this.lastReactionAt.set(playerId, now);
     const relayed = { playerId, reaction: parsed };
     this.events.onReaction(this, relayed);
+    const heard = { ...relayed, at: now, depth };
+    this.heard.push(heard);
+    this.answer(heard);
     return relayed;
+  }
+
+  // 接话（表 7）：每条通过校验的表态，其余电脑都听到，各自从公开语境判断要不要回一句。行动策略不听表态
+  private answer(to: Heard): void {
+    const state = publicState(this.game!);
+    for (const id of this.players.keys()) this.say(id, replyTo(state, this.gameEvents, this.heard, to, id));
   }
 
   getPublicState() {
