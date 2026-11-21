@@ -1625,6 +1625,14 @@ describe('Room 电脑赛后', () => {
     expect([...speakers].some((n) => n >= 2)).toBe(true);
   });
 
+  it('5 个电脑都在 1 秒醒来都要说：错峰顺延得再晚也陆续说完，不因晚到取消', () => {
+    const { said, winnerId, loserIds } = ended({}, { computerCount: 5 });
+    vi.advanceTimersByTime(15_000);
+    expect(new Set(said.map((s) => s.playerId))).toEqual(new Set([winnerId, ...loserIds]));
+    expect(said.every((s) => s.reaction.kind === 'phrase')).toBe(true);
+    for (let i = 1; i < said.length; i += 1) expect(said[i].at - said[i - 1].at).toBeGreaterThanOrEqual(800);
+  });
+
   it('获胜电脑的表态只取决于已公开的揭晓结果：揭晓之前改它的暗牌，它说什么、什么时候说都不变', () => {
     const before = (roles: Role[], seed: number) => {
       const setHand = (room: Room, winnerId: string) => room.game!.players.find((p) => p.id === winnerId)!.hand.forEach((c, i) => (c.role = roles[i]));

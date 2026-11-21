@@ -96,7 +96,7 @@ export interface Said {
 }
 
 // 顺延后比原定时刻晚过这么久就取消：说的是眼前的事，晚到就过时了，也不排长队。
-// 换阶段或换行动者时 clearTimer 已经把这期间的表态清掉，这里兜住同一阶段里排得太久的（例如牌局结束后几个电脑都要说）
+// 只管不带 current 的表态（Room 把带 current 的截止时刻记作 Infinity）：带的由 current 判断还算不算数，例如牌局结束后几个电脑都要说
 const MAX_LATE_MS = 2_000;
 
 // 到点时决定这条表态现在说（0）、再等多久，还是取消（null）：离全桌上一条电脑表态（lastAt）不足间隔就顺延。dueAt 是原定时刻
@@ -290,7 +290,8 @@ export function afterGame(state: PublicState, events: readonly GameEvent[], me: 
     bluffShown: shown.length > 0 && claims.length > 0 && !shown.includes(claims.at(-1)!),
     honestShown: shown.some((r) => claims.includes(r)),
   };
-  return { options: toOptions(merge(AFTER_GAME, situation), undefined), delayMs: AT_ONCE };
+  // 再来一局之前都算数：几个电脑同时醒来时顺延得再晚也陆续说完（「可能多人陆续说」）
+  return { options: toOptions(merge(AFTER_GAME, situation), undefined), delayMs: AT_ONCE, current: (now) => now.phase === 'gameOver' };
 }
 
 // 从此刻起还没换过回合。events 在 Room 里是本局只增不减的同一个数组，到点时已含这期间的事
