@@ -2,14 +2,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   COUP_COST,
+  block,
   challenge,
   chooseAction,
   createGame,
   forfeit,
+  passBlock,
   passChallenge,
   publicState,
   resolveLoss,
   revealShowdownCard,
+  type ActionType,
   type GameEvent,
   type GameState,
   type Role,
@@ -52,7 +55,7 @@ function table(hands = HANDS) {
       did(revealShowdownCard(g, by, cardOf(by, reveal)));
     },
     hear(playerId: string, reaction: Reaction, depth = 0): Heard {
-      const line = { playerId, reaction, at: (clock += 1_000), depth };
+      const line = { playerId, reaction, at: (clock += 1_000), depth, seen: events.length };
       heard.push(line);
       return line;
     },
@@ -252,6 +255,45 @@ describe('表 7 接话：短语和口头声称', () => {
     const flow = (t: Table) => (t.taxed('a'), t.income('b', 'c'), t.options('a', t.hear('b', phrase('doubt'))));
     const swapped: Record<string, Role[]> = { a: ['ambassador', 'contessa'], b: ['captain', 'captain'], c: ['assassin', 'ambassador'] };
     expect(flow(table(swapped))).toEqual(flow(table()));
+  });
+});
+
+// 行动预告、手下留情、好险的接话（#83）：预告写成 动作>目标
+const announce = (action: ActionType, targetId?: string): Reaction => (targetId ? { kind: 'announcement', action, targetId } : { kind: 'announcement', action });
+const said = (r: Reaction | null) => (r?.kind === 'announcement' ? `${r.action}${r.targetId ? `>${r.targetId}` : ''}` : label(r));
+const saids = (options: Options) => options.map(([r]) => said(r)).sort();
+
+describe('表 7 接话：行动预告、手下留情、好险', () => {
+  it.each<[string, (t: Table) => [me: string, to: Heard], string[]]>([
+    ['预告政变自己，对方金币够 7（反预告偷窃他）', (t) => ((t.seat('b').coins = 7), ['a', t.hear('b', announce('coup', 'a'))]), ['mercy', 'respect', 'silence', 'steal>b']],
+    ['预告政变自己，对方金币不够', (t) => ['a', t.hear('b', announce('coup', 'a'))], ['doubt', 'silence', 'sure']],
+    [
+      '预告暗杀自己，对方金币够 3，自己仍作数地声称过女伯爵',
+      (t) => {
+        t.seat('a').coins = 3;
+        t.did(chooseAction(t.g, 'a', 'assassinate', 'c'));
+        t.passAll('a');
+        t.did(block(t.g, 'c', 'contessa'));
+        t.passAll('c');
+        t.seat('b').coins = 3;
+        return ['c', t.hear('b', announce('assassinate', 'c'))];
+      },
+      ['claim:contessa', 'silence', 'sure'],
+    ],
+    ['预告暗杀自己，对方金币够 3，自己没声称过（反预告暗杀他）', (t) => ((t.seat('b').coins = 3), (t.seat('a').coins = 3), ['a', t.hear('b', announce('assassinate', 'a'))]), ['assassinate>b', 'mercy', 'silence', 'sure']],
+    ['预告暗杀自己，对方金币不够', (t) => ['a', t.hear('b', announce('assassinate', 'a'))], ['doubt', 'silence', 'sure']],
+    [
+      '预告偷窃自己，自己仍作数地声称过队长',
+      (t) => (t.did(chooseAction(t.g, 'a', 'steal', 'b')), t.passAll('a'), t.did(passBlock(t.g, 'b')), ['a', t.hear('c', announce('steal', 'a'))]),
+      ['claim:captain', 'silence', 'sure'],
+    ],
+    ['预告偷窃自己，没声称过（反预告偷窃他）', (t) => ['a', t.hear('b', announce('steal', 'a'))], ['mercy', 'silence', 'steal>b']],
+  ])('%s', (_, setup, expected) => {
+    const t = table();
+    const [me, to] = setup(t);
+    const options = t.options(me, to);
+    expect(saids(options)).toEqual(expected);
+    for (const [, weight] of options) expect(weight).toBeGreaterThan(0);
   });
 });
 

@@ -785,7 +785,7 @@ export class Room {
     this.lastReactionAt.set(playerId, now);
     const relayed = { playerId, reaction: parsed };
     this.events.onReaction(this, relayed);
-    const heard = { ...relayed, at: now, depth };
+    const heard = { ...relayed, at: now, depth, seen: this.gameEvents.length };
     this.heard.push(heard);
     this.answer(heard);
     return relayed;
