@@ -134,13 +134,15 @@ function memoryOf(state: PublicState, events: readonly GameEvent[], me: string) 
   return { ...memory, attacker: attacker && aimedAgo(events, events.length, attacker, me) ? attacker : undefined };
 }
 const shownCount = (state: PublicState, role: Role) => state.players.reduce((n, p) => n + p.revealed.filter((r) => r === role).length, 0);
-// 最近一次声称（行动或阻挡）的事件下标，没有时是 -1
-function lastClaimAt(events: readonly GameEvent[]): number {
-  let at = events.length - 1;
-  const claims = (e: GameEvent) => e.type === 'blocked' || (e.type === 'actionChosen' && !!e.claimedRole);
-  while (at >= 0 && !claims(events[at])) at -= 1;
+// end 之前最后一条这类事件（或符合条件的事件）的下标，没有时是 -1（服务器的 TS lib 里没有 findLastIndex）
+function lastIndex(events: readonly GameEvent[], match: GameEvent['type'] | ((e: GameEvent) => boolean), end = events.length): number {
+  const matches = typeof match === 'string' ? (e: GameEvent) => e.type === match : match;
+  let at = end - 1;
+  while (at >= 0 && !matches(events[at])) at -= 1;
   return at;
 }
+// 声称：行动声称角色，或阻挡
+const isClaim = (e: GameEvent) => e.type === 'blocked' || (e.type === 'actionChosen' && !!e.claimedRole);
 
 // 任何行动预告都要看起来说得通：自己付得起（金币到 10 只能政变），针对性行动的目标在场、不是自己（偷窃还得对方有金币可偷），
 // 非针对性行动不带目标。只看公开信息
@@ -241,7 +243,7 @@ export function afterOwnClaim(state: PublicState, events: readonly GameEvent[], 
   if (state.phase !== 'awaitingChallenge' || !pending || (blocking ? pending.blockById : pending.actorId) !== me) return NOTHING(AFTER_OWN_CLAIM_MS);
   const role = blocking ? pending.blockRole! : pending.claimedRole!;
   // 这次声称的事件是最后一条 actionChosen 或 blocked：在它之前就作数的才算延续
-  const before = memoryOf(state, events.slice(0, lastClaimAt(events)), me);
+  const before = memoryOf(state, events.slice(0, lastIndex(events, isClaim)), me);
   const now = memoryOf(state, events, me);
   const situation: OwnClaim = {
     continuing: before.standing.get(me)?.has(role) ?? false,
@@ -475,7 +477,7 @@ export function afterResult(state: PublicState, events: readonly GameEvent[], ba
   const resolved = r?.type === 'challengeResolved' ? r : undefined;
   const resolvedAt = resolved ? events.indexOf(resolved) : start;
   const chosen = events[lastIndex(events, 'actionChosen', resolvedAt)] as Extract<GameEvent, { type: 'actionChosen' }> | undefined;
-  const claimAt = lastClaimAt(events.slice(0, resolvedAt));
+  const claimAt = lastIndex(events, isClaim, resolvedAt);
   const blockAt = lastIndex(events, 'blocked', resolvedAt);
   const onBlock = blockAt >= 0 && blockAt === claimAt && blockAt > lastIndex(events, 'actionChosen', resolvedAt);
   const blockerId = onBlock ? (events[blockAt] as Extract<GameEvent, { type: 'blocked' }>).blockerId : undefined;
@@ -675,11 +677,6 @@ export function replyTo(state: PublicState, events: readonly GameEvent[], heard:
 }
 
 type Claim = Extract<GameEvent, { type: 'actionChosen' | 'blocked' }>;
-function lastIndex(events: readonly GameEvent[], type: GameEvent['type'], end = events.length): number {
-  let at = end - 1;
-  while (at >= 0 && events[at].type !== type) at -= 1;
-  return at;
-}
 
 function replyOptions(state: PublicState, events: readonly GameEvent[], heard: readonly Heard[], to: Heard, me: string): Options {
   const over = state.phase === 'gameOver';
@@ -714,7 +711,7 @@ function replyOptions(state: PublicState, events: readonly GameEvent[], heard: r
     : kind === 'tax' || kind === 'foreignAid' ? 'duke'
     : kind === 'aimed' ? BLOCK_ROLES[announced!].find((x) => memory.standing.get(me)?.has(x))
     : undefined;
-  const claimAt = lastClaimAt(events);
+  const claimAt = lastIndex(events, isClaim);
   const claim = events[claimAt] as Claim | undefined;
   // 自己的声称已经生效：最近一次声称是自己的，没人质疑，问询窗口已过
   const settledRole =

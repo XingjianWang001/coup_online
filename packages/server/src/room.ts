@@ -511,24 +511,21 @@ export class Room {
     const handSize = this.game!.players.find((p) => p.id === id)!.hand.length;
     const landAt = revealInMs - LAND_HOLD_MS;
     if (landAt < 0) return;
-    const aim = (at: number, slot: () => number | undefined) => {
-      const t = setTimeout(() => {
-        this.speechTimers.delete(t);
+    const focusAt = (at: number, slot: () => number | undefined) =>
+      this.later(at, () => {
         const s = slot();
         const focus = s === undefined ? null : this.aim(id, s);
         if (focus) this.events.onShowdownFocus(this, focus);
-      }, at);
-      this.speechTimers.add(t);
-    };
+      });
     const gap = () => WANDER_GAP_MS[0] + this.speechRandom() * (WANDER_GAP_MS[1] - WANDER_GAP_MS[0]);
     let last: number | null = null;
     for (let at = gap(); at + WANDER_GAP_MS[0] <= landAt; at += gap()) {
       // 每次换到另一张：只剩一张时一直是它，只对准一次
       const slot: number = last === null ? Math.floor(this.speechRandom() * handSize) : (last + 1 + Math.floor(this.speechRandom() * (handSize - 1))) % handSize;
-      if (slot !== last) aim(at, () => slot);
+      if (slot !== last) focusAt(at, () => slot);
       last = slot;
     }
-    aim(landAt, () => {
+    focusAt(landAt, () => {
       const intent = this.decideComputer(id); // 对质时的决定不抽随机数，到点翻的就是这张
       return intent?.type === 'revealShowdownCard' ? this.game!.players.find((p) => p.id === id)!.hand.findIndex((c) => c.id === intent.cardId) : undefined;
     });
@@ -544,24 +541,18 @@ export class Room {
   // 电脑表态（#58）：每个场景在这里认出自己的时刻，交给 speech.ts 选说什么。只读公开状态和本局公开事件
   private scheduleSpeech(events: GameEvent[]): void {
     const g = this.game!;
-    // 表 2：电脑刚作出声称（含阻挡），问询窗口开着
-    if (g.phase === 'awaitingChallenge' && events.some((e) => e.type === 'actionChosen' || e.type === 'blocked')) {
-      const claimantId = g.pending!.blockById ?? g.pending!.actorId;
-      this.say(claimantId, afterOwnClaim(publicState(g), this.gameEvents, claimantId));
-    }
-    // 表 3：别人作出声称（含阻挡），有资格质疑、还没回应的电脑试探一句；不读也不改它要不要质疑
+    // 表 2：电脑刚作出声称（含阻挡），问询窗口开着；表 3：别人作出声称，有资格质疑、还没回应的电脑试探一句，不读也不改它要不要质疑
     if (g.phase === 'awaitingChallenge' && events.some((e) => e.type === 'actionChosen' || e.type === 'blocked')) {
       const state = publicState(g);
+      const claimantId = g.pending!.blockById ?? g.pending!.actorId;
+      this.say(claimantId, afterOwnClaim(state, this.gameEvents, claimantId));
       for (const id of this.players.keys()) this.say(id, probe(state, this.gameEvents, id));
     }
-    // 表 4：电脑成为偷窃、暗杀（问询窗口前段）或政变（宣布后）的目标。旁观加速时不反预告
+    // 表 4：电脑成为偷窃、暗杀（问询窗口前段）或政变（宣布后）的目标
     const aimed = events.find((e) => e.type === 'actionChosen' && e.targetId);
-    if (aimed?.type === 'actionChosen') {
-      const moment = targeted(publicState(g), this.gameEvents, aimed.targetId!);
-      this.say(aimed.targetId!, this.humanAlive() ? moment : { ...moment, options: moment.options.filter(([r]) => r?.kind !== 'announcement') });
-    }
+    if (aimed?.type === 'actionChosen') this.say(aimed.targetId!, targeted(publicState(g), this.gameEvents, aimed.targetId!));
     // 表 5：结果公开后。一次结算（对质结果、失去影响力、淘汰）每位电脑一次机会，对质的结果等揭晓动画播完再说。
-    // 候选看这次声称以来自己说过什么，所以声称时记下 heard 的位置（结果总在本局的某次声称之后，换局不用清）。旁观加速时不反预告
+    // 候选看这次声称以来自己说过什么，所以声称时记下 heard 的位置（结果总在本局的某次声称之后，换局不用清）
     if (events.some((e) => (e.type === 'actionChosen' && e.claimedRole) || e.type === 'blocked')) this.claimHeard = this.heard.length;
     if (events.length > 0) {
       const state = publicState(g);
@@ -569,19 +560,17 @@ export class Room {
       for (const p of this.players.values()) {
         if (!p.isComputer) continue;
         const moment = afterResult(state, this.gameEvents, events.length, this.heard.slice(this.claimHeard), p.id);
-        const options = this.humanAlive() ? moment.options : moment.options.filter(([r]) => r?.kind !== 'announcement');
-        if (options.some(([r]) => r)) this.say(p.id, { ...moment, options, delayMs: [moment.delayMs[0] + reveal, moment.delayMs[1] + reveal] });
+        this.say(p.id, { ...moment, delayMs: [moment.delayMs[0] + reveal, moment.delayMs[1] + reveal] });
       }
     }
-    // 表 6：没轮到自己时，局势刚出现的电脑可能说一句。旁观加速时不预告；只有沉默可选时不抽签
+    // 表 6：没轮到自己时，局势刚出现的电脑可能说一句
     if (g.phase !== 'gameOver') {
       const state = publicState(g);
       for (const p of this.players.values()) {
         if (!p.isComputer) continue;
         const { held, moment } = offTurn(state, this.gameEvents, p.id, this.offTurnHeld.get(p.id) ?? new Set());
         this.offTurnHeld.set(p.id, held);
-        const options = this.humanAlive() ? moment.options : moment.options.filter(([r]) => r?.kind !== 'announcement');
-        if (options.some(([r]) => r)) this.say(p.id, { ...moment, options });
+        this.say(p.id, moment);
       }
     }
     // 表 8 和赛后揭晓：牌局刚结束
@@ -593,17 +582,7 @@ export class Room {
   // 时刻和揭不揭都抽发言随机源；抽几次只看暗牌张数（公开），揭晓之前改暗牌不改变任何一次抽取
   private scheduleAfterGame(): void {
     const g = this.game!;
-    const later = (ms: number, fn: () => void) => {
-      const t = setTimeout(() => {
-        this.speechTimers.delete(t);
-        try {
-          fn();
-        } catch (e) {
-          console.error('computer after-game error', e);
-        }
-      }, ms);
-      this.speechTimers.add(t);
-    };
+    const later = (ms: number, fn: () => void) => this.later(ms, fn, true);
     const [min, max] = AFTER_GAME_MS;
     for (const { id } of g.players) {
       if (this.players.get(id)?.isComputer) later(min + this.speechRandom() * (max - min), () => this.say(id, afterGame(publicState(this.game!), this.gameEvents, id)));
@@ -622,10 +601,13 @@ export class Room {
   }
 
   // 电脑抽签决定说不说；说的话到点经和真人相同的校验与限流发出。计时器随 clearTimer 一起清。
-  // 带 current 的表态到点自己判断还算不算数：换阶段、换行动者不清它，顺延得再晚也不因晚到取消（截止时刻记作 Infinity）
+  // 带 current 的表态到点自己判断还算不算数：换阶段、换行动者不清它，顺延得再晚也不因晚到取消（截止时刻记作 Infinity）。
+  // 旁观加速时（房里的真人全被淘汰）不预告；只有沉默可选时不抽签
   private say(id: string, moment: Moment): void {
     if (!this.players.get(id)?.isComputer) return;
-    const speech = speak(temper(moment, id, this.computerSpeech, Date.now()), this.speechRandom);
+    const options = this.humanAlive() ? moment.options : moment.options.filter(([r]) => r?.kind !== 'announcement');
+    if (!options.some(([r]) => r)) return;
+    const speech = speak(temper({ ...moment, options }, id, this.computerSpeech, Date.now()), this.speechRandom);
     if (!speech) return;
     this.sayLater(id, speech.reaction, speech.delayMs, moment.current ? Infinity : Date.now() + speech.delayMs, moment.current, moment.depth);
   }
@@ -671,11 +653,13 @@ export class Room {
     }
   }
 
-  // 停顿之后执行：留着的决定已失效（目标刚弃权）就重新决定。只有目标会在停顿里失效：换阶段或换行动者已取消了停顿
-  private computerAct(id: string, intent: ComputerIntent | null, kept = false): void {
-    if (kept) {
+  // 预告的停顿之后执行（afterAnnouncement）：留着的决定已失效（目标刚弃权）就重新决定。只有目标会在停顿里失效：换阶段或换行动者已取消了停顿
+  private computerAct(id: string, intent: ComputerIntent | null, afterAnnouncement = false): void {
+    if (afterAnnouncement) {
       this.computerTimers.delete(id);
       const targetId = intent?.type === 'chooseAction' ? intent.targetId : undefined;
+      // 重新决定会多抽一次 computerRandom，和不预告时的随机序列不同。有意如此：规格要求执行时决定已失效就重新决定，
+      // 而目标只在预告的停顿里弃权才会走到这里
       if (targetId && !this.game!.players.find((p) => p.id === targetId)!.alive) intent = this.decideComputer(id);
     }
     if (!intent) return;
@@ -824,11 +808,7 @@ export class Room {
   // 接话（表 7）：每条通过校验的表态，其余电脑都听到，各自从公开语境判断要不要回一句。行动策略不听表态
   private answer(to: Heard): void {
     const state = publicState(this.game!);
-    for (const id of this.players.keys()) {
-      // 旁观加速时不预告（反预告、再预告一遍）
-      const moment = replyTo(state, this.gameEvents, this.heard, to, id);
-      this.say(id, this.humanAlive() ? moment : { ...moment, options: moment.options.filter(([r]) => r?.kind !== 'announcement') });
-    }
+    for (const id of this.players.keys()) this.say(id, replyTo(state, this.gameEvents, this.heard, to, id));
   }
 
   getPublicState() {
