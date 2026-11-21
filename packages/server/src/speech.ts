@@ -467,7 +467,7 @@ export function offTurn(state: PublicState, events: readonly GameEvent[], me: st
   return { held: now, moment: { options, delayMs: OFF_TURN_MS } };
 }
 
-// ── 表 7：接话（#81）。听到短语和口头声称时回一句；听到行动预告、手下留情、好险的各行另加（#83） ──
+// ── 表 7：接话（#81）。听到短语和口头声称时回一句；听到行动预告、手下留情、好险的各行是 #83 加的 ──
 // 桌上通过校验的一条表态（真人和电脑的）：电脑「听到」的全部内容，由 Room.relay 按时间先后记下
 export interface Heard extends Said {
   depth: number; // 接话的层数：自己起头的是 0，回应第 n 层的是 n + 1。只在服务器里记，不进协议
