@@ -150,6 +150,8 @@ export interface RoomOptions {
   computerDelayMs?: (phase: Phase) => number;
   // 电脑表态的随机源（说不说、说哪条、什么时候说），和 computerRandom 分开：启停发言不改变行动的随机序列
   speechRandom?: () => number;
+  // 只供测试：按入座顺序给每人发的牌（每人两张），不给时洗牌发
+  hands?: readonly Role[][];
 }
 
 export class Room {
@@ -386,8 +388,10 @@ export class Room {
       throw new Error('starting player random value must be between 0 and 1');
     }
     const startingPlayerId = entries[Math.floor(random * entries.length)].id;
+    const { hands } = this.options;
     this.game = createGame(entries.map((p) => ({ id: p.id, name: p.name })), {
       startingPlayerId,
+      ...(hands && { hands: Object.fromEntries(entries.map((p, i) => [p.id, hands[i]])) }),
     });
     this.gameNumber += 1;
     this.temperaments = new Map(entries.filter((p) => p.isComputer).map((p) => [p.id, drawTemperament(this.computerRandom, TUNINGS[p.strength!])]));
