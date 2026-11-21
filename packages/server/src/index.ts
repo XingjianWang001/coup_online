@@ -24,11 +24,14 @@ const COMPUTER_DELAY_MS = process.env.COMPUTER_DELAY_MS === undefined ? undefine
 // STARTING_PLAYER_RANDOM=0 让最先入座的人先手；HANDS 按入座顺序发牌（JSON，如 [["duke","duke"],["contessa","captain"]]）
 const STARTING_PLAYER_RANDOM = process.env.STARTING_PLAYER_RANDOM === undefined ? undefined : Number(process.env.STARTING_PLAYER_RANDOM);
 const HANDS = process.env.HANDS === undefined ? undefined : (JSON.parse(process.env.HANDS) as RoomOptions['hands']);
+// COMPUTER_RANDOM=0.999 让电脑行动的随机源恒为这个数：几乎从不质疑，有真牌就阻挡
+const COMPUTER_RANDOM = process.env.COMPUTER_RANDOM === undefined ? undefined : Number(process.env.COMPUTER_RANDOM);
 const roomOptions: RoomOptions = {
   ...(SPEECH_RANDOM !== undefined && { speechRandom: () => SPEECH_RANDOM }),
   ...(COMPUTER_DELAY_MS !== undefined && { computerDelayMs: () => COMPUTER_DELAY_MS }),
   ...(STARTING_PLAYER_RANDOM !== undefined && { startingPlayerRandom: () => STARTING_PLAYER_RANDOM }),
   ...(HANDS && { hands: HANDS }),
+  ...(COMPUTER_RANDOM !== undefined && { computerRandom: () => COMPUTER_RANDOM }),
 };
 
 const repo = new InMemoryGameRepository();
