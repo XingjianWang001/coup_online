@@ -2,16 +2,17 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer,
 import { ACTION_CLAIM, ASSASSINATE_COST, BLOCK_ROLES, COUP_COST, FORCED_COUP_COINS, isValidNickname, MAX_PLAYERS, parseServerError, PHRASES, REACTION_MIN_INTERVAL_MS, STRENGTHS, type ActionType, type Card, type LobbyPlayer, type PublicState, type Reaction, type Role, type ServerError, type Strength } from '@coup/shared';
 import { clearIdentity, clearRoomCode, connect, loadIdentity, loadRoomCode, onMessage, saveIdentity, saveRoomCode, send, type ServerMessage } from './socket.ts';
 import { actionName, ACTIONS, coinLegend, roleDescription, roleName, ROLES, roleShortName, rulesFor, type RuleLevel } from './rules.ts';
-import { describeCountdown, describePending, describeReaction, describeWaiting, effectiveRemainingMs, estimateServerOffset, groupLog, nameOf, reactionText, remainingSinceReceipt, type LogEntry } from './narration.ts';
+import { describePending, describeReaction, describeWaiting, estimateServerOffset, groupLog, nameOf, reactionText, type LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
-import { strayFocusTarget, wrappedDialogFocus } from './dialog.ts';
+import { useDialogFocus } from './dialog.ts';
 import { scheduleAutoDismiss } from './transient.ts';
-import { REVEAL_STEPS_MS, useSmoothHeight } from './motion.ts';
-import { closeShowdown, dropMotion, initialSession, reduceSession, rejoinIntent, type CountdownSnapshot, type SeatMotion, type Session, type Showcase, type ShowdownView } from './session.ts';
+import { animate, prefersReducedMotion, REVEAL_STEPS_MS, useSmoothHeight } from './motion.ts';
+import { closeShowdown, dropMotion, initialSession, reduceSession, rejoinIntent, type SeatMotion, type Session, type Showcase, type ShowdownView } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
 import { CARD_STYLES, loadCardStyle, loadDebug, persistCardStyle, type CardStyle } from './cardStyle.ts';
 import { LANGUAGE_OPTIONS, loadLocale, localizeCoinCount, localizeNotice, localizeServerError, persistLocale, translate, type Locale, type MessageKey, type NoticeDescriptor } from './localization.ts';
-import { AddComputerIcon, BigCard, CoinIcon, ComputerBadge, CrownIcon, Glyph, HourglassIcon, RoleIcon } from './icons.tsx';
+import { DecisionTimer, type Clock } from './clock.tsx';
+import { AddComputerIcon, BigCard, CoinIcon, ComputerBadge, CrownIcon, Glyph, RoleIcon } from './icons.tsx';
 
 interface TransientNoticeState {
   id: number;
@@ -72,59 +73,6 @@ function browserStorage(): Storage | null {
   } catch {
     return null;
   }
-}
-
-function useDialogFocus(
-  onClose: () => void,
-  dialogRef: RefObject<HTMLDivElement>,
-  initialFocusRef: RefObject<HTMLElement>,
-) {
-  // onClose 放进 ref：调用方每次渲染传入新函数时，若作为依赖会让焦点每次都跳回初始按钮。
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-  useEffect(() => {
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
-    const onKeyDown = (event: KeyboardEvent) => {
-      // 对话框叠开时（如发牌展示盖在规则上）只由最上层的那个响应
-      const modals = document.querySelectorAll('[aria-modal="true"]');
-      if (modals[modals.length - 1] !== dialogRef.current) return;
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== 'Tab') return;
-      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
-        'button:not(:disabled), input:not(:disabled), select:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])',
-      );
-      if (!focusable?.length) return;
-      const target = wrappedDialogFocus(
-        focusable,
-        document.activeElement instanceof HTMLElement ? document.activeElement : null,
-        event.shiftKey,
-      );
-      if (target) {
-        event.preventDefault();
-        target.focus();
-      }
-    };
-    // 焦点无论怎么跑到对话框外（Tab 跳过单选组、旁观对质时没有可聚焦的控件……）都拉回来，否则键盘能操作被遮住的牌桌
-    const onFocusIn = (event: FocusEvent) => {
-      if (!dialogRef.current) return;
-      strayFocusTarget(document.querySelectorAll('[aria-modal="true"]'), dialogRef.current, event.target, initialFocusRef.current)?.focus();
-    };
-    document.body.style.overflow = 'hidden';
-    document.addEventListener('keydown', onKeyDown);
-    document.addEventListener('focusin', onFocusIn);
-    (initialFocusRef.current ?? dialogRef.current)?.focus();
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener('keydown', onKeyDown);
-      document.removeEventListener('focusin', onFocusIn);
-      previouslyFocused?.focus();
-    };
-  }, [dialogRef, initialFocusRef]);
 }
 
 function useAutoDismiss<T extends { id: number }>(
@@ -1084,12 +1032,7 @@ function DealShowcase({ showcase, locale, clock, onClose }: {
     </div>
   );
 }
-
-// ---------- 对质舞台与私下选牌（动效：聚光、静止的牌带发热边框、快速翻牌、盖章；原型分支未归档） ----------
-const prefersReducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-const animate = (el: Element, frames: Keyframe[], options: KeyframeAnimationOptions) =>
-  el.animate(frames, { fill: 'forwards', ...options }).finished;
 // 翻牌器从 180°（牌背朝外）转到 0°（牌面朝外）
 const flipTo = (deg: number): Keyframe => ({ transform: `perspective(1000px) rotateY(${deg}deg)` });
 const FOCUS_SEND_MS = 100;
@@ -1146,42 +1089,6 @@ function StageCard(props: {
 }
 
 const StageBack = () => <span className="card-back stage-back" aria-hidden="true" />;
-
-interface Clock {
-  snapshot: CountdownSnapshot | null;
-  serverOffsetMs: number | null;
-}
-
-// 只在显示倒计时的组件里 tick；浏览器暂停计时器后按实际经过时间重新计算，避免每次回调只减一秒造成滞后。
-function useCountdown(clock: Clock | null): { countdown: string | null; urgent: boolean } {
-  const snapshot = clock?.snapshot ?? null;
-  const serverOffsetMs = clock?.serverOffsetMs ?? null;
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (snapshot?.remainingMs == null) return;
-    const interval = setInterval(() => setTick((value) => value + 1), 250);
-    return () => clearInterval(interval);
-  }, [snapshot]);
-  if (!snapshot) return { countdown: null, urgent: false };
-  const remainingMs = remainingSinceReceipt(snapshot.remainingMs, snapshot.receivedAt, performance.now());
-  const serverNow = serverOffsetMs == null ? null : Date.now() + serverOffsetMs;
-  const effectiveRemaining = effectiveRemainingMs(remainingMs, snapshot.deadlineAt, serverNow);
-  return {
-    countdown: describeCountdown(remainingMs, snapshot.deadlineAt, serverNow),
-    urgent: effectiveRemaining != null && effectiveRemaining <= 3000,
-  };
-}
-
-function DecisionTimer({ clock, locale }: { clock: Clock | null; locale: Locale }) {
-  const { countdown, urgent } = useCountdown(clock);
-  if (!countdown) return null;
-  return (
-    <span className={`decision-timer${urgent ? ' urgent' : ''}`} role="timer" aria-label={translate(locale, 'timeToAct', { time: countdown })}>
-      <HourglassIcon />
-      {countdown}
-    </span>
-  );
-}
 
 // 对质：全场可见。被质疑者在放大的暗牌中选一张翻开，其他人看到牌背、同步的悬停和翻牌。
 // 揭晓后舞台留到动画播完再调用 onDone（会话的 showdown 由此清空）。

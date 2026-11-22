@@ -55,3 +55,9 @@ export function useSmoothHeight(
     if (fade) el.animate([{ opacity: 0.2 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' });
   }, deps); // 由调用方声明「什么算换了内容」
 }
+
+// ---------- 对质舞台与私下选牌（动效：聚光、静止的牌带发热边框、快速翻牌、盖章；原型分支未归档） ----------
+export const prefersReducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+export const animate = (el: Element, frames: Keyframe[], options: KeyframeAnimationOptions) =>
+  el.animate(frames, { fill: 'forwards', ...options }).finished;
