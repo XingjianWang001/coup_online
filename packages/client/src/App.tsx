@@ -1522,9 +1522,9 @@ function ShowdownStage(props: {
             <div className="stage-ask" role="alertdialog" aria-labelledby="stage-ask-text">
               <p id="stage-ask-text">{translate(locale, 'showdownRevealOther', { role: roleLabel })}</p>
               <div className="stage-actions">
+                <DecisionTimer clock={props.clock} locale={locale} />
                 <button ref={backRef} onClick={() => setAsking(false)}>{translate(locale, 'back')}</button>
                 <button className="primary" onClick={reveal}>{translate(locale, 'revealAnyway')}</button>
-                <DecisionTimer clock={props.clock} locale={locale} />
               </div>
             </div>
           )}
@@ -2018,17 +2018,18 @@ function GameBoard(props: {
         )}
 
         {canChallenge && (
-          <div className="row">
+          <div className="row" role="group" aria-labelledby="challenge-heading">
+            <p id="challenge-heading" className="decision-heading">{translate(props.locale, 'challengePrompt')} {timer}</p>
             <button onClick={() => props.onIntent({ type: 'challenge' })}>{translate(props.locale, 'challenge')}</button>
             <button className="ghost" onClick={() => props.onIntent({ type: 'passChallenge' })}>
               {translate(props.locale, 'passChallenge')}
             </button>
-            {timer}
           </div>
         )}
 
         {canBlock && (
-          <div className="row">
+          <div className="row" role="group" aria-labelledby="block-heading">
+            <p id="block-heading" className="decision-heading">{translate(props.locale, 'blockPrompt')} {timer}</p>
             {canBlockRoles.map((r) => (
               <button key={r} className={`role-btn role--${r}`} onClick={() => props.onIntent({ type: 'block', role: r })}>
                 {translate(props.locale, 'blockWith', { role: roleName(props.locale, r) })}
@@ -2037,7 +2038,6 @@ function GameBoard(props: {
             <button className="ghost" onClick={() => props.onIntent({ type: 'passBlock' })}>
               {translate(props.locale, 'passBlock')}
             </button>
-            {timer}
           </div>
         )}
 

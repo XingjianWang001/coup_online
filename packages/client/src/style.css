@@ -1003,15 +1003,19 @@ input:focus-visible {
   animation: fade-in 240ms ease;
 }
 
+/* 行动栏每个阶段的第一行：提示在左、倒计时钉在右端，换阶段时倒计时不挪位置。
+   不换行：提示过长时在自身内折行，倒计时不会被挤到下一行开头 */
 .decision-heading {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  justify-content: space-between;
   gap: var(--sp-2);
 }
+/* 与其他阶段的标题同字号、无额外内边距，倒计时才落在同一点 */
 .waiting.decision-heading {
-  justify-content: center;
-  padding: var(--sp-2);
+  text-align: start;
+  padding: 0;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 .controls-body > .row { margin-top: 0; }
