@@ -245,7 +245,7 @@ _Avoid_: 规则面板
 
 #### 选择器与 ui-check 场景
 
-主选择器沿用现有 class 和 role；场景名对应 `scripts/ui-check-<场景>.mjs`，「默认」是 `scripts/ui-check.mjs` 的内置场景。
+主选择器沿用现有 class 和 role；场景名对应 `scripts/ui-check-<场景>.mjs`，「默认」是 `scripts/ui-check.mjs` 的内置场景。场景覆盖一个区域，指它对这个区域（按主选择器或括号里的子部分找到）作断言，或专为看它截图；截图里只是碰巧拍到不算。
 
 | 区域 | 主选择器 | 覆盖它的场景 |
 | --- | --- | --- |
@@ -259,10 +259,10 @@ _Avoid_: 规则面板
 | 铭牌 | `.nameplate`（亮起时 `.nameplate.speaking`） | reaction、announce、speech、reply、after-game、table |
 | 叙述 | `.narration` | table、decision-clock |
 | 提示条 | `.notice`（获胜者 `.notice.big`） | table、decision-clock |
-| 控制区 | `.controls` | block-switch、decision-clock、table、motion |
+| 控制区 | `.controls`（行动与目标按钮在 `.actions`） | block-switch、decision-clock、table、motion |
 | 决策倒计时 | `[role="timer"]` | decision-clock、table |
 | 对质舞台 | `.stage-overlay:has(.stage-spot)` | showdown-hesitation |
 | 表态面板 | `.reaction` | reaction、reply |
-| 记录 | `.log` | announce、computer |
+| 记录 | `.log`（每组的标题行 `.log-header`） | announce、computer |
 | 规则中心 | `.rules` | — |
 | 设置 | `.settings-panel` | — |

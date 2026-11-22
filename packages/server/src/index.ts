@@ -7,10 +7,10 @@ import { Server, type Socket } from 'socket.io';
 import { InMemoryGameRepository } from './repository.ts';
 import { Room, type RoomOptions, type RoomPlayer } from './room.ts';
 import { canStartTunnel, startTunnel, stopTunnel } from './tunnel.ts';
-import { parseClientIntent, type ClientIntent, type GameEvent, type ServerError } from '@coup/shared';
+import { parseClientIntent, type ClientIntent, type ServerError } from '@coup/shared';
 import { ClientError, toServerError } from './errors.ts';
 import { reserveRoomCreation } from './room-limits.ts';
-import { publish as publishTo, pushJoined } from './push.ts';
+import { publish, pushJoined } from './push.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -98,8 +98,6 @@ const httpServer = createServer((req, res) => {
 
 const io = new Server(httpServer);
 
-const publish = (room: Room, events: GameEvent[]) => publishTo(io, room, events);
-
 // 所有错误都从这里发：带上这条连接是否还在房间里，客户端据此决定会话是否结束
 function emitError(socket: Socket, error: ServerError): void {
   socket.emit('error', { ...error, inRoom: rooms.has(socket.data.roomCode) });
@@ -143,7 +141,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       if (socket.data.roomCode) throw new ClientError({ code: 'illegalIntent' });
       const code = genCode();
       const room = new Room(code, '', repo, {
-        onBroadcast: publish,
+        onBroadcast: (r, events) => publish(io, r, events),
         onEmpty: (r) => rooms.delete(r.code),
         // 发给整个房间（含发送者）：自己的座位也要亮起，且只在服务器接受后才亮
         onReaction: (r, reaction) => io.to(r.code).emit('reaction', reaction),

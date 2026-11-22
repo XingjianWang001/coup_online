@@ -188,4 +188,8 @@ export type ServerMessage =
   | ({ type: 'error'; inRoom: boolean } & ServerError)
   | { type: 'left'; reason: 'left' | 'replaced' };
 
+// fixtures/message-flows.json 的形状：每条流程按步骤记每位玩家（a、b、c）的连接收到的消息。
+// server/src/message-flows.test.ts 按它录制、client/src/session.test.ts 按它重放，流程名或形状一变两边都过不了类型检查
+export type MessageFlows = Record<'duel' | 'turns' | 'trio' | 'seats', { step: string; to: Record<string, ServerMessage[]> }[]>;
+
 export type { ActionType, GameEvent, PublicState, PrivateState, Role, Card };
