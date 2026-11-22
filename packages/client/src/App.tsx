@@ -12,7 +12,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { ACTION_CLAIM, ASSASSINATE_COST, BLOCK_ROLES, COUP_COST, FORCED_COUP_COINS, MAX_PLAYERS, parseServerError, PHRASES, STRENGTHS } from '@coup/shared';
+import { ACTION_CLAIM, ASSASSINATE_COST, BLOCK_ROLES, COUP_COST, FORCED_COUP_COINS, isValidNickname, MAX_PLAYERS, parseServerError, PHRASES, STRENGTHS } from '@coup/shared';
 import type { ActionType, Card, LobbyPlayer, PublicState, Reaction, Role, ServerError, Strength } from '@coup/shared';
 import {
   clearIdentity,
@@ -533,7 +533,7 @@ export function App() {
           reactions={reactions}
           latestReaction={latestReaction}
           onDismissReaction={dropReaction}
-          clock={clock}
+          clock={showcase || showdown ? null : clock}
           log={log}
           selectedAction={selectedAction}
           setSelectedAction={setSelectedAction}
@@ -754,7 +754,8 @@ function EntryForm(props: {
   onJoin: () => void;
   locale: Locale;
 }) {
-  const canCreate = !!props.name.trim();
+  const canCreate = isValidNickname(props.name);
+  const invalid = !!props.name && !canCreate;
   const canJoin = canCreate && props.roomCode.trim().length === 6;
   // 回车：填了完整房间码就加入，否则创建房间
   const onEnter = (event: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -771,9 +772,11 @@ function EntryForm(props: {
           onChange={(e) => props.setName(e.target.value)}
           onKeyDown={onEnter}
           placeholder={translate(props.locale, 'nicknamePlaceholder')}
-          maxLength={32}
+          aria-invalid={invalid || undefined}
+          aria-describedby={invalid ? 'nickname-error' : undefined}
         />
       </label>
+      {invalid && <span id="nickname-error" role="status">{translate(props.locale, 'errorInvalidName')}</span>}
       <button className="primary" onClick={props.onCreate} disabled={!canCreate}>
         {translate(props.locale, 'createRoom')}
       </button>
@@ -883,7 +886,7 @@ interface RoomViewProps {
   onStart: () => void;
   onAction: (action: ActionType, targetId?: string) => void;
   socket: ReturnType<typeof connect>;
-  clock: Clock;
+  clock: Clock | null;
   log: LogEntry[];
   tunnelUrl: string | null;
   canStartTunnel: boolean;
@@ -1170,7 +1173,7 @@ function DealShowcase({ showcase, locale, clock, onClose }: {
           })}
         </div>
         <div className="showcase-actions">
-          <StageTimer clock={clock} locale={locale} />
+          <DecisionTimer clock={clock} locale={locale} />
           <button ref={confirmRef} onClick={onClose}>{translate(locale, 'confirm')}</button>
         </div>
       </div>
@@ -1268,17 +1271,11 @@ function useCountdown(clock: Clock | null): { countdown: string | null; urgent: 
   };
 }
 
-function NarrationTimer({ clock }: { clock: Clock }) {
+function DecisionTimer({ clock, locale }: { clock: Clock | null; locale: Locale }) {
   const { countdown, urgent } = useCountdown(clock);
   if (!countdown) return null;
-  return <span className={`narration-timer${urgent ? ' urgent' : ''}`}>{countdown}</span>;
-}
-
-function StageTimer({ clock, locale }: { clock: Clock | null; locale: Locale }) {
-  const { countdown } = useCountdown(clock);
-  if (!countdown) return null;
   return (
-    <span className="showcase-timer" role="timer" aria-label={translate(locale, 'timeToAct', { time: countdown })}>
+    <span className={`decision-timer${urgent ? ' urgent' : ''}`} role="timer" aria-label={translate(locale, 'timeToAct', { time: countdown })}>
       <HourglassIcon />
       {countdown}
     </span>
@@ -1512,7 +1509,7 @@ function ShowdownStage(props: {
               {/* 旁观者必须看到在等谁，否则会以为要自己操作 */}
               {!mine && <p>{translate(locale, 'waitingForShowdown', { name: claimant })}</p>}
               <div className="stage-actions">
-                <StageTimer clock={props.clock} locale={locale} />
+                {!asking && <DecisionTimer clock={props.clock} locale={locale} />}
                 {mine && (
                   <button className="primary" disabled={picked === null || sent} onClick={confirm}>
                     {translate(locale, 'revealThis')}
@@ -1527,6 +1524,7 @@ function ShowdownStage(props: {
               <div className="stage-actions">
                 <button ref={backRef} onClick={() => setAsking(false)}>{translate(locale, 'back')}</button>
                 <button className="primary" onClick={reveal}>{translate(locale, 'revealAnyway')}</button>
+                <DecisionTimer clock={props.clock} locale={locale} />
               </div>
             </div>
           )}
@@ -1586,7 +1584,7 @@ function LossStage(props: { hand: Card[]; locale: Locale; clock: Clock | null; o
         </div>
         <div className="stage-foot">
           <div className="stage-actions">
-            <StageTimer clock={props.clock} locale={locale} />
+            <DecisionTimer clock={props.clock} locale={locale} />
             <button className="primary" disabled={picked === null || sent} onClick={lose}>{translate(locale, 'revealThis')}</button>
           </div>
         </div>
@@ -1658,7 +1656,7 @@ function ExchangeStage(props: {
         </div>
         <div className="stage-foot">
           <div className="stage-actions">
-            <StageTimer clock={props.clock} locale={locale} />
+            <DecisionTimer clock={props.clock} locale={locale} />
             <button className="primary" disabled={kept.length !== keepCount || sent} onClick={keep}>{translate(locale, 'confirmKeep')}</button>
           </div>
         </div>
@@ -1812,7 +1810,7 @@ function GameBoard(props: {
   setSelectedAction: (a: ActionType | null) => void;
   onAction: (action: ActionType, targetId?: string) => void;
   onIntent: (i: Parameters<typeof send>[1]) => void;
-  clock: Clock;
+  clock: Clock | null;
   log: LogEntry[];
   locale: Locale;
 }) {
@@ -1847,6 +1845,7 @@ function GameBoard(props: {
   const amExchanging = state.phase === 'choosingExchange' && pending?.actorId === me;
   // 对质时等待提示由对质舞台给出，控制区不再重复
   const waiting = me && state.phase !== 'showdown' ? describeWaiting(state, me, props.locale) : null;
+  const timer = <DecisionTimer clock={props.clock} locale={props.locale} />;
 
   const narration = describePending(state, props.locale);
   const centerText = narration ?? (isMyTurn && state.phase === 'choosingAction' ? translate(props.locale, 'yourTurn') : null);
@@ -1999,7 +1998,6 @@ function GameBoard(props: {
           <span className="narration-text" aria-live="polite">
             {centerText && <span key={centerText} className="narration-line">{centerText}</span>}
           </span>
-          {centerText && <NarrationTimer clock={props.clock} />}
         </div>
       </div>
 
@@ -2009,6 +2007,7 @@ function GameBoard(props: {
       <div className="controls-body" key={controlKey} {...{ inert: armedKey === controlKey ? undefined : '' }}>
         {state.phase === 'choosingAction' && isMyTurn && (
           <Actions
+            timer={timer}
             coins={myView?.coins ?? 0}
             selectedAction={props.selectedAction}
             onSelect={props.setSelectedAction}
@@ -2024,6 +2023,7 @@ function GameBoard(props: {
             <button className="ghost" onClick={() => props.onIntent({ type: 'passChallenge' })}>
               {translate(props.locale, 'passChallenge')}
             </button>
+            {timer}
           </div>
         )}
 
@@ -2037,6 +2037,7 @@ function GameBoard(props: {
             <button className="ghost" onClick={() => props.onIntent({ type: 'passBlock' })}>
               {translate(props.locale, 'passBlock')}
             </button>
+            {timer}
           </div>
         )}
 
@@ -2050,7 +2051,7 @@ function GameBoard(props: {
           <div className="waiting">{translate(props.locale, 'waitingForRematch', { name: nameOf(state, props.hostId) })}</div>
         ))}
 
-        {waiting && <div className="waiting">{waiting}</div>}
+        {waiting && <div className="waiting decision-heading"><span>{waiting}</span>{timer}</div>}
       </div>
       </div>
 
@@ -2252,6 +2253,7 @@ function ReactionTray(props: {
 }
 
 function Actions(props: {
+  timer: ReactNode;
   coins: number;
   selectedAction: ActionType | null;
   onSelect: (a: ActionType | null) => void;
@@ -2279,7 +2281,7 @@ function Actions(props: {
       sel.type === 'coup' ? 'chooseCoupTarget' : sel.type === 'assassinate' ? 'chooseAssassinateTarget' : 'chooseStealTarget';
     return (
       <div className="actions" role="group" aria-labelledby="target-heading">
-        <p id="target-heading">{translate(props.locale, heading)}</p>
+        <p id="target-heading" className="decision-heading">{translate(props.locale, heading)} {props.timer}</p>
         {props.targets.map((t, i) => (
           <button key={t.id} autoFocus={i === 0} onClick={() => props.onAction(sel.type, t.id)}>
             {t.name}
@@ -2293,6 +2295,7 @@ function Actions(props: {
   }
   return (
     <div className="actions">
+      <p className="decision-heading">{translate(props.locale, 'chooseAction')} {props.timer}</p>
       {mustCoup && <p role="status">{translate(props.locale, 'mandatoryCoup')}</p>}
       {ACTIONS.map((a) => {
         const disabled =

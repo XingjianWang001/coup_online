@@ -27,7 +27,7 @@ import {
   revealShowdownCard,
 } from '@coup/engine';
 import type { GameRepository } from './repository.ts';
-import { PHRASES, STRENGTHS, type LobbyPlayer, type Phrase, type Reaction, type Strength } from '@coup/shared';
+import { isValidNickname, PHRASES, STRENGTHS, type LobbyPlayer, type Phrase, type Reaction, type Strength } from '@coup/shared';
 import { ClientError } from './errors.ts';
 import { TUNINGS, decideComputerIntent, drawTemperament, type ComputerIntent, type Returned, type Temperament } from './computer.ts';
 
@@ -40,7 +40,6 @@ const FOCUS_MIN_INTERVAL_MS = 50;
 // 客户端发完表态冷却 2 秒；服务器按玩家只拦 1.5 秒，留 0.5 秒给网络抖动，正常冷却后的表态不会被误丢
 const REACTION_MIN_INTERVAL_MS = 1_500;
 const DISCONNECT_GRACE_MS = 90_000;
-const MAX_NAME_LENGTH = 32;
 // 电脑玩家的名字不分语言（ADR 0008：文字归客户端，名字不翻译）。6 个够用：加第 6 位时房里只有 5 个名字可能撞上
 const COMPUTER_NAMES = ['Ada', 'Alan', 'Grace', 'Hedy', 'Linus', 'Edsger'];
 
@@ -222,21 +221,22 @@ export class Room {
 
   // 加入或重连。reconnect 提供 id + secret，匹配才复用座位，否则视为新玩家（防劫持）。
   addPlayer(name: string, socketId: string, reconnect?: { id: string; secret: string }): RoomPlayer {
-    if (typeof name !== 'string' || !name.trim() || name.length > MAX_NAME_LENGTH || /[\u0000-\u001f\u007f]/.test(name)) {
+    const returning = reconnect ? this.players.get(reconnect.id) : undefined;
+    const existing = returning && returning.secret === reconnect?.secret ? returning : undefined;
+    // An authenticated returning seat may keep a nickname admitted under the old limit.
+    const keepsLegacyName = existing && typeof name === 'string' && name.length <= 32 && existing.name === name.trim();
+    if (!isValidNickname(name) && !keepsLegacyName) {
       throw new ClientError({ code: 'invalidName' });
     }
     name = name.trim();
-    if (reconnect) {
-      const existing = this.players.get(reconnect.id);
-      if (existing && existing.secret === reconnect.secret) {
-        existing.socketId = socketId;
-        existing.connected = true;
-        if (name) existing.name = name;
-        this.clearDisconnectTimer(reconnect.id);
-        this.clearEmptyTimer();
-        this.handOffOfflineHost();
-        return existing;
-      }
+    if (existing) {
+      existing.socketId = socketId;
+      existing.connected = true;
+      existing.name = name;
+      this.clearDisconnectTimer(existing.id);
+      this.clearEmptyTimer();
+      this.handOffOfflineHost();
+      return existing;
     }
     // 新玩家：服务器生成全新 id 与 secret。开局后禁止新玩家加入，保证 room.players 是 game.players 的子集。
     if (this.game) throw new ClientError({ code: 'gameAlreadyStarted' });
