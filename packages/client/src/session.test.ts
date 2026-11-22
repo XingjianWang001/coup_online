@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { PublicState, ServerMessage } from '@coup/shared';
-import { closeShowdown, initialSession, reduceSession, rejoinIntent, type Session } from './session.ts';
+import type { ActionType, PublicState, Role, ServerMessage } from '@coup/shared';
+import { closeShowdown, dropMotion, initialSession, reduceSession, rejoinIntent, type Session } from './session.ts';
 
 const players = [{ id: 'a', name: '张三', isHost: true, connected: true, isPreviousWinner: false, isComputer: false }];
 const table = { phase: 'choosingAction' } as PublicState;
@@ -281,5 +281,92 @@ describe('断线重连', () => {
 
   it('重连带上本机保存的身份', () => {
     expect(rejoinIntent(id, 'ABC123', null, false)).toEqual({ type: 'joinRoom', roomCode: 'ABC123', name: '张三', playerId: 'a', secret: 's' });
+  });
+});
+
+describe('座位动效', () => {
+  // a 是自己（手里公爵 + 女伯爵），b 是对手；金币 a 2、b 0
+  const seated = (coins: [number, number], extra: Partial<PublicState> = {}): ServerMessage => ({
+    type: 'publicState',
+    state: {
+      ...table,
+      players: [{ id: 'a', coins: coins[0], alive: true, handCount: 2 }, { id: 'b', coins: coins[1], alive: true, handCount: 2 }] as PublicState['players'],
+      ...extra,
+    },
+    remainingMs: 1000,
+    deadlineAt: 5000,
+    hostId: 'a',
+  });
+  const start = run([
+    { type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: pair, hostId: 'a', canStartTunnel: true, gameNumber: 0 },
+    { type: 'gameStarted', turnOrder: ['a', 'b'], gameNumber: 1 },
+    seated([2, 0]),
+    { type: 'privateState', hand: [{ id: 'c1', role: 'duke' }, { id: 'c2', role: 'contessa' }] },
+  ]);
+  const events = (...list: Extract<ServerMessage, { type: 'events' }>['events']): ServerMessage => ({ type: 'events', events: list });
+  const claim = (actorId: string, role: Role, action: ActionType = 'tax') => events({ type: 'actionChosen', actorId, action, claimedRole: role });
+  const brief = (s: Session) => s.motions.map(({ id: _id, ...m }) => m);
+
+  it('金币差额按变化前的状态计算，同批合并，0 不显示', () => {
+    // 对手从 0 金币的人那里偷：自己 +0 不显示；随后对手又拿了一次收入，两条合并
+    const s = run([events(
+      { type: 'actionChosen', actorId: 'b', action: 'steal', targetId: 'a' },
+      { type: 'coinsChanged', playerId: 'a', coins: 2 },
+      { type: 'coinsChanged', playerId: 'b', coins: 2 },
+      { type: 'coinsChanged', playerId: 'b', coins: 3 },
+    )], start);
+    expect(brief(s)).toContainEqual({ playerId: 'b', kind: 'coins', delta: 3 });
+    expect(s.motions.some((m) => m.playerId === 'a' && m.kind === 'coins')).toBe(false);
+  });
+
+  it('同一座位的新动效替换还没播完的旧动效', () => {
+    const s = run([
+      events({ type: 'coinsChanged', playerId: 'a', coins: 3 }),
+      seated([3, 0]),
+      events({ type: 'coinsChanged', playerId: 'a', coins: 0 }),
+    ], start);
+    expect(brief(s)).toEqual([{ playerId: 'a', kind: 'coins', delta: -3 }]);
+  });
+
+  it('新声称才放背后灵：故事里已有的角色不重放，实际交换后从头讲', () => {
+    const first = run([claim('b', 'duke')], start);
+    expect(brief(first)).toEqual([{ playerId: 'b', kind: 'ghost', role: 'duke', honest: false }]);
+    const again = run([claim('b', 'duke')], first);
+    expect(again.motions).toEqual(first.motions);
+    const exchanged = run([
+      claim('b', 'ambassador', 'exchange'),
+      events({ type: 'exchangeDrew', playerId: 'b', count: 2 }),
+      claim('b', 'duke'),
+    ], again);
+    expect(brief(exchanged).at(-1)).toEqual({ playerId: 'b', kind: 'ghost', role: 'duke', honest: false });
+  });
+
+  it('阻挡也是声称；自己手里有这张才算真声称', () => {
+    const s = run([
+      events({ type: 'actionChosen', actorId: 'b', action: 'assassinate', targetId: 'a', claimedRole: 'assassin' }, { type: 'blocked', blockerId: 'a', role: 'contessa' }),
+    ], start);
+    expect(brief(s)).toContainEqual({ playerId: 'a', kind: 'ghost', role: 'contessa', honest: true });
+    expect(brief(run([claim('a', 'captain', 'steal')], start))).toEqual([{ playerId: 'a', kind: 'ghost', role: 'captain', honest: false }]);
+  });
+
+  it('对质那一批的动效等舞台收起后才放出来', () => {
+    const challenged = run([
+      claim('b', 'duke'),
+      seated([2, 0], { phase: 'showdown', showdown: { challengerId: 'a', claimantId: 'b', role: 'duke' } as PublicState['showdown'] }),
+    ], start);
+    const resolved = run([events(
+      { type: 'challengeResolved', truth: true, loserId: 'a', claimantId: 'b', role: 'duke', slot: 0 },
+      { type: 'coinsChanged', playerId: 'b', coins: 3 },
+    )], challenged);
+    expect(resolved.motions.some((m) => m.kind === 'coins')).toBe(false);
+    expect(brief(closeShowdown(resolved))).toContainEqual({ playerId: 'b', kind: 'coins', delta: 3 });
+  });
+
+  it('播完的动效可以移除；重连不补播，开新局清空故事', () => {
+    const s = run([claim('b', 'duke')], start);
+    expect(dropMotion(s, s.motions[0].id).motions).toEqual([]);
+    expect(run([{ type: 'joined', roomCode: 'ABC123', playerId: 'a', secret: 's', players: pair, hostId: 'a', canStartTunnel: true, gameNumber: 1 }], s).motions).toEqual([]);
+    const next = run([{ type: 'lobby', players: pair, hostId: 'a' }, { type: 'gameStarted', turnOrder: ['a', 'b'], gameNumber: 2 }, seated([2, 0]), claim('b', 'duke')], s);
+    expect(brief(next)).toEqual([{ playerId: 'b', kind: 'ghost', role: 'duke', honest: false }]);
   });
 });

@@ -24,6 +24,12 @@ export interface ShowdownView {
   newCard: Card | null; // 自己质疑失败后在原牌位换来的新牌
 }
 
+// 座位动效：一次性的，只由实时事件产生（重连时服务器不重放事件，所以不会补播）。id 取事件的日志序号。
+export type SeatMotion =
+  | { id: number; playerId: string; kind: 'coins'; delta: number }
+  // honest：自己声称、手里正好有这个角色（只有本机知道，别人的屏幕上永远是普通背后灵）
+  | { id: number; playerId: string; kind: 'ghost'; role: Role; honest: boolean };
+
 // 房间会话：服务器下发的「这个房间」的状态，加上随牌局一起重置的本地选择。
 export interface Session {
   roomCode: string | null;
@@ -44,6 +50,11 @@ export interface Session {
   awaitingShowcase: Showcase['kind'] | null;
   showcase: Showcase | null;
   showdown: ShowdownView | null;
+  motions: SeatMotion[]; // 每个座位每种至多一条，新的替换旧的
+  heldMotions: SeatMotion[]; // 对质那一批的动效：舞台挡着座位，收起后再放
+  // 每位玩家的故事（CONTEXT.md）：最近一次实际交换以来声称过的角色，只有不在故事里的才是新声称、才放背后灵。
+  // 从本局实时事件累积；刷新页面后从空开始，每人第一次再声称会重放一次（有意的简化：服务器不补发事件历史）
+  stories: Record<string, Role[]>;
 }
 
 export const initialSession: Session = {
@@ -64,6 +75,9 @@ export const initialSession: Session = {
   awaitingShowcase: null,
   showcase: null,
   showdown: null,
+  motions: [],
+  heldMotions: [],
+  stories: {},
 };
 
 // now 为收到消息时的 performance.now()，用于倒计时按实际经过时间递减。
@@ -78,6 +92,7 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
         hand: s.hand,
         // 离线期间再来一局并已开局（错过了 lobby 与 gameStarted）：上一局的日志不能带进这一局
         log: msg.gameNumber === s.gameNumber ? s.log : [],
+        stories: msg.gameNumber === s.gameNumber ? s.stories : {},
         nextLogId: s.nextLogId,
         gameNumber: msg.gameNumber,
         countdown: s.countdown,
@@ -102,9 +117,12 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
         awaitingShowcase: null,
         showcase: null,
         showdown: null,
+        motions: [],
+        heldMotions: [],
+        stories: {},
       };
     case 'gameStarted':
-      return { ...s, log: [], nextLogId: 0, gameNumber: msg.gameNumber, awaitingShowcase: 'deal' };
+      return { ...s, log: [], nextLogId: 0, gameNumber: msg.gameNumber, awaitingShowcase: 'deal', motions: [], heldMotions: [], stories: {} };
     case 'publicState': {
       // 牌局结束或自己被淘汰：手里已没有可看的牌，收起发牌展示
       const out = msg.state.phase === 'gameOver' || msg.state.players?.find((p) => p.id === s.playerId)?.alive === false;
@@ -131,8 +149,11 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
     case 'events': {
       const entries = msg.events.map((event, i) => ({ id: s.nextLogId + i, event }));
       const resolved = msg.events.find((e) => e.type === 'challengeResolved');
+      const { motions, stories } = seatMotions(s, entries);
       return {
         ...s,
+        stories,
+        ...(resolved ? { heldMotions: withMotions(s.heldMotions, motions) } : { motions: withMotions(s.motions, motions) }),
         log: [...s.log, ...entries].slice(-500),
         nextLogId: s.nextLogId + entries.length,
         // 已揭晓的舞台不再换揭晓结果：动画中途换掉会让它的结束回调永远不触发，舞台挡住整局（下一场对质在动画期间已结束）
@@ -170,7 +191,7 @@ function showdownWithHand(sd: ShowdownView, hand: Card[]): ShowdownView {
 
 // 舞台动画播完：收起这场对质；若下一场对质已经开始（动画期间收到了它的状态），接着打开它
 export function closeShowdown(s: Session): Session {
-  const closed = { ...s, showdown: null };
+  const closed = { ...s, showdown: null, motions: withMotions(s.motions, s.heldMotions), heldMotions: [] };
   return { ...closed, showdown: s.publicState ? showdownFor(closed, s.publicState) : null };
 }
 
@@ -182,4 +203,41 @@ function showdownFor(s: Session, state: PublicState): ShowdownView | null {
   const mine = state.showdown.claimantId === s.playerId;
   const slots = state.players.find((p) => p.id === state.showdown!.claimantId)?.handCount ?? 0;
   return { ...state.showdown, id: s.nextLogId, slots, hand: mine ? s.hand : null, focus: null, reveal: null, newCard: null };
+}
+
+// 一批事件 → 座位动效。金币差额对照变化前的公开状态（服务器先发 events 再发 publicState），同批同座位合并，0 不显示
+function seatMotions(s: Session, entries: LogEntry[]): { motions: SeatMotion[]; stories: Record<string, Role[]> } {
+  const motions: SeatMotion[] = [];
+  const stories = { ...s.stories };
+  const coins = new Map<string, { id: number; coins: number }>();
+  const ghost = (id: number, playerId: string, role: Role) => {
+    const story = stories[playerId] ?? [];
+    if (story.includes(role)) return;
+    stories[playerId] = [...story, role];
+    const honest = playerId === s.playerId && s.hand.some((c) => c.role === role);
+    motions.push({ id, playerId, kind: 'ghost', role, honest });
+  };
+  for (const { id, event: e } of entries) {
+    if (e.type === 'coinsChanged') coins.set(e.playerId, { id, coins: e.coins });
+    else if (e.type === 'actionChosen' && e.claimedRole) ghost(id, e.actorId, e.claimedRole);
+    else if (e.type === 'blocked') ghost(id, e.blockerId, e.role);
+    else if (e.type === 'exchangeDrew') stories[e.playerId] = []; // 只宣布、被抓到没换成的交换没有这个事件
+  }
+  for (const [playerId, { id, coins: after }] of coins) {
+    const before = s.publicState?.players?.find((p) => p.id === playerId)?.coins;
+    if (before != null && after !== before) motions.push({ id, playerId, kind: 'coins', delta: after - before });
+  }
+  return { motions, stories };
+}
+
+// 同一座位同一种动效只留最新一条：还没播完的旧动效被新的替换
+function withMotions(current: SeatMotion[], added: SeatMotion[]): SeatMotion[] {
+  const latest = new Map<string, SeatMotion>();
+  for (const m of [...current, ...added]) latest.set(`${m.playerId}:${m.kind}`, m);
+  return [...latest.values()];
+}
+
+// 动效播完（animationend）后移除，免得座位换位重挂载时重放
+export function dropMotion(s: Session, id: number): Session {
+  return { ...s, motions: s.motions.filter((m) => m.id !== id) };
 }
