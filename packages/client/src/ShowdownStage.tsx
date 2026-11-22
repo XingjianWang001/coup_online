@@ -9,6 +9,7 @@ import { translate, type Locale } from './localization.ts';
 import { DecisionTimer, type Clock } from './clock.tsx';
 import { BigCard, RoleIcon } from './icons.tsx';
 
+// ---------- 对质舞台与私下选牌（动效：聚光、静止的牌带发热边框、快速翻牌、盖章；原型分支未归档） ----------
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // 翻牌器从 180°（牌背朝外）转到 0°（牌面朝外）
