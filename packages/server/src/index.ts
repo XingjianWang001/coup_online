@@ -6,10 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { Server, type Socket } from 'socket.io';
 import { InMemoryGameRepository } from './repository.ts';
 import { Room, type RoomOptions, type RoomPlayer } from './room.ts';
-import { canStartTunnel, getTunnelUrl, startTunnel, stopTunnel } from './tunnel.ts';
+import { canStartTunnel, startTunnel, stopTunnel } from './tunnel.ts';
 import { parseClientIntent, type ClientIntent, type GameEvent, type ServerError } from '@coup/shared';
 import { ClientError, toServerError } from './errors.ts';
 import { reserveRoomCreation } from './room-limits.ts';
+import { publish as publishTo, pushJoined } from './push.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -97,34 +98,7 @@ const httpServer = createServer((req, res) => {
 
 const io = new Server(httpServer);
 
-function broadcast(room: Room): void {
-  const pub = room.getPublicState();
-  if (pub) {
-    io.to(room.code).emit('publicState', {
-      state: pub,
-      remainingMs: room.getDeadlineMs(),
-      deadlineAt: room.getDeadlineAt(),
-      hostId: room.hostId,
-    });
-    for (const p of room.players.values()) {
-      const priv = room.getPrivateState(p.id);
-      if (priv && room.isCurrentConnection(p.id, p.socketId)) io.to(p.socketId).emit('privateState', { hand: priv.hand });
-    }
-  }
-}
-
-function broadcastLobby(room: Room): void {
-  io.to(room.code).emit('lobby', { players: room.playerList, hostId: room.hostId });
-}
-
-// 房间状态变化后的唯一推送：先推事件（开局单独推 gameStarted），再按阶段推大厅或牌局状态。
-function publish(room: Room, events: GameEvent[]): void {
-  const started = events.find((e) => e.type === 'started');
-  if (started) io.to(room.code).emit('gameStarted', { turnOrder: started.turnOrder, gameNumber: room.gameNumber });
-  else if (events.length) io.to(room.code).emit('events', { events });
-  if (room.game) broadcast(room);
-  else broadcastLobby(room);
-}
+const publish = (room: Room, events: GameEvent[]) => publishTo(io, room, events);
 
 // 所有错误都从这里发：带上这条连接是否还在房间里，客户端据此决定会话是否结束
 function emitError(socket: Socket, error: ServerError): void {
@@ -135,17 +109,7 @@ function emitJoined(socket: Socket, room: Room, player: RoomPlayer): void {
   socket.join(room.code);
   socket.data.roomCode = room.code;
   socket.data.playerId = player.id;
-  socket.emit('joined', {
-    roomCode: room.code,
-    playerId: player.id,
-    secret: player.secret,
-    players: room.playerList,
-    hostId: room.hostId,
-    tunnelUrl: getTunnelUrl() ?? undefined,
-    canStartTunnel: canStartTunnel(socket.handshake),
-    gameNumber: room.gameNumber,
-  });
-  publish(room, []);
+  pushJoined(io, room, player, canStartTunnel(socket.handshake));
 }
 
 io.on('connection', (socket) => {
