@@ -10,7 +10,6 @@ export default async function reactionScenario(ui) {
   other.intent({ type: 'joinRoom', roomCode, name: 'Van' });
   await other.next('joined');
   await ui.joinAs('Me', roomCode);
-  await host.next('lobby');
   host.intent({ type: 'startGame' });
   await ui.waitFor('.showcase');
   await ui.evaluate(`document.querySelector('.showcase-overlay').click()`);

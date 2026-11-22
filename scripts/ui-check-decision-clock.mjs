@@ -15,7 +15,6 @@ export default async function decisionClockScenario(ui) {
     await bot.next('joined');
   }
   await ui.joinAs('小林', roomCode);
-  await host.next('lobby');
   host.intent({ type: 'startGame' });
   await ui.waitFor('.showcase-overlay');
   await ui.evaluate("document.querySelector('.showcase-overlay').click()");

@@ -18,7 +18,6 @@ export default async function tableScenario(ui) {
       await bot.next('joined');
     }
     await ui.joinAs('Me', roomCode);
-    await host.next('lobby');
     host.intent({ type: 'startGame' });
     await ui.waitFor('.showcase');
     await ui.evaluate(`document.querySelector('.showcase-overlay').click()`);

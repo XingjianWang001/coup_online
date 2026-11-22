@@ -108,7 +108,6 @@ async function defaultScenario(ui) {
   host.intent({ type: 'createRoom', name: 'Bot' });
   const { roomCode } = await host.next('joined');
   await ui.joinAs('Me', roomCode);
-  await host.next('lobby');
   host.intent({ type: 'startGame' });
   await ui.waitFor('.showcase');
   await ui.frames('deal', [0, 300, 700, 1400]);
@@ -179,12 +178,14 @@ async function main() {
       }
       await evaluate(`document.getAnimations().forEach((a) => a.finish())`);
     },
-    // 真人玩家凭加入链接进房
+    // 真人玩家凭加入链接进房；等到页面进了房间（服务器已把这位玩家加进房间）才返回，之后机器人可以直接开局。
+    // 不要改成之后再等机器人的 next('lobby')：那条 lobby 可能在监听挂上之前就到了，CI 上会偶发超时
     joinAs: async (name, roomCode) => {
       await ui.goto(`/?room=${roomCode}`);
       await ui.waitFor('input');
       await ui.type('input', name);
       await ui.click('Join|加入');
+      await ui.waitFor('.roomcode');
     },
     // socket.io 机器人：intent 发意图，next 等下一条某类消息，state 存最新公开状态与手牌
     bot: () => {

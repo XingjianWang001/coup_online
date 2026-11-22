@@ -32,7 +32,6 @@ export default async function motionScenario(ui) {
   van.intent({ type: 'joinRoom', roomCode, name: 'Van' });
   await van.next('joined');
   await ui.joinAs('Me', roomCode);
-  await host.next('lobby');
   host.intent({ type: 'startGame' });
   await ui.waitFor('.showcase');
   await ui.evaluate(`document.querySelector('.showcase-overlay').click()`);
