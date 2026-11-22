@@ -1111,7 +1111,7 @@ function Glyph({ children, size, className = '' }: { children: ReactNode; size?:
   );
 }
 
-function RoleIcon({ role }: { role: Role }) {
+export function RoleIcon({ role }: { role: Role }) {
   return <Glyph>{ROLE_GLYPHS[role]}</Glyph>;
 }
 
@@ -1795,7 +1795,7 @@ function TransientMessage<T extends { id: number }>(props: {
   );
 }
 
-function GameBoard(props: {
+export function GameBoard(props: {
   state: PublicState;
   hand: Card[];
   me: string | undefined;
