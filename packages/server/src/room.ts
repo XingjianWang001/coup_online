@@ -1,11 +1,9 @@
-import type { GameState, GameEvent, Role, ActionType, Phase } from '@coup/engine';
+import type { GameState, GameEvent, Role, Phase } from '@coup/engine';
 import { randomBytes } from 'node:crypto';
 import {
-  ACTION_CLAIM,
   FORCED_COUP_COINS,
   GameRuleError,
   MAX_PLAYERS,
-  ROLE_ORDER,
   needsTarget,
   block,
   challenge,
@@ -27,20 +25,12 @@ import {
   revealShowdownCard,
 } from '@coup/engine';
 import type { GameRepository } from './repository.ts';
-import { isValidNickname, PHRASES, STRENGTHS, type LobbyPlayer, type Phrase, type Reaction, type Strength } from '@coup/shared';
+import { ACTION_TIMEOUT_MS, DISCONNECT_GRACE_MS, isValidNickname, REACTION_MIN_INTERVAL_MS, REVEAL_MS, WINDOW_TIMEOUT_MS, type ClientIntent, type LobbyPlayer, type Reaction, type Strength } from '@coup/shared';
 import { ClientError } from './errors.ts';
 import { TUNINGS, decideComputerIntent, drawTemperament, type ComputerIntent, type Returned, type Temperament } from './computer.ts';
 import { AFTER_GAME_MS, afterGame, afterOwnClaim, afterResult, offTurn, onOwnTurn, probe, replyTo, speak, stagger, targeted, temper, type Heard, type Moment, type Said } from './speech.ts';
 
-const ACTION_TIMEOUT_MS = 60_000;
-const WINDOW_TIMEOUT_MS = 20_000;
-// 对质揭晓后客户端要播完翻牌、换牌或落回座位的动画（约 6 秒），下一段计时顺延这么久，免得倒计时被动画吃掉。
-// 与 client/src/App.tsx 对质舞台的动画时长（SUSPENSE_MS 等）一起改
-const REVEAL_MS = 6_000;
 const FOCUS_MIN_INTERVAL_MS = 50;
-// 客户端发完表态冷却 2 秒；服务器按玩家只拦 1.5 秒，留 0.5 秒给网络抖动，正常冷却后的表态不会被误丢
-const REACTION_MIN_INTERVAL_MS = 1_500;
-const DISCONNECT_GRACE_MS = 90_000;
 // 电脑玩家的名字不分语言（ADR 0008：文字归客户端，名字不翻译）。6 个够用：加第 6 位时房里只有 5 个名字可能撞上
 const COMPUTER_NAMES = ['Ada', 'Alan', 'Grace', 'Hedy', 'Linus', 'Edsger'];
 
@@ -93,25 +83,11 @@ function autoAction(g: GameState): GameEvent[] {
   return chooseAction(g, cur, 'income');
 }
 
-const isAction = (value: unknown): value is ActionType => typeof value === 'string' && Object.hasOwn(ACTION_CLAIM, value);
-const isRole = (value: unknown): value is Role => (ROLE_ORDER as readonly unknown[]).includes(value);
-
-// 表态来自客户端：只认预设内容，按已知字段重新组装，多余字段（比如自写文字）不会被转发出去
-function parseReaction(raw: unknown): Reaction {
-  const r = (raw ?? {}) as Record<string, unknown>;
-  if (r.kind === 'phrase' && (PHRASES as readonly unknown[]).includes(r.phrase)) {
-    return { kind: 'phrase', phrase: r.phrase as Phrase };
-  }
-  if (r.kind === 'announcement' && isAction(r.action) && (r.targetId === undefined || typeof r.targetId === 'string')) {
-    return r.targetId === undefined
-      ? { kind: 'announcement', action: r.action }
-      : { kind: 'announcement', action: r.action, targetId: r.targetId };
-  }
-  if (r.kind === 'verbalClaim' && typeof r.has === 'boolean' && isRole(r.role)) {
-    return { kind: 'verbalClaim', has: r.has, role: r.role };
-  }
-  throw new ClientError({ code: 'illegalIntent' });
-}
+// 落到引擎上的意图；形状已由 parseClientIntent 在传输层检查过
+export type GameIntent = Extract<
+  ClientIntent,
+  { type: 'chooseAction' | 'challenge' | 'passChallenge' | 'block' | 'passBlock' | 'revealShowdownCard' | 'revealPostGameCard' | 'resolveLoss' | 'resolveExchange' }
+>;
 
 function genId(): string {
   return randomBytes(8).toString('hex');
@@ -226,22 +202,21 @@ export class Room {
     this.events.onBroadcast(this, []);
   }
 
-  removeComputer(playerId: string, socketId: string, computerId: unknown): void {
+  removeComputer(playerId: string, socketId: string, computerId: string): void {
     this.requireLobbyHost(playerId, socketId);
     this.removePlayer(this.requireComputer(computerId).id);
     this.events.onBroadcast(this, []);
   }
 
-  setComputerStrength(playerId: string, socketId: string, computerId: unknown, strength: unknown): void {
+  setComputerStrength(playerId: string, socketId: string, computerId: string, strength: Strength): void {
     this.requireLobbyHost(playerId, socketId);
     const computer = this.requireComputer(computerId);
-    if (!STRENGTHS.includes(strength as Strength)) throw new ClientError({ code: 'illegalIntent' });
-    computer.strength = strength as Strength;
+    computer.strength = strength;
     this.events.onBroadcast(this, []);
   }
 
-  private requireComputer(computerId: unknown): RoomPlayer {
-    const p = typeof computerId === 'string' ? this.players.get(computerId) : undefined;
+  private requireComputer(computerId: string): RoomPlayer {
+    const p = this.players.get(computerId);
     if (!p?.isComputer) throw new ClientError({ code: 'illegalIntent' });
     return p;
   }
@@ -704,7 +679,7 @@ export class Room {
   }
 
   // 客户端意图分发
-  dispatch(playerId: string, socketId: string, intent: { type: string } & Record<string, unknown>): GameEvent[] {
+  dispatch(playerId: string, socketId: string, intent: GameIntent): GameEvent[] {
     this.requireCurrentConnection(playerId, socketId);
     // 重复的放弃（例如双击）不改变牌局：既不报错，也不广播，免得恶意客户端借此让全房间不停重渲染
     const g = this.game;
@@ -715,29 +690,27 @@ export class Room {
     return events;
   }
 
-  private applyIntent(playerId: string, intent: { type: string } & Record<string, unknown>): GameEvent[] {
+  private applyIntent(playerId: string, intent: GameIntent): GameEvent[] {
     try {
       switch (intent.type) {
         case 'chooseAction':
-          return this.apply((g) => chooseAction(g, playerId, intent.action as ActionType, intent.targetId as string | undefined));
+          return this.apply((g) => chooseAction(g, playerId, intent.action, intent.targetId));
         case 'challenge':
           return this.apply((g) => challenge(g, playerId));
         case 'passChallenge':
           return this.apply((g) => passChallenge(g, playerId));
         case 'block':
-          return this.apply((g) => block(g, playerId, intent.role as Role));
+          return this.apply((g) => block(g, playerId, intent.role));
         case 'passBlock':
           return this.apply((g) => passBlock(g, playerId));
         case 'revealShowdownCard':
-          return this.apply((g) => revealShowdownCard(g, playerId, intent.cardId as string));
+          return this.apply((g) => revealShowdownCard(g, playerId, intent.cardId));
         case 'revealPostGameCard':
-          return this.apply((g) => revealPostGameCard(g, playerId, intent.cardId as string));
+          return this.apply((g) => revealPostGameCard(g, playerId, intent.cardId));
         case 'resolveLoss':
-          return this.apply((g) => resolveLoss(g, playerId, intent.cardId as string));
+          return this.apply((g) => resolveLoss(g, playerId, intent.cardId));
         case 'resolveExchange':
-          // keepIds 来自客户端：不是数组时在这里拒绝，而不是让引擎抛 TypeError、在日志里打一份堆栈
-          if (!Array.isArray(intent.keepIds)) throw new ClientError({ code: 'invalidGameAction' });
-          return this.apply((g) => resolveExchange(g, playerId, intent.keepIds as string[]));
+          return this.apply((g) => resolveExchange(g, playerId, intent.keepIds));
         default:
           throw new ClientError({ code: 'illegalIntent' });
       }
@@ -752,53 +725,50 @@ export class Room {
 
   // 对质悬停同步：校验后返回 { slot } 交给传输层转发（slot 为 null 表示不再对准任何牌）；不该转发时返回 null。
   // 比客户端节流还密的消息直接丢弃，挡住刷屏；转发不进牌局状态。
-  focusShowdownCard(playerId: string, socketId: string, slot: unknown): { slot: number | null } | null {
+  focusShowdownCard(playerId: string, socketId: string, slot: number | null): { slot: number | null } | null {
     this.requireCurrentConnection(playerId, socketId);
     return this.aim(playerId, slot);
   }
 
   // 对准的内核，不看连接：电脑没有连接，走这里而不伪造 socket
-  private aim(playerId: string, slot: unknown): { slot: number | null } | null {
+  private aim(playerId: string, slot: number | null): { slot: number | null } | null {
     const g = this.game;
     if (g?.phase !== 'showdown' || g.showdown?.claimantId !== playerId) return null;
     const handSize = g.players.find((p) => p.id === playerId)!.hand.length;
-    if (slot !== null && !(Number.isInteger(slot) && (slot as number) >= 0 && (slot as number) < handSize)) {
-      throw new ClientError({ code: 'illegalIntent' });
-    }
+    if (slot !== null && slot >= handSize) throw new ClientError({ code: 'illegalIntent' });
     const now = Date.now();
     if (now - this.lastFocusAt < FOCUS_MIN_INTERVAL_MS) return null;
     this.lastFocusAt = now;
-    return { slot: slot as number | null };
+    return { slot };
   }
 
   // 真人表态：校验后经 onReaction 发给整个房间（含发送者），也返回 { playerId, reaction }；不进牌局状态。
-  // 格式不对、不在预设里的内容报错；客户端点下去时还合法、到服务器时已过时的（目标刚被淘汰、自己刚被淘汰、牌局刚结束）静默丢弃，
+  // 形状和预设内容已由 parseClientIntent 检查；行动预告的目标不对报错；客户端点下去时还合法、到服务器时已过时的（目标刚被淘汰、自己刚被淘汰、牌局刚结束）静默丢弃，
   // 不给一条不改变牌局的表态弹错误
-  react(playerId: string, socketId: string, reaction: unknown): { playerId: string; reaction: Reaction } | null {
+  react(playerId: string, socketId: string, reaction: Reaction): { playerId: string; reaction: Reaction } | null {
     this.requireCurrentConnection(playerId, socketId);
     return this.relay(playerId, reaction);
   }
 
   // 表态的内核，不看连接：电脑没有连接，走这里而不伪造 socket。通过的经 onReaction 发给整个房间
   // depth 是接话的层数（只在服务器里记）：真人的和电脑起头的是 0
-  private relay(playerId: string, reaction: unknown, depth = 0): { playerId: string; reaction: Reaction } | null {
+  private relay(playerId: string, reaction: Reaction, depth = 0): { playerId: string; reaction: Reaction } | null {
     const g = this.game;
     if (!g) throw new ClientError({ code: 'gameNotStarted' });
-    const parsed = parseReaction(reaction);
-    if (parsed.kind === 'announcement') {
-      const target = g.players.find((p) => p.id === parsed.targetId);
-      const shapeOk = needsTarget(parsed.action) ? !!target && target.id !== playerId : parsed.targetId === undefined;
+    if (reaction.kind === 'announcement') {
+      const target = g.players.find((p) => p.id === reaction.targetId);
+      const shapeOk = needsTarget(reaction.action) ? !!target && target.id !== playerId : reaction.targetId === undefined;
       if (!shapeOk) throw new ClientError({ code: 'illegalIntent' });
       if (target && !target.alive) return null;
     }
     // 被淘汰的人和结束的牌局没有下一步行动可预告、也没有角色可声称
     const phrasesOnly = g.phase === 'gameOver' || !g.players.find((p) => p.id === playerId)?.alive;
-    if (phrasesOnly && parsed.kind !== 'phrase') return null;
+    if (phrasesOnly && reaction.kind !== 'phrase') return null;
     // 比冷却还密的直接丢弃，挡住刷屏；不回错误，与对质悬停一致
     const now = Date.now();
     if (now - (this.lastReactionAt.get(playerId) ?? -Infinity) < REACTION_MIN_INTERVAL_MS) return null;
     this.lastReactionAt.set(playerId, now);
-    const relayed = { playerId, reaction: parsed };
+    const relayed = { playerId, reaction };
     this.events.onReaction(this, relayed);
     const heard = { ...relayed, at: now, depth, seen: this.gameEvents.length };
     this.heard.push(heard);

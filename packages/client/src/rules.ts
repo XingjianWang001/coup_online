@@ -1,8 +1,12 @@
-import { ACTION_CLAIM, ASSASSINATE_COST, COUP_COST, needsTarget, ROLE_ORDER, STEAL_AMOUNT } from '@coup/shared';
+import { ACTION_CLAIM, ACTION_TIMEOUT_MS, ASSASSINATE_COST, COUP_COST, DISCONNECT_GRACE_MS, needsTarget, ROLE_ORDER, STEAL_AMOUNT, WINDOW_TIMEOUT_MS } from '@coup/shared';
 import type { ActionType, Role } from '@coup/shared';
 import type { Locale } from './localization.ts';
 
 export const ROLES = ROLE_ORDER;
+
+const ACTION_TIMEOUT_S = ACTION_TIMEOUT_MS / 1000;
+const WINDOW_TIMEOUT_S = WINDOW_TIMEOUT_MS / 1000;
+const DISCONNECT_GRACE_S = DISCONNECT_GRACE_MS / 1000;
 
 // 悬浮气泡里的金币图标说明；收入、外援、征税的金额引擎没有导出常量
 const ACTION_COINS: Partial<Record<ActionType, string>> = {
@@ -118,12 +122,12 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
         onlineOnly: true,
         items: [
           '每局由系统随机选择起始玩家。',
-          '行动阶段限时 60 秒；超时自动选择收入。若玩家已有至少 10 枚金币，则自动对随机合法目标发动政变。',
-          '问询窗口限时 20 秒；无论当前等待质疑还是阻挡，超时都视为所有尚未回应的玩家放弃。',
-          '有人质疑即进入对质：被质疑者在 20 秒内从自己的暗牌中选一张公开翻开，全场都能看到，被质疑者正对准哪张牌也会同步给所有人。翻出被声称的角色则质疑失败：这张牌洗回牌堆、在原位换一张新牌，质疑者失去 1 影响力；翻出其他牌则质疑成功，翻开的这张就是被质疑者失去的影响力。持有被声称的角色也可以故意翻开另一张，按质疑成功处理。超时时，持有被声称的角色就自动翻开它，否则随机翻开一张。',
-          '需要失去影响力时（政变、暗杀、质疑失败），玩家在 20 秒内私下选择翻开哪张暗牌，其他玩家只看到等待提示和最终的明牌；超时随机翻开一张。',
-          '交换时，行动者在 60 秒内私下选择保留哪些牌；超时保留原来的手牌，摸到的牌全部放回牌堆。',
-          '刷新或短暂断线后，本机可凭保存的临时身份回到原座位。断线宽限为 90 秒。',
+          `行动阶段限时 ${ACTION_TIMEOUT_S} 秒；超时自动选择收入。若玩家已有至少 10 枚金币，则自动对随机合法目标发动政变。`,
+          `问询窗口限时 ${WINDOW_TIMEOUT_S} 秒；无论当前等待质疑还是阻挡，超时都视为所有尚未回应的玩家放弃。`,
+          `有人质疑即进入对质：被质疑者在 ${WINDOW_TIMEOUT_S} 秒内从自己的暗牌中选一张公开翻开，全场都能看到，被质疑者正对准哪张牌也会同步给所有人。翻出被声称的角色则质疑失败：这张牌洗回牌堆、在原位换一张新牌，质疑者失去 1 影响力；翻出其他牌则质疑成功，翻开的这张就是被质疑者失去的影响力。持有被声称的角色也可以故意翻开另一张，按质疑成功处理。超时时，持有被声称的角色就自动翻开它，否则随机翻开一张。`,
+          `需要失去影响力时（政变、暗杀、质疑失败），玩家在 ${WINDOW_TIMEOUT_S} 秒内私下选择翻开哪张暗牌，其他玩家只看到等待提示和最终的明牌；超时随机翻开一张。`,
+          `交换时，行动者在 ${ACTION_TIMEOUT_S} 秒内私下选择保留哪些牌；超时保留原来的手牌，摸到的牌全部放回牌堆。`,
+          `刷新或短暂断线后，本机可凭保存的临时身份回到原座位。断线宽限为 ${DISCONNECT_GRACE_S} 秒。`,
           '宽限期内未重连会自动弃权；牌局中主动离开也会立即弃权。弃权会公开全部剩余暗牌并淘汰该玩家；该玩家尚未结算的声称与行动作废，其他玩家已欠下的失去影响力照常结算。',
         ],
       },
@@ -195,12 +199,12 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
         onlineOnly: true,
         items: [
           'The system chooses a starting player at random for each game.',
-          'The action phase lasts 60 seconds. A timeout chooses Income automatically, or a Coup against a random legal target when the player has at least 10 coins.',
-          'An Interrogation Window lasts 20 seconds. Whether it is waiting for a Challenge or a Block, a timeout passes for everyone who has not responded.',
-          'A Challenge starts a Showdown: within 20 seconds the challenged Player reveals one of their Hidden Cards for everyone to see, and the card they are pointing at is shown to all Players as they decide. Revealing the claimed Role fails the Challenge: that card is shuffled into the Deck and replaced in the same position, and the challenger loses 1 Influence. Revealing any other card makes the Challenge succeed, and the revealed card is the Influence the challenged Player loses. A Player who holds the claimed Role may still reveal the other card on purpose; the Challenge then succeeds. On timeout, the claimed Role is revealed if held, otherwise a random card.',
-          'When a Player must lose Influence (Coup, Assassination, or a failed Challenge), they privately choose which Hidden Card to reveal within 20 seconds; others see a waiting line and then the Revealed Card. A timeout reveals a random card.',
-          'During an Exchange, the actor privately chooses which cards to keep within 60 seconds. A timeout keeps their original cards and returns the drawn cards to the Deck.',
-          'After a refresh or brief disconnect, the device can use its saved temporary identity to reclaim the same seat. The disconnect grace period is 90 seconds.',
+          `The action phase lasts ${ACTION_TIMEOUT_S} seconds. A timeout chooses Income automatically, or a Coup against a random legal target when the player has at least 10 coins.`,
+          `An Interrogation Window lasts ${WINDOW_TIMEOUT_S} seconds. Whether it is waiting for a Challenge or a Block, a timeout passes for everyone who has not responded.`,
+          `A Challenge starts a Showdown: within ${WINDOW_TIMEOUT_S} seconds the challenged Player reveals one of their Hidden Cards for everyone to see, and the card they are pointing at is shown to all Players as they decide. Revealing the claimed Role fails the Challenge: that card is shuffled into the Deck and replaced in the same position, and the challenger loses 1 Influence. Revealing any other card makes the Challenge succeed, and the revealed card is the Influence the challenged Player loses. A Player who holds the claimed Role may still reveal the other card on purpose; the Challenge then succeeds. On timeout, the claimed Role is revealed if held, otherwise a random card.`,
+          `When a Player must lose Influence (Coup, Assassination, or a failed Challenge), they privately choose which Hidden Card to reveal within ${WINDOW_TIMEOUT_S} seconds; others see a waiting line and then the Revealed Card. A timeout reveals a random card.`,
+          `During an Exchange, the actor privately chooses which cards to keep within ${ACTION_TIMEOUT_S} seconds. A timeout keeps their original cards and returns the drawn cards to the Deck.`,
+          `After a refresh or brief disconnect, the device can use its saved temporary identity to reclaim the same seat. The disconnect grace period is ${DISCONNECT_GRACE_S} seconds.`,
           'Failing to reconnect within the grace period causes an automatic Forfeit. Leaving during a Game Forfeits immediately. A Forfeit reveals all remaining Hidden Cards and eliminates that Player; that Player\'s unresolved Claims and Actions are void, while Influence other Players already owe is still lost.',
         ],
       },

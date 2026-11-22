@@ -7,7 +7,7 @@ import { Server, type Socket } from 'socket.io';
 import { InMemoryGameRepository } from './repository.ts';
 import { Room, type RoomOptions, type RoomPlayer } from './room.ts';
 import { canStartTunnel, getTunnelUrl, startTunnel, stopTunnel } from './tunnel.ts';
-import type { ClientIntent, GameEvent, ServerError } from '@coup/shared';
+import { parseClientIntent, type ClientIntent, type GameEvent, type ServerError } from '@coup/shared';
 import { ClientError, toServerError } from './errors.ts';
 import { reserveRoomCreation } from './room-limits.ts';
 
@@ -153,9 +153,11 @@ io.on('connection', (socket) => {
     if (typeof ack === 'function') ack(Date.now());
   });
 
-  socket.on('intent', (raw: ClientIntent) => {
+  socket.on('intent', (raw: unknown) => {
     try {
-      handleIntent(socket, raw);
+      const intent = parseClientIntent(raw);
+      if (!intent) throw new ClientError({ code: 'illegalIntent' });
+      handleIntent(socket, intent);
     } catch (e) {
       emitError(socket, toServerError(e));
     }
@@ -172,9 +174,6 @@ io.on('connection', (socket) => {
 });
 
 function handleIntent(socket: Socket, raw: ClientIntent): void {
-  if (!raw || typeof raw !== 'object' || typeof raw.type !== 'string') {
-    throw new ClientError({ code: 'illegalIntent' });
-  }
   switch (raw.type) {
     case 'createRoom': {
       if (socket.data.roomCode) throw new ClientError({ code: 'illegalIntent' });
@@ -194,7 +193,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
     }
     case 'joinRoom': {
       if (socket.data.roomCode) throw new ClientError({ code: 'illegalIntent' });
-      if (typeof raw.roomCode !== 'string' || !/^[0-9a-f]{6}$/i.test(raw.roomCode)) {
+      if (!/^[0-9a-f]{6}$/i.test(raw.roomCode)) {
         throw new ClientError({ code: 'roomNotFound' });
       }
       const room = rooms.get(raw.roomCode.toUpperCase());

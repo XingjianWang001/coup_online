@@ -474,19 +474,6 @@ describe('Room 意图错误', () => {
       .toThrow('invalidGameAction');
   });
 
-  it.each([null, 'ab', { length: 2 }])('交换时 keepIds 不是数组（%j）按非法行动拒绝', (keepIds) => {
-    const { room } = makeRoom({ startingPlayerRandom: () => 0 });
-    const alice = room.addPlayer('Alice', 'sock1');
-    const bob = room.addPlayer('Bob', 'sock2');
-    room.hostId = alice.id;
-    room.startGame(alice.id, 'sock1');
-    room.dispatch(alice.id, 'sock1', { type: 'chooseAction', action: 'exchange' });
-    room.dispatch(bob.id, 'sock2', { type: 'passChallenge' });
-    expect(room.game?.phase).toBe('choosingExchange');
-
-    expect(() => room.dispatch(alice.id, 'sock1', { type: 'resolveExchange', keepIds })).toThrow('invalidGameAction');
-  });
-
   it.each([
     ['passChallenge', 'tax'],
     ['passBlock', 'foreignAid'],
@@ -506,12 +493,6 @@ describe('Room 意图错误', () => {
     expect(room.game?.passed).toEqual([bob.id]);
   });
 
-  it('即使牌局尚未开始也把未知意图映射为稳定的客户端错误', () => {
-    const { room } = makeRoom();
-    const alice = room.addPlayer('Alice', 'sock1');
-
-    expect(() => room.dispatch(alice.id, 'sock1', { type: 'futureIntent' })).toThrow('illegalIntent');
-  });
 
   it('不把意外基础设施异常误报为规则校验错误', () => {
     const { room, repo } = makeRoom({ startingPlayerRandom: () => 0 });
@@ -716,7 +697,7 @@ describe('Room 电脑玩家', () => {
     expect(room.playerList.filter((p) => !p.isComputer).map((p) => p.name)).toEqual(['Alice', 'Bob']);
   });
 
-  it('新加的电脑玩家一律普通，房主在大厅阶段逐个改强度，名单上人人看得到；非房主、牌局中、目标不是电脑或不认识的强度被拒绝', () => {
+  it('新加的电脑玩家一律普通，房主在大厅阶段逐个改强度，名单上人人看得到；非房主、牌局中、目标不是电脑被拒绝', () => {
     const { room, events, alice, bob } = lobby();
     room.addComputer(alice.id, 'sock1');
     room.addComputer(alice.id, 'sock1');
@@ -727,7 +708,6 @@ describe('Room 电脑玩家', () => {
     expect(room.playerList.filter((p) => !p.isComputer).some((p) => 'strength' in p)).toBe(false);
     expect(() => room.setComputerStrength(bob.id, 'sock2', first.id, 'strong')).toThrow('hostOnly');
     expect(() => room.setComputerStrength(alice.id, 'sock1', bob.id, 'strong')).toThrow('illegalIntent');
-    expect(() => room.setComputerStrength(alice.id, 'sock1', first.id, 'godlike')).toThrow('illegalIntent');
     room.startGame(alice.id, 'sock1');
     expect(() => room.setComputerStrength(alice.id, 'sock1', first.id, 'strong')).toThrow('illegalIntent');
     expect(computers(room).map((p) => p.strength)).toEqual(['standard', 'strong']);
@@ -1123,7 +1103,6 @@ describe('Room 对质悬停同步', () => {
     vi.advanceTimersByTime(100);
     expect(room.focusShowdownCard(alice.id, 'sock1', null)).toEqual({ slot: null });
     expect(() => room.focusShowdownCard(alice.id, 'sock1', 2)).toThrow('illegalIntent');
-    expect(() => room.focusShowdownCard(alice.id, 'sock1', '0')).toThrow('illegalIntent');
   });
 });
 
@@ -1294,23 +1273,6 @@ describe('Room 表态', () => {
     expect(() => room.react(alice.id, 'sock1', { kind: 'phrase', phrase: 'sure' })).toThrow('gameNotStarted');
   });
 
-  it('拒绝格式不对或不在预设里的表态：自写文字进不来', () => {
-    const { room, bob } = playingRoom();
-    for (const bad of [
-      null,
-      'sure',
-      { kind: 'phrase', phrase: '随便写点什么' },
-      { kind: 'phrase', phrase: 'framed' }, // 「冤枉啊」已从预设里删除
-      { kind: 'phrase' },
-      { kind: 'chat', text: 'hello' },
-      { kind: 'announcement', action: 'nap' },
-      { kind: 'verbalClaim', has: true, role: 'king' },
-      { kind: 'verbalClaim', has: 'yes', role: 'duke' },
-    ]) {
-      expect(() => room.react(bob.id, 'sock2', bad), JSON.stringify(bad)).toThrow('illegalIntent');
-    }
-  });
-
   it('行动预告：针对性行动只能指向对手，非针对性行动不带目标；目标已被淘汰时静默丢弃', () => {
     const { room, alice, bob, carol } = playingRoom();
     room.apply((g) => forfeit(g, carol.id));
@@ -1329,15 +1291,15 @@ describe('Room 表态', () => {
       { kind: 'announcement', action: 'steal', targetId: bob.id },
       { kind: 'announcement', action: 'coup', targetId: 'nobody' },
       { kind: 'announcement', action: 'income', targetId: alice.id },
-    ]) {
+    ] satisfies Reaction[]) {
       expect(() => room.react(bob.id, 'sock2', bad), JSON.stringify(bad)).toThrow('illegalIntent');
     }
   });
 
   it('被淘汰的玩家和牌局结束后只能用短语：其余表态静默丢弃', () => {
     const { room, alice, bob, carol } = playingRoom();
-    const claim = { kind: 'verbalClaim', has: true, role: 'duke' };
-    const income = { kind: 'announcement', action: 'income' };
+    const claim: Reaction = { kind: 'verbalClaim', has: true, role: 'duke' };
+    const income: Reaction = { kind: 'announcement', action: 'income' };
     room.apply((g) => forfeit(g, carol.id));
     expect(room.react(carol.id, 'sock3', claim)).toBeNull();
     expect(room.react(carol.id, 'sock3', income)).toBeNull();
@@ -1352,7 +1314,7 @@ describe('Room 表态', () => {
   it('按玩家限流：同一人 1.5 秒内的第二条直接丢弃，不影响其他人', () => {
     vi.useFakeTimers();
     const { room, alice, bob } = playingRoom();
-    const sure = { kind: 'phrase', phrase: 'sure' };
+    const sure: Reaction = { kind: 'phrase', phrase: 'sure' };
     expect(room.react(bob.id, 'sock2', sure)).not.toBeNull();
     vi.advanceTimersByTime(1_499);
     expect(room.react(bob.id, 'sock2', sure)).toBeNull();

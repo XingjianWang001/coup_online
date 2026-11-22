@@ -19,7 +19,7 @@ import {
 } from '@coup/engine';
 import type { Phrase, Reaction } from '@coup/shared';
 import { replyTo, type Heard, type Options } from './speech.ts';
-import { Room, type RoomOptions } from './room.ts';
+import { Room, type GameIntent, type RoomOptions } from './room.ts';
 import type { GameRepository } from './repository.ts';
 
 // 一桌按真实流程推进的牌局：a 先手，did 记下引擎产生的事件（和 Room.gameEvents 一样），hear 记下桌上的表态（和 Room 的听到记录一样）
@@ -462,10 +462,10 @@ describe('Room 电脑接话', () => {
     for (let i = 0; i < computers; i += 1) room.addComputer(people[0].id, 'sock0');
     room.startGame(people[0].id, 'sock0');
     const cs = room.playerList.filter((p) => p.isComputer).map((p) => p.id);
-    const act = (id: string, intent: { type: string } & Record<string, unknown>) =>
+    const act = (id: string, intent: Extract<GameIntent, { type: 'chooseAction' | 'passChallenge' }>) =>
       sockOf.has(id)
         ? room.dispatch(id, sockOf.get(id)!, intent)
-        : room.apply((g) => (intent.type === 'chooseAction' ? chooseAction(g, id, intent.action as 'tax') : passChallenge(g, id)));
+        : room.apply((g) => (intent.type === 'chooseAction' ? chooseAction(g, id, intent.action) : passChallenge(g, id)));
     const income = (id: string) => act(id, { type: 'chooseAction', action: 'income' });
     const tax = (id: string) => act(id, { type: 'chooseAction', action: 'tax' });
     const pass = (id: string) => act(id, { type: 'passChallenge' });
@@ -587,8 +587,8 @@ describe('Room 电脑接话', () => {
         }
         const g = room.game!;
         const first = g.players.find((p) => p.id === alice.id)!.hand[0]?.id;
-        const turn = g.players.find((p) => p.id === alice.id)!.coins >= 10 ? { type: 'chooseAction', action: 'coup', targetId: g.players.find((p) => p.alive && p.id !== alice.id)!.id } : { type: 'chooseAction', action: 'income' };
-        for (const intent of [turn, { type: 'passChallenge' }, { type: 'passBlock' }, { type: 'resolveLoss', cardId: first }, { type: 'revealShowdownCard', cardId: first }]) {
+        const turn: GameIntent = g.players.find((p) => p.id === alice.id)!.coins >= 10 ? { type: 'chooseAction', action: 'coup', targetId: g.players.find((p) => p.alive && p.id !== alice.id)!.id } : { type: 'chooseAction', action: 'income' };
+        for (const intent of [turn, { type: 'passChallenge' }, { type: 'passBlock' }, { type: 'resolveLoss', cardId: first ?? '' }, { type: 'revealShowdownCard', cardId: first ?? '' }] satisfies GameIntent[]) {
           try {
             room.dispatch(alice.id, 'sock0', intent);
           } catch {
@@ -622,8 +622,8 @@ describe('Room 电脑接话', () => {
         const g = room.game!;
         const self = g.players.find((p) => p.id === alice.id)!;
         const first = self.hand[0]?.id;
-        const turn = self.coins >= 10 ? { type: 'chooseAction', action: 'coup', targetId: g.players.find((p) => p.alive && p.id !== alice.id)!.id } : { type: 'chooseAction', action: 'income' };
-        for (const intent of [turn, { type: 'passChallenge' }, { type: 'passBlock' }, { type: 'resolveLoss', cardId: first }, { type: 'revealShowdownCard', cardId: first }]) {
+        const turn: GameIntent = self.coins >= 10 ? { type: 'chooseAction', action: 'coup', targetId: g.players.find((p) => p.alive && p.id !== alice.id)!.id } : { type: 'chooseAction', action: 'income' };
+        for (const intent of [turn, { type: 'passChallenge' }, { type: 'passBlock' }, { type: 'resolveLoss', cardId: first ?? '' }, { type: 'revealShowdownCard', cardId: first ?? '' }] satisfies GameIntent[]) {
           try {
             room.dispatch(alice.id, 'sock0', intent);
           } catch {
