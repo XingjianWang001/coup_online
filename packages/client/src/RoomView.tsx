@@ -23,7 +23,7 @@ export interface ReactionBubble {
   reaction: Reaction;
 }
 
-// 最近一条表态单独留着给读屏朗读：气泡过期时不能让更早的一条被重新朗读
+// 最近一条表态单独留着给读屏朗读：铭牌上的表态过期时不能让更早的一条被重新朗读
 export interface LatestReaction extends ReactionBubble {
   playerId: string;
 }
@@ -549,7 +549,7 @@ function GameBoard(props: {
   else if (amLosing) controlMode = 'loss';
   else if (amExchanging) controlMode = 'exchange';
   const controlKey = `${controlMode}:${state.currentPlayerId ?? ''}:${pending?.actorId ?? ''}:${state.lossPlayerId ?? ''}`;
-  // 操作区外壳常驻，换内容（换模式、进出选目标、等待提示变化）时高度平滑过渡；内层按 controlKey 重挂载播入场动画
+  // 控制区外壳常驻，换内容（换模式、进出选目标、等待提示变化）时高度平滑过渡；内层按 controlKey 重挂载播入场动画
   const controlsRef = useRef<HTMLDivElement>(null);
   useSmoothHeight(controlsRef, [controlKey, props.selectedAction, waiting, props.locale]);
   // 换内容后短暂 inert：别人抢先阻挡外援时，按钮原地从「阻挡」换成「质疑」，手快的那一下不能落到新按钮上。

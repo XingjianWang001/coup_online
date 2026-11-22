@@ -47,7 +47,7 @@ export default async function replyScenario(ui) {
   }
   assert(reply, `真人说「${mine}」后 3 秒内电脑没有接话`);
   assert(/你确定|我信你个鬼|You sure|Yeah, right/.test(reply), `电脑的回应应是你确定？或我信你个鬼：${reply}`);
-  // 气泡 3 秒后淡出：看到就把动画定在完全显示的时刻再截
+  // 铭牌上的表态 3 秒后淡出：看到就把动画定在完全显示的时刻再截
   await ui.evaluate(`document.getAnimations().forEach((a) => { a.pause(); a.currentTime = 900; })`);
   await ui.evaluate(`window.scrollTo(0, 0)`);
   await ui.shot('reply');

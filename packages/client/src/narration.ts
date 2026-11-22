@@ -102,7 +102,7 @@ export function describeCountdown(
   return `${sec}s`;
 }
 
-/** 事件 → 日志文案；不重要的（回合流转/金币变化等）返回 null 跳过。 */
+/** 事件 → 记录文案；不重要的（回合流转/金币变化等）返回 null 跳过。 */
 export function describeEvent(e: GameEvent, state: PublicState, locale: Locale = 'zh-CN'): string | null {
   switch (e.type) {
     case 'challenged':
