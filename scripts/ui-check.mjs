@@ -5,6 +5,7 @@
 //   场景默认导出 async (ui) => {}，ui 见 main() 里的 context；不传场景时跑内置场景（真人玩家加入机器人房间并开局）。
 //   场景还可以导出 serverEnv（对象），合并进服务端的环境变量，例如 { SPEECH_RANDOM: '0' } 让电脑每个能开口的时刻都开口（见 server/src/index.ts）。
 //   环境变量：W/H 视口，MOBILE=1 手机触屏，REDUCED=1 减少动态效果，LOCALE=zh-CN|en，NO_BUILD=1 跳过构建，CHROME 浏览器路径（默认 macOS / Windows 的 Chrome 安装位置）。
+//   界面区域的规范名称、主选择器和覆盖它们的场景见 CONTEXT.md「界面」。
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
