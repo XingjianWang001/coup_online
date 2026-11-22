@@ -515,14 +515,33 @@ input:focus-visible {
   height: 500px;
 }
 
-/* 只有一个对手时座位落在正上方，中心固定在 100px，叙述中心在 0.65 × 高度 − 30px：
-   带铭牌的座位约 186px 高，牌桌至少约 408px 叙述才不压到它（scripts/ui-check-table.mjs 会检查） */
+/* 叙述落在桌心：各人数用 --narr-y 指明桌心高度，未指明的（两个对手）沿用椭圆弧上的默认位置。 */
+
+/* 只有一个对手时座位落在正上方，中心固定在 100px，带铭牌约 186px 高（下沿约 193px）；
+   自己的座位在牌桌下方约 16px，叙述放在两者正中间：(193 + 100% + 16) / 2 */
 .table[data-seats='1'] {
-  height: 420px;
+  height: 360px;
+  --narr-y: calc(50% + 104px);
 }
 
 .table[data-seats='2'] {
   height: 290px;
+}
+
+/* 三个对手：左右两座落在 --cy 上，叙述与它们同高，就是十字的中心 */
+.table[data-seats='3'] {
+  --narr-y: var(--cy);
+}
+
+/* 四个对手：叙述放在五个座位中心的平均位置（五边形中心）。
+   对手两座在 --cy、两座在 --cy − sin60°·--ry；自己的座位中心约在牌桌下沿以下 105px（16px 间距 + 半个座位高） */
+.table[data-seats='4'] {
+  --narr-y: calc((4 * var(--cy) - 1.732 * var(--ry) + 100% + 105px) / 5);
+}
+
+/* 三个对手没有斜角座位，不需要五人弧那么高；平板、手机断点在后面另设高度 */
+.table[data-seats='3'] {
+  height: 400px;
 }
 
 .opponent-seats,
@@ -959,7 +978,7 @@ input:focus-visible {
 .narration {
   position: absolute;
   left: 50%;
-  top: calc(var(--cy) - var(--ry) * 0.35);
+  top: var(--narr-y, calc(var(--cy) - var(--ry) * 0.35));
   transform: translate(-50%, -50%);
   width: min(320px, 60%);
   display: flex;
