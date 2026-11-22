@@ -2,6 +2,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -33,7 +34,7 @@ import { copyToClipboard } from './clipboard.ts';
 import { strayFocusTarget, wrappedDialogFocus } from './dialog.ts';
 import { scheduleAutoDismiss } from './transient.ts';
 import { useSmoothHeight } from './motion.ts';
-import { closeShowdown, initialSession, reduceSession, rejoinIntent, type CountdownSnapshot, type Session, type Showcase, type ShowdownView } from './session.ts';
+import { closeShowdown, dropMotion, initialSession, reduceSession, rejoinIntent, type CountdownSnapshot, type SeatMotion, type Session, type Showcase, type ShowdownView } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
 import { CARD_STYLES, loadCardStyle, loadDebug, persistCardStyle, type CardStyle } from './cardStyle.ts';
 import {
@@ -73,10 +74,11 @@ interface TransientErrorState {
   error: ServerError | { notice: 'leftRoomNotice' | 'replacedRoomNotice' };
 }
 
-type SessionAction = { msg: ServerMessage; now: number } | { patch: Partial<Session> } | { closeShowdown: true };
+type SessionAction = { msg: ServerMessage; now: number } | { patch: Partial<Session> } | { closeShowdown: true } | { dropMotion: number };
 
 function sessionReducer(s: Session, a: SessionAction): Session {
   if ('closeShowdown' in a) return closeShowdown(s);
+  if ('dropMotion' in a) return dropMotion(s, a.dropMotion);
   return 'msg' in a ? reduceSession(s, a.msg, a.now) : { ...s, ...a.patch };
 }
 
@@ -198,6 +200,7 @@ export function App() {
     selectedAction,
     showcase,
     showdown,
+    motions,
   } = session;
   const setSelectedAction = useCallback((a: ActionType | null) => dispatchSession({ patch: { selectedAction: a } }), []);
   const [error, setError] = useState<TransientErrorState | null>(null);
@@ -226,6 +229,7 @@ export function App() {
   const closeLeaveConfirmation = useCallback(() => setConfirmLeave(false), []);
   const closeShowcase = useCallback(() => dispatchSession({ patch: { showcase: null } }), []);
   const finishShowdown = useCallback(() => dispatchSession({ closeShowdown: true }), []);
+  const finishMotion = useCallback((id: number) => dispatchSession({ dropMotion: id }), []);
 
   function changeLocale(nextLocale: Locale) {
     setLocale(nextLocale);
@@ -535,6 +539,8 @@ export function App() {
           onDismissReaction={dropReaction}
           clock={showcase || showdown ? null : clock}
           log={log}
+          motions={motions}
+          onMotionDone={finishMotion}
           selectedAction={selectedAction}
           setSelectedAction={setSelectedAction}
           onStart={startGame}
@@ -888,6 +894,8 @@ interface RoomViewProps {
   socket: ReturnType<typeof connect>;
   clock: Clock | null;
   log: LogEntry[];
+  motions: SeatMotion[];
+  onMotionDone: (id: number) => void;
   tunnelUrl: string | null;
   canStartTunnel: boolean;
   tunnelLoading: boolean;
@@ -999,6 +1007,8 @@ function RoomView(props: RoomViewProps) {
       onDismissReaction={props.onDismissReaction}
       clock={props.clock}
       log={props.log}
+      motions={props.motions}
+      onMotionDone={props.onMotionDone}
       selectedAction={props.selectedAction}
       setSelectedAction={props.setSelectedAction}
       onAction={props.onAction}
@@ -1795,6 +1805,73 @@ function TransientMessage<T extends { id: number }>(props: {
   );
 }
 
+// 新声称：角色从声称者身后显形（prototype/claim-ghost 的变体 A）。真声称只在本机：背后灵从手里那张牌升起，
+// 那张牌像对质「属实」时那样漫开一团角色色的光，再收回去。手里两张都是这个角色时两张都亮，背后灵只有一个
+const GHOST_MS = 1000;
+const HONEST_GLOW_MS = 1600;
+const EASE_OUT_EXPO = 'cubic-bezier(0.16, 1, 0.3, 1)';
+const EASE_IN_OUT = 'cubic-bezier(0.45, 0, 0.55, 1)';
+function SeatGhost({ motion, onDone }: { motion: Extract<SeatMotion, { kind: 'ghost' }>; onDone: (id: number) => void }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const ghost = ref.current!;
+    const seat = ghost.parentElement!;
+    const reduced = prefersReducedMotion();
+    const box = seat.getBoundingClientRect();
+    const center = (r: DOMRect) => ({ x: r.left - box.left + r.width / 2, y: r.top - box.top + r.height / 2 });
+    const cards = motion.honest ? [...seat.querySelectorAll<HTMLElement>(`.cards-row .card--${motion.role}:not(.unavailable)`)] : [];
+    const size = box.height * 1.2;
+    const at = cards[0] ? center(cards[0].getBoundingClientRect()) : { x: box.width / 2, y: box.height / 2 };
+    Object.assign(ghost.style, { left: `${at.x - size / 2}px`, top: `${at.y - size / 2}px`, width: `${size}px`, height: `${size}px` });
+    const runs = [
+      reduced
+        ? ghost.animate([{ opacity: 0 }, { opacity: 0.35, offset: 0.4 }, { opacity: 0 }], { duration: 600, fill: 'both' })
+        : ghost.animate([
+            { opacity: 0, transform: 'scale(0.7)' },
+            { opacity: 0.5, transform: 'scale(1.05)', offset: 0.3 },
+            { opacity: 0, transform: 'scale(1.5)' },
+          ], { duration: GHOST_MS, easing: EASE_OUT_EXPO, fill: 'both' }),
+    ];
+    const glows: HTMLElement[] = [];
+    for (const card of cards) {
+      const r = card.getBoundingClientRect();
+      const c = center(r);
+      const d = r.width * 3.4;
+      const glow = document.createElement('span');
+      glow.className = 'seat-glow';
+      Object.assign(glow.style, { left: `${c.x - d / 2}px`, top: `${c.y - d / 2}px`, width: `${d}px`, height: `${d}px` });
+      glow.style.setProperty('--glow', `var(--${motion.role})`);
+      seat.append(glow);
+      glows.push(glow);
+      runs.push(glow.animate(reduced
+        ? [{ opacity: 0, easing: EASE_IN_OUT }, { opacity: 0.7, offset: 0.35, easing: EASE_IN_OUT }, { opacity: 0 }]
+        : [
+            { opacity: 0, transform: 'scale(0.3)', easing: EASE_OUT_EXPO },
+            { opacity: 0.85, transform: 'scale(1)', offset: 0.35, easing: EASE_IN_OUT },
+            { opacity: 0, transform: 'scale(0.5)' },
+          ], { duration: HONEST_GLOW_MS, fill: 'both' }));
+      runs.push(card.animate([
+        { filter: 'brightness(1) saturate(1)', easing: EASE_OUT_EXPO },
+        { filter: 'brightness(1.45) saturate(1.2)', offset: 0.35, easing: EASE_IN_OUT },
+        { filter: 'brightness(1) saturate(1)' },
+      ], { duration: HONEST_GLOW_MS }));
+    }
+    Promise.all(runs.map((a) => a.finished)).then(() => onDone(motion.id), () => {});
+    return () => {
+      runs.forEach((a) => a.cancel());
+      glows.forEach((g) => g.remove());
+    };
+  }, [motion, onDone]);
+  return (
+    <span ref={ref} className={`seat-ghost role--${motion.role}`} aria-hidden="true">
+      <RoleIcon role={motion.role} />
+    </span>
+  );
+}
+
+// 针对性行动的目标在问询与对质期间被标出；进入选失去的影响力后让位给 losing
+const TARGETED_PHASES: ReadonlySet<PublicState['phase']> = new Set(['awaitingChallenge', 'awaitingBlock', 'showdown']);
+
 function GameBoard(props: {
   state: PublicState;
   hand: Card[];
@@ -1812,6 +1889,8 @@ function GameBoard(props: {
   onIntent: (i: Parameters<typeof send>[1]) => void;
   clock: Clock | null;
   log: LogEntry[];
+  motions: SeatMotion[];
+  onMotionDone: (id: number) => void;
   locale: Locale;
 }) {
   const { state, me } = props;
@@ -1890,11 +1969,14 @@ function GameBoard(props: {
     const isLosing = state.phase === 'choosingLoss' && p.id === state.lossPlayerId;
     // 交换选牌期间手里暂时多出抽到的牌，影响力仍是原来的张数
     const influence = state.phase === 'choosingExchange' && p.id === pending?.actorId ? (state.exchangeKeepCount ?? p.handCount) : p.handCount;
+    const isTargeted = p.alive && pending?.targetId === p.id && TARGETED_PHASES.has(state.phase);
+    const coinMotion = props.motions.find((m) => m.playerId === p.id && m.kind === 'coins');
+    const ghost = props.motions.find((m) => m.playerId === p.id && m.kind === 'ghost');
     return (
       <div
         key={p.id}
         data-seat={p.id}
-        className={`seat ${angle == null ? 'self' : 'opponent'}${isCurrent ? ' current' : ''}${isLosing ? ' losing' : ''}${p.alive ? '' : ' dead'}`}
+        className={`seat ${angle == null ? 'self' : 'opponent'}${isCurrent ? ' current' : ''}${isLosing ? ' losing' : ''}${isTargeted ? ' targeted' : ''}${p.alive ? '' : ' dead'}`}
         aria-current={isCurrent ? 'true' : undefined}
         style={angle == null ? undefined : ({ '--seat-angle': `${angle}deg` } as CSSProperties)}
       >
@@ -1903,8 +1985,26 @@ function GameBoard(props: {
             {props.computers.has(p.id) && <ComputerBadge strength={props.computers.get(p.id)!} locale={props.locale} />}
             {p.name}
             {p.id === me && translate(props.locale, 'selfMarker')}
+            {isTargeted && <span className="visually-hidden">{translate(props.locale, 'targetedMarker')}</span>}
           </span>
-          <span className="coins" role="img" aria-label={localizeCoinCount(props.locale, p.coins)}><CoinIcon /> {p.coins}</span>
+          {p.alive ? (
+            <span className="coins" role="img" aria-label={localizeCoinCount(props.locale, p.coins)}>
+              <CoinIcon />
+              <span key={`count-${coinMotion?.id ?? ''}`} className={coinMotion ? 'coin-count bump' : 'coin-count'}>{p.coins}</span>
+              {coinMotion?.kind === 'coins' && (
+                <span
+                  key={`delta-${coinMotion.id}`}
+                  className={`coin-delta ${coinMotion.delta > 0 ? 'gain' : 'loss'}`}
+                  aria-hidden="true"
+                  onAnimationEnd={() => props.onMotionDone(coinMotion.id)}
+                >
+                  {coinMotion.delta > 0 ? '+' : '−'}{Math.abs(coinMotion.delta)}
+                </span>
+              )}
+            </span>
+          ) : (
+            <span className="seat-out">{translate(props.locale, 'eliminatedMarker')}</span>
+          )}
         </div>
         <div className="cards-row" role="group" aria-label={translate(props.locale, 'influenceCount', { count: influence })}>
           {p.id === me
@@ -1935,6 +2035,7 @@ function GameBoard(props: {
           ))}
         </div>
         {renderNameplate(p.id)}
+        {ghost?.kind === 'ghost' && <SeatGhost key={ghost.id} motion={ghost} onDone={props.onMotionDone} />}
       </div>
     );
   };

@@ -1571,6 +1571,76 @@ button.post-game-reveal[aria-disabled] { cursor: default; transform: none; }
 button.post-game-reveal .card { transition: box-shadow 180ms ease; }
 button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-mix(in srgb, currentColor 40%, transparent); }
 
+/* ---------- 牌局事件（#90）：金币变动、针对性行动的目标、新声称、淘汰 ---------- */
+
+/* 座位是背后灵、牌光的定位容器（对手座位在桌面上本就是 absolute） */
+.seat.self { position: relative; }
+
+/* 金币差额：在数字上方浮起后淡出，数字轻跳一下。增加用金色，减少用 sage */
+.seat .coins { position: relative; }
+.coin-count { display: inline-block; }
+.coin-count.bump { animation: coin-bump 300ms ease-out; }
+@keyframes coin-bump {
+  40% { transform: scale(1.2); }
+}
+.coin-delta {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: coin-rise 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.coin-delta.gain { color: var(--gold); }
+.coin-delta.loss { color: var(--text-2); }
+@keyframes coin-rise {
+  0%   { opacity: 0; transform: translate(-50%, 6px); }
+  25%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -10px); }
+}
+@keyframes coin-fade {
+  0%, 100% { opacity: 0; transform: translateX(-50%); }
+  30%      { opacity: 1; transform: translateX(-50%); }
+}
+
+/* 针对性行动的目标：ivory 边框加一圈细环（金色留给「轮到他」） */
+.seat.targeted {
+  border-color: color-mix(in oklch, var(--text) 80%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--text) 35%, transparent);
+}
+
+/* 淘汰：最后一张牌先翻开（card-flip 400ms），翻完座位再慢慢暗下去 */
+.seat.dead > :not(.nameplate) {
+  transition-duration: 0.5s;
+  transition-delay: 0.4s;
+}
+.seat-out {
+  color: var(--text-2);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+/* 新声称的背后灵与真声称的牌光：位置、尺寸和动画由 SeatGhost 设置，这里只管外观 */
+.seat-ghost {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  opacity: 0;
+  pointer-events: none;
+}
+.seat-ghost .glyph { width: 100%; height: 100%; --surface: var(--felt); }
+.seat-glow {
+  position: absolute;
+  z-index: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--glow) 65%, transparent), transparent 62%);
+  mix-blend-mode: screen;
+  opacity: 0;
+  pointer-events: none;
+}
+
 /* 提示条 / 叙述条 / 控制区 / 记录 入场 */
 @keyframes rise-in {
   from { opacity: 0; transform: translateY(-4px); }
@@ -1638,6 +1708,8 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   /* 不呼吸，但保留「快到时」的状态：静态琥珀 */
   .decision-timer.urgent { animation: none; color: var(--warn); }
   .role-btn { transition: none; }
+  .coin-delta { animation: coin-fade 600ms linear both; }
+  .coin-count.bump { animation: none; }
   /* 几乎瞬时，但仍触发 transitionend（表态面板复位选目标、滚进视口靠它） */
   .collapse { transition-duration: 1ms; }
   .nameplate-text {
@@ -2240,7 +2312,8 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
   .rail--right { grid-area: right; }
 
   .seat.opponent {
-    position: static;
+    position: relative; /* 背后灵、牌光的定位容器；桌面用的 left/top 在这里不生效 */
+    inset: auto;
     transform: none;
     width: 100%;
     max-width: 100px;
@@ -2501,7 +2574,8 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
   }
   .table[data-seats='5'] .opponent-seats { display: contents; }
   .table[data-seats='5'] .seat.opponent {
-    position: static;
+    position: relative;
+    inset: auto;
     transform: none;
     justify-self: center;
     width: min(100%, 154px);
