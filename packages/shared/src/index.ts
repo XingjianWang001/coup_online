@@ -12,6 +12,7 @@ export type {
   Phrase,
   Reaction,
   Strength,
+  MessageFlows,
 } from './protocol.ts';
 
 export {

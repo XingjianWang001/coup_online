@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { PublicState, ServerMessage } from '@coup/shared';
+import type { MessageFlows, ServerMessage } from '@coup/shared';
 import recorded from '@coup/shared/fixtures/message-flows.json';
 import { closeShowdown, dropMotion, initialSession, reduceSession, rejoinIntent, type Session } from './session.ts';
 
 // 服务端真实推送的消息序列，由 server/src/message-flows.test.ts 录下（`pnpm fixtures` 重新生成）。
-// 每条流程按步骤记每位玩家（a、b、c）的连接收到的消息；各流程演的是什么见那里的注释
-type Flow = 'duel' | 'turns' | 'trio' | 'seats';
-const flows = recorded as unknown as Record<Flow, { step: string; to: Record<string, ServerMessage[]> }[]>;
+// 各流程演的是什么见那里的注释
+type Flow = keyof MessageFlows;
+const flows = recorded as unknown as MessageFlows;
 
 // viewer 在 flow 里收到的消息：after 那一步之后（不给时从头）到 until 那一步为止（含）
 function received(flow: Flow, viewer: string, until: string, after?: string): ServerMessage[] {
@@ -25,7 +25,7 @@ function run(messages: ServerMessage[], from: Session = initialSession): Session
 
 describe('房间会话', () => {
   const inGame = run(received('duel', 'a', 'a 开局'));
-  // a 的回合刚开始，已选了偷钱、还没选目标
+  // a 的回合刚开始，已选了偷窃、还没选目标
   const myTurn = { ...run(received('turns', 'a', 'a 开局')), selectedAction: 'steal' as const };
 
   it('自己的回合内收到新的牌局状态时保留目标选择', () => {
@@ -44,10 +44,12 @@ describe('房间会话', () => {
     expect(s.selectedAction).toBeNull();
   });
 
-  it('再来一局回到大厅阶段：清空牌桌，保留房间信息', () => {
+  it('再来一局回到大厅阶段：清空牌桌与选择，保留房间信息', () => {
     const seated = run([{ type: 'tunnelUrl', url: 'https://t' }], run(received('duel', 'b', 'b 加入')));
-    const s = run(received('duel', 'b', 'b 再来一局', 'b 加入'), seated);
-    expect(s).toMatchObject({ roomCode: 'ABC123', tunnelUrl: 'https://t', publicState: null, countdown: null, hand: [], log: [], showcase: null });
+    // 牌局结束后 b 还选着政变，房主 b 随即再来一局
+    const ended = { ...run(received('duel', 'b', 'a 再次断线', 'b 加入'), seated), selectedAction: 'coup' as const };
+    const s = run(received('duel', 'b', 'b 再来一局', 'a 再次断线'), ended);
+    expect(s).toMatchObject({ roomCode: 'ABC123', tunnelUrl: 'https://t', publicState: null, countdown: null, hand: [], log: [], selectedAction: null, showcase: null });
   });
 
   it('离开后回到初始会话', () => {
@@ -74,8 +76,11 @@ describe('房间会话', () => {
   });
 
   it('牌局状态记录收到时刻供倒计时使用', () => {
-    const s = reduceSession(initialSession, { type: 'publicState', state: { phase: 'choosingAction' } as PublicState, remainingMs: 1000, deadlineAt: 5000, hostId: 'a' }, 42);
-    expect(s.countdown).toEqual({ remainingMs: 1000, deadlineAt: 5000, receivedAt: 42 });
+    // 开局后 a 的回合开始计时
+    const msg = received('turns', 'a', 'a 开局').filter((m) => m.type === 'publicState').at(-1)!;
+    const { remainingMs, deadlineAt } = msg;
+    expect(remainingMs).not.toBeNull();
+    expect(reduceSession(initialSession, msg, 42).countdown).toEqual({ remainingMs, deadlineAt, receivedAt: 42 });
   });
 
   it('开局后收到手牌即发牌展示；刷新重连只收到手牌时不展示', () => {
@@ -101,9 +106,9 @@ describe('房间会话', () => {
     expect(run(received('duel', 'a', 'a 质疑')).showcase).not.toBeNull();
     expect(run(received('duel', 'a', 'b 翻开女伯爵，出局')).showcase).toBeNull();
     // 三人局里 b 出局，牌局继续
-    const beforeOut = run(received('trio', 'b', 'c 质疑偷钱'));
+    const beforeOut = run(received('trio', 'b', 'c 质疑偷窃'));
     expect(beforeOut.showcase).not.toBeNull();
-    const out = run(received('trio', 'b', 'b 翻开最后一张，出局', 'c 质疑偷钱'), beforeOut);
+    const out = run(received('trio', 'b', 'b 翻开最后一张，出局', 'c 质疑偷窃'), beforeOut);
     expect(out.publicState?.phase).toBe('choosingAction');
     expect(out.showcase).toBeNull();
   });
@@ -189,43 +194,43 @@ describe('座位动效', () => {
 
   it('金币差额按变化前的状态计算，0 不显示', () => {
     // b 偷走 a 的 2 枚
-    const robbed = upTo('a 不阻挡偷钱');
+    const robbed = upTo('a 不阻挡偷窃');
     expect(coins(robbed)).toContainEqual({ playerId: 'a', kind: 'coins', delta: -2 });
     expect(coins(robbed)).toContainEqual({ playerId: 'b', kind: 'coins', delta: 2 });
-    // b 从没钱的 a 那里偷：两人金币都没变，不新增金币动效
-    expect(coins(upTo('a 不阻挡偷空'))).toEqual(coins(upTo('a 不质疑偷空')));
+    // b 偷窃没钱的 a：两人金币都没变，不新增金币动效
+    expect(coins(upTo('a 不阻挡落空的偷窃'))).toEqual(coins(upTo('a 不质疑落空的偷窃')));
   });
 
   it('同一座位的新动效替换还没播完的旧动效', () => {
     expect(coins(upTo('a 收入'))).toEqual([{ playerId: 'a', kind: 'coins', delta: 1 }]);
-    expect(coins(upTo('a 不阻挡偷钱')).filter((m) => m.playerId === 'a')).toEqual([{ playerId: 'a', kind: 'coins', delta: -2 }]);
+    expect(coins(upTo('a 不阻挡偷窃')).filter((m) => m.playerId === 'a')).toEqual([{ playerId: 'a', kind: 'coins', delta: -2 }]);
   });
 
   it('新声称才放背后灵：故事里已有的角色不重放，实际交换后从头讲', () => {
-    expect(brief(upTo('b 偷 a'))).toContainEqual({ playerId: 'b', kind: 'ghost', role: 'captain', honest: false });
-    // b 第二次声称船长：故事里已有，b 的背后灵还是上次的刺客
-    expect(ghosts(upTo('b 再偷 a'), 'b')).toEqual(ghosts(upTo('a 不阻挡再偷'), 'b'));
-    expect(ghosts(upTo('b 再偷 a'), 'b')).toMatchObject([{ role: 'assassin' }]);
-    // a 声称大使交换、实际交换后故事从头讲，之后又声称船长；再声称大使时重新放背后灵
+    expect(brief(upTo('b 偷窃 a'))).toContainEqual({ playerId: 'b', kind: 'ghost', role: 'captain', honest: false });
+    // b 第二次声称队长：故事里已有，b 的背后灵还是上次的刺客
+    expect(ghosts(upTo('b 再偷窃 a'), 'b')).toEqual(ghosts(upTo('a 不阻挡再偷窃'), 'b'));
+    expect(ghosts(upTo('b 再偷窃 a'), 'b')).toMatchObject([{ role: 'assassin' }]);
+    // a 声称大使交换、实际交换后故事从头讲，之后又声称队长；再声称大使时重新放背后灵
     const again = upTo('a 再交换');
-    expect(ghosts(again, 'a')).not.toEqual(ghosts(upTo('a 不阻挡再偷'), 'a'));
+    expect(ghosts(again, 'a')).not.toEqual(ghosts(upTo('a 不阻挡再偷窃'), 'a'));
     expect(ghosts(again, 'a')).toMatchObject([{ role: 'ambassador', honest: false }]);
   });
 
   it('阻挡也是声称；自己手里有这张才算真声称', () => {
     expect(brief(upTo('a 以公爵阻挡'))).toContainEqual({ playerId: 'a', kind: 'ghost', role: 'duke', honest: true });
-    expect(brief(upTo('a 偷 b'))).toContainEqual({ playerId: 'a', kind: 'ghost', role: 'captain', honest: false });
+    expect(brief(upTo('a 偷窃 b'))).toContainEqual({ playerId: 'a', kind: 'ghost', role: 'captain', honest: false });
   });
 
   it('对质那一批的动效等舞台收起后才放出来', () => {
-    // b 虚张刺杀被 a 质疑，翻开船长：退回的 3 枚金币和失去影响力同一批到达
-    const resolved = upTo('b 翻开船长');
+    // b 诈唬暗杀被 a 质疑，翻开队长：退回的 3 枚金币和失去影响力同一批到达
+    const resolved = upTo('b 翻开队长');
     expect(coins(resolved)).not.toContainEqual({ playerId: 'b', kind: 'coins', delta: 3 });
     expect(coins(closeShowdown(resolved))).toContainEqual({ playerId: 'b', kind: 'coins', delta: 3 });
   });
 
   it('播完的动效可以移除；重连不补播，开新局清空故事', () => {
-    const s = upTo('b 偷 a');
+    const s = upTo('b 偷窃 a');
     const [ghost] = ghosts(s, 'b');
     expect(ghosts(dropMotion(s, ghost.id), 'b')).toEqual([]);
     const ended = run(received('duel', 'a', 'a 赛后断线'));
