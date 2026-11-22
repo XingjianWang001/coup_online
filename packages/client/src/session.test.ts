@@ -67,7 +67,7 @@ describe('房间会话', () => {
     expect(run([{ type: 'error', code: 'gameAlreadyStarted', inRoom: true }], inGame)).toMatchObject({ roomCode: 'ABC123', publicState: inGame.publicState });
   });
 
-  it('开局重置日志，后续事件的日志 id 从 0 递增', () => {
+  it('开局重置记录，后续事件的记录 id 从 0 递增', () => {
     // b 看完上一局，再来一局开局后两人各收入一次
     const s = run(received('duel', 'b', 'b 收入'));
     expect(s.log.map((e) => e.id)).toEqual([0, 1, 2, 3, 4, 5]);
@@ -88,7 +88,7 @@ describe('房间会话', () => {
     expect(run(received('duel', 'a', 'a 在新一局重连', 'a 再次断线')).showcase).toBeNull();
   });
 
-  it('离线期间上一局结束、再来一局已开局：重连后不沿用上一局的日志；同一局内重连仍保留', () => {
+  it('离线期间上一局结束、再来一局已开局：重连后不沿用上一局的记录；同一局内重连仍保留', () => {
     const ended = run(received('duel', 'a', 'b 翻开女伯爵，出局'));
     const sameGame = run(received('duel', 'a', 'a 赛后重连', 'b 翻开女伯爵，出局'), ended);
     expect(sameGame.log).toEqual(ended.log);
