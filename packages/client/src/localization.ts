@@ -1,4 +1,4 @@
-import { parseServerError } from '@coup/shared';
+import { MAX_NICKNAME_CHARACTERS, parseServerError } from '@coup/shared';
 
 export const LOCALES = ['zh-CN', 'en'] as const;
 
@@ -75,7 +75,8 @@ const english = {
   errorInvalidGameAction: 'That action is not allowed right now.',
   errorGameNotStarted: 'The game has not started yet.',
   errorRoomFull: 'This room is full (maximum {maximum} players).',
-  errorInvalidName: 'Enter a nickname of 1–32 characters.',
+  errorInvalidName: `Enter a nickname of 1–${MAX_NICKNAME_CHARACTERS} characters.`,
+  chooseAction: 'Choose an action',
   errorRateLimited: 'Too many rooms created recently. Try again in a minute.',
   errorServerBusy: 'The server is full. Please try again later.',
   errorUnexpected: 'Something went wrong. Please try again.',
@@ -116,6 +117,8 @@ const english = {
   passChallenge: 'Do not challenge',
   blockWith: 'Block with {role}',
   passBlock: 'Do not block',
+  challengePrompt: 'Challenge this claim?',
+  blockPrompt: 'Block this action?',
   reactionToggle: 'React',
   reactionTabPhrase: 'Phrases',
   reactionTabAnnouncement: 'Announce',
@@ -150,7 +153,7 @@ const english = {
   postGameRevealHint: 'Click a hidden card to unveil it to everyone',
   showcaseDeal: 'Your hand',
   confirm: 'Confirm',
-  timeToAct: '{time} left to act',
+  timeToAct: '{time} remaining',
   expandLog: 'Expand details for {action}',
   collapseLog: 'Collapse details for {action}',
   narrationAction: '{actor} uses {action}',
@@ -230,7 +233,8 @@ const simplifiedChinese = {
   errorInvalidGameAction: '当前不能执行此行动。',
   errorGameNotStarted: '牌局尚未开始。',
   errorRoomFull: '房间已满（最多 {maximum} 名玩家）。',
-  errorInvalidName: '请输入 1～32 个字符的昵称。',
+  errorInvalidName: `请输入 1～${MAX_NICKNAME_CHARACTERS} 个字符的昵称。`,
+  chooseAction: '选择行动',
   errorRateLimited: '最近创建的房间过多，请一分钟后再试。',
   errorServerBusy: '服务器房间已满，请稍后再试。',
   errorUnexpected: '出现意外错误，请重试。',
@@ -271,6 +275,8 @@ const simplifiedChinese = {
   passChallenge: '不质疑',
   blockWith: '用{role}阻挡',
   passBlock: '不阻挡',
+  challengePrompt: '是否质疑？',
+  blockPrompt: '是否阻挡？',
   reactionToggle: '表态',
   reactionTabPhrase: '短语',
   reactionTabAnnouncement: '行动预告',
@@ -305,7 +311,7 @@ const simplifiedChinese = {
   postGameRevealHint: '点击暗牌，向所有人翻开',
   showcaseDeal: '你的手牌',
   confirm: '确认',
-  timeToAct: '行动剩余 {time}',
+  timeToAct: '剩余 {time}',
   expandLog: '展开{action}的详情',
   collapseLog: '收起{action}的详情',
   narrationAction: '{actor} 发动{action}',

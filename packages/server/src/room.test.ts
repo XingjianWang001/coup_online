@@ -194,10 +194,27 @@ describe('Room 连接归属', () => {
 describe('Room 加入守卫', () => {
   it('拒绝空白、过长或带控制字符的昵称', () => {
     const { room } = makeRoom();
-    for (const name of ['   ', 'x'.repeat(33), 'A\nB']) {
+    for (const name of ['   ', '月'.repeat(13), 'x'.repeat(33), 'A\nB']) {
       expect(() => room.addPlayer(name, 'sock')).toThrow('invalidName');
     }
     expect(room.players.size).toBe(0);
+  });
+
+  it('组合 emoji 和组合音标各算一个字符', () => {
+    const { room } = makeRoom();
+    const name = '👩🏽‍💻e\u0301'.repeat(6);
+    expect(room.addPlayer(name, 'sock').name).toBe(name);
+    expect(() => room.addPlayer(name + '甲', 'other')).toThrow('invalidName');
+  });
+
+  it('旧长昵称只允许本人凭原凭证重连保留', () => {
+    const { room } = makeRoom();
+    const returning = room.addPlayer('Alice', 'original');
+    const legacy = 'MoonlightCardCollector';
+    returning.name = legacy;
+    expect(() => room.addPlayer(legacy, 'guest')).toThrow('invalidName');
+    expect(() => room.addPlayer(legacy, 'other', { id: returning.id, secret: 'wrong' })).toThrow('invalidName');
+    expect(room.addPlayer(' ' + legacy, 'rejoined', returning).id).toBe(returning.id);
   });
 
   it('六名玩家后拒绝第七名新玩家', () => {

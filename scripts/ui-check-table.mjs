@@ -1,17 +1,20 @@
-// ui-check 场景：牌桌几何。对手 1～5 人各开一局，让当前玩家声称征税（牌桌中央出现叙述和倒计时）、对手都表态（铭牌亮起），
+// ui-check 场景：牌桌几何。对手 1～5 人各开一局，让当前玩家声称行动、对手都表态（铭牌亮起），
 // 断言叙述、通知、各座位互不重叠，对手座位不越出牌桌；每种人数截一张图。
 // 用法：pnpm ui-check scripts/ui-check-table.mjs [截图目录]；手机布局加 MOBILE=1 W=390 H=844
-const NAMES = ['Bot', 'Van', 'Mia', '小林', 'Bartholomew the Third'];
+const NAMES = ['MoonlightFox', 'Van', 'Mia', '小林', 'EastWindWolf'];
 
 export default async function tableScenario(ui) {
   const failures = [];
+  const compact = await ui.evaluate("matchMedia('(width < 720px)').matches");
   for (let opponents = 1; opponents <= 5; opponents++) {
-    const bots = NAMES.slice(0, opponents).map(() => ui.bot());
+    const names = NAMES.slice(0, opponents);
+    const actionRow = compact && opponents >= 2;
+    const bots = names.map(() => ui.bot());
     const [host, ...guests] = bots;
-    host.intent({ type: 'createRoom', name: NAMES[0] });
+    host.intent({ type: 'createRoom', name: names[0] });
     const { roomCode } = await host.next('joined');
     for (const [i, bot] of guests.entries()) {
-      bot.intent({ type: 'joinRoom', roomCode, name: NAMES[i + 1] });
+      bot.intent({ type: 'joinRoom', roomCode, name: names[i + 1] });
       await bot.next('joined');
     }
     await ui.joinAs('Me', roomCode);
@@ -21,10 +24,17 @@ export default async function tableScenario(ui) {
     await ui.evaluate(`document.querySelector('.showcase-overlay').click()`);
     await ui.waitFor('.table');
 
-    // 当前玩家声称征税，牌桌中央出现叙述
+    // 带目标的偷窃覆盖昵称、行动和目标同时出现的布局。
     const pub = host.state.pub ?? (await host.next('publicState')).state;
     const current = bots.find((b) => b.state.playerId === pub.currentPlayerId);
-    if (current) current.intent({ type: 'chooseAction', action: 'tax' });
+    if (opponents >= 2) {
+      const target = current === host ? guests[0] : host;
+      if (current) current.intent({ type: 'chooseAction', action: 'steal', targetId: target.state.playerId });
+      else {
+        await ui.click('^(偷窃|Steal)$', '.controls');
+        await ui.click(names[0], '.controls');
+      }
+    } else if (current) current.intent({ type: 'chooseAction', action: 'tax' });
     else await ui.click('^(征税|Tax)$', '.controls');
     await ui.waitFor('.narration:not(.is-empty)');
     for (const bot of bots) bot.intent({ type: 'react', reaction: { kind: 'phrase', phrase: 'sure' } });
@@ -39,10 +49,27 @@ export default async function tableScenario(ui) {
       const seats = [...document.querySelectorAll('.seat.opponent')].map((el) => ({ name: named(el), ...box(el) }));
       const self = { name: 'self', ...box(document.querySelector('.seat.self')) };
       const table = box(document.querySelector('.table'));
-      const parts = [...document.querySelectorAll('.narration-text, .narration-timer')].map(box);
-      const narration = { name: 'narration', top: Math.min(...parts.map((p) => p.top)), bottom: Math.max(...parts.map((p) => p.bottom)), left: Math.min(...parts.map((p) => p.left)), right: Math.max(...parts.map((p) => p.right)) };
+      const narration = box(document.querySelector('.narration-text'));
+      const timer = box(document.querySelector('.controls [role="timer"]'));
       const notices = [...document.querySelectorAll('.notice-region')].map((el) => ({ name: 'notice', ...box(el) }));
       const out = [];
+      if (${actionRow}) {
+        const row = box(document.querySelector('.narration'));
+        const text = document.createRange();
+        text.selectNodeContents(document.querySelector('.narration-line'));
+        if (!text.toString().includes(${JSON.stringify(names[0])})) out.push('行动缺少完整昵称');
+        if (seats.some(s => s.bottom > row.top + 1) || row.bottom > self.top + 1) out.push('行动行不在对手与自己之间');
+        if (innerHeight >= 640 && hit(row, box(document.querySelector('.controls')))) out.push('操作区遮住行动行');
+        for (const line of text.getClientRects()) {
+          if (line.left < row.left || line.right > row.right || hit(line, timer)) out.push('行动文字越界或压住倒计时');
+        }
+      }
+      if (document.querySelectorAll('[role="timer"]').length !== 1) out.push('倒计时应当只出现一次');
+      if (!${compact}) {
+        if (narration.bottom > table.bottom + 1 || Math.abs(narration.left + narration.right - table.left - table.right) > 2) out.push('叙述不在桌心');
+        if (seats.length > 1 && narration.top >= Math.max(...seats.map(s => s.bottom))) out.push('叙述落在所有对手下方');
+        if (seats.length === 5 && innerHeight >= 768 && (timer.bottom > innerHeight || [...document.querySelectorAll('.controls button')].some(b => box(b).bottom > innerHeight))) out.push('首屏未显示完整操作区');
+      }
       for (const s of seats) {
         if (hit(s, narration)) out.push(s.name + ' 压住叙述');
         if (s.top < table.top - 1) out.push(s.name + ' 越出牌桌上沿');

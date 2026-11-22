@@ -290,6 +290,7 @@ input:focus-visible {
 }
 
 .notice {
+  overflow-wrap: anywhere;
   --surface: color-mix(in srgb, var(--gold) 13%, var(--panel));
   background: var(--surface);
   color: var(--gold);
@@ -514,16 +515,36 @@ input:focus-visible {
   height: 500px;
 }
 
-/* 只有一个对手时座位落在正上方，中心固定在 100px，叙述中心在 0.65 × 高度 − 30px：
-   带铭牌的座位约 186px 高，牌桌至少约 408px 叙述才不压到它（scripts/ui-check-table.mjs 会检查） */
+/* 叙述落在桌心：各人数用 --narr-y 指明桌心高度，未指明的（两个对手）沿用椭圆弧上的默认位置。 */
+
+/* 只有一个对手时座位落在正上方，中心固定在 100px，带铭牌约 186px 高（下沿约 193px）；
+   自己的座位在牌桌下方约 16px，叙述放在两者正中间：(193 + 100% + 16) / 2 */
 .table[data-seats='1'] {
-  height: 420px;
+  height: 360px;
+  --narr-y: calc(50% + 104px);
 }
 
 .table[data-seats='2'] {
   height: 290px;
 }
 
+/* 三个对手：左右两座落在 --cy 上，叙述与它们同高，就是十字的中心 */
+.table[data-seats='3'] {
+  --narr-y: var(--cy);
+}
+
+/* 四个对手：叙述放在五个座位中心的平均位置（五边形中心）。
+   对手两座在 --cy、两座在 --cy − sin60°·--ry；自己的座位中心约在牌桌下沿以下 105px（16px 间距 + 半个座位高） */
+.table[data-seats='4'] {
+  --narr-y: calc((4 * var(--cy) - 1.732 * var(--ry) + 100% + 105px) / 5);
+}
+
+/* 三个对手没有斜角座位，不需要五人弧那么高；平板、手机断点在后面另设高度 */
+.table[data-seats='3'] {
+  height: 400px;
+}
+
+.opponent-seats,
 .rail {
   display: contents;
 }
@@ -957,7 +978,7 @@ input:focus-visible {
 .narration {
   position: absolute;
   left: 50%;
-  top: calc(var(--cy) - var(--ry) * 0.35);
+  top: var(--narr-y, calc(var(--cy) - var(--ry) * 0.35));
   transform: translate(-50%, -50%);
   width: min(320px, 60%);
   display: flex;
@@ -968,6 +989,9 @@ input:focus-visible {
 }
 
 .narration-text {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   font-weight: 600;
   font-size: 17px;
   line-height: 1.4;
@@ -979,13 +1003,23 @@ input:focus-visible {
   animation: fade-in 240ms ease;
 }
 
-.narration-timer {
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  color: var(--gold);
+/* 行动栏每个阶段的第一行：提示在左、倒计时钉在右端，换阶段时倒计时不挪位置。
+   不换行：提示过长时在自身内折行，倒计时不会被挤到下一行开头 */
+.decision-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
 }
-
+/* 与其他阶段的标题同字号、无额外内边距，倒计时才落在同一点 */
+.waiting.decision-heading {
+  text-align: start;
+  padding: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.controls-body > .row { margin-top: 0; }
+.actions button { overflow-wrap: anywhere; }
 /* ---------- 表态面板：记录上方，收起时只有一行 ---------- */
 .reaction {
   display: flex;
@@ -1556,7 +1590,7 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   0%, 100% { color: var(--gold); }
   50%      { color: var(--warn); }
 }
-.narration-timer.urgent { animation: urgent-pulse 1s ease-in-out infinite; }
+.decision-timer.urgent { animation: urgent-pulse 1s ease-in-out infinite; }
 
 /* 浮层 / 模态 */
 @keyframes fade-in {
@@ -1602,7 +1636,7 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   button.post-game-reveal,
   button.post-game-reveal .card { transition: none; }
   /* 不呼吸，但保留「快到时」的状态：静态琥珀 */
-  .narration-timer.urgent { animation: none; color: var(--warn); }
+  .decision-timer.urgent { animation: none; color: var(--warn); }
   .role-btn { transition: none; }
   /* 几乎瞬时，但仍触发 transitionend（表态面板复位选目标、滚进视口靠它） */
   .collapse { transition-duration: 1ms; }
@@ -1845,11 +1879,12 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   gap: var(--sp-4);
 }
 .showcase-actions button { min-width: 140px; }
-.showcase-timer {
+.decision-timer {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   font-weight: 700;
   color: var(--gold);
 }
@@ -2174,12 +2209,15 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     border-radius: var(--r-xl) var(--r-xl) 0 0;
   }
 
-  /* 手机：对手沿左右两侧 + 正对面落座，牌桌中央放叙述 */
+}
+
+@media (width < 720px) {
+  /* 窄桌：沿左右两侧和正对面落座。 */
   .table,
   .table[data-seats='1'],
   .table[data-seats='2'] {
     display: grid;
-    grid-template-columns: minmax(0, 100px) minmax(0, 1fr) minmax(0, 100px);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 100px) minmax(0, 1fr);
     grid-template-areas:
       'left top right'
       'left center right';
@@ -2263,6 +2301,9 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     --pad-b: var(--sp-3);
     padding: var(--sp-3) var(--pad-x) var(--pad-b);
   }
+}
+
+@media (max-width: 768px) {
   .reaction-tray {
     scroll-margin-bottom: 120px; /* 展开后滚进视口时让出底部吸附的操作栏 */
   }
@@ -2285,8 +2326,10 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     padding-inline: 4px;
     font-size: 13px;
   }
+}
 
-  /* 手机：座位紧凑，叙述带底板才读得清 */
+@media (width < 720px) {
+  /* 行动文字沿用桌心的排版，窄屏留出独立空间。 */
   .narration {
     grid-area: center;
     position: static;
@@ -2294,9 +2337,6 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     width: auto;
     align-self: center;
     padding: var(--sp-3);
-    background: color-mix(in srgb, var(--gold) 8%, var(--felt));
-    border: 1px solid var(--gold-dim);
-    border-radius: var(--r-md);
     transition: opacity 0.2s ease;
   }
 
@@ -2322,5 +2362,180 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
        ponytail: 视口矮于行动栏（约 260px）时栏顶看不全；真遇到再加 max-height + 气泡朝下。 */
     box-shadow: 0 -8px 24px oklch(0.08 0.01 155 / 0.55);
   }
+}
+
+/* 窄桌的行动叙述可换行，计时跟随决定区域。 */
+@media (width < 720px) {
+  .table:not([data-seats='1']) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    height: auto;
+  }
+
+  .table:not([data-seats='1']) .narration {
+    position: static;
+    transform: none;
+    align-self: stretch;
+    width: auto;
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .table:not([data-seats='1']) .narration.is-empty {
+    padding: 0;
+    height: 0;
+  }
+}
+
+@media (720px <= width <= 1024px) {
+  .table:not([data-seats='1']) {
+    height: 380px;
+    --cy: 300px;
+    --ry: 222px;
+    --rx: calc(50% - 78px);
+  }
+
+  .table[data-seats='2'] {
+    height: 180px;
+    --cy: 160px;
+    --ry: 140px;
+  }
+
+  .table[data-seats='2'] .narration {
+    width: min(320px, 40%);
+  }
+
+  .table:not([data-seats='1']) .seat.opponent {
+    width: 148px;
+    --pad-x: var(--sp-2);
+    --pad-b: var(--sp-2);
+    padding: var(--sp-2);
+    gap: var(--sp-1);
+  }
+
+  .table:not([data-seats='1']) .seat-head {
+    flex-wrap: nowrap;
+  }
+
+  .table:not([data-seats='1']) .seat .coins {
+    flex-shrink: 0;
+  }
+
+  .table:not([data-seats='1']) .seat.opponent :is(.card, .card-back) {
+    width: 44px;
+    height: 62px;
+  }
+}
+
+@media (width < 720px) {
+  .table:not([data-seats='1']) .opponent-seats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas: 'left top right';
+    gap: var(--sp-1);
+    align-items: start;
+  }
+
+  .opponent-seats .rail--right { align-items: flex-end; }
+
+  .table:not([data-seats='1']) .seat.opponent {
+    --pad-b: var(--sp-1);
+    padding-block: var(--sp-1);
+    gap: var(--sp-1);
+  }
+
+  .table:not([data-seats='1']) .seat.opponent :is(.card, .card-back) {
+    width: 34px;
+    height: 48px;
+  }
+
+  .table:not([data-seats='1']) .seat-head { row-gap: 0; }
+
+  .table:not([data-seats='1']) .nameplate {
+    height: calc(2lh + var(--sp-1));
+    margin-top: 0;
+  }
+
+  .controls .actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--sp-1);
+  }
+  .controls .actions button { padding-inline: var(--sp-1); }
+}
+
+@media (max-width: 360px) {
+  /* 窄屏满桌时，给限时行动留出首屏空间。 */
+  .app:has(.table) .header {
+    gap: var(--sp-1);
+    padding-bottom: var(--sp-2);
+    margin-bottom: var(--sp-2);
+  }
+
+  .app:has(.table) .header-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .app:has(.table) .header-actions button { padding-inline: var(--sp-1); }
+}
+
+@media (max-width: 360px) and (max-height: 720px) {
+  .table[data-seats='5'] .seat-head {
+    flex-flow: row nowrap;
+    column-gap: var(--sp-1);
+  }
+  .table[data-seats='5'] .coins { flex-shrink: 0; }
+  .board:has(.table[data-seats='5']) > .notice-region .notice { padding-block: var(--sp-2); }
+  .controls:has(.actions) { padding-block-start: var(--sp-2); }
+}
+
+/* 满桌的五个对手各占一列；桌心与两侧近端座位共享最后一行。
+   文字换行时这一行自然增高，不会盖住牌或挤进上方的铭牌。 */
+@media (width >= 720px) {
+  .table[data-seats='5'] {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-rows: var(--sp-8) auto minmax(64px, auto);
+    gap: 0 var(--sp-2);
+    height: auto;
+    align-items: start;
+  }
+  .table[data-seats='5'] .opponent-seats { display: contents; }
+  .table[data-seats='5'] .seat.opponent {
+    position: static;
+    transform: none;
+    justify-self: center;
+    width: min(100%, 154px);
+    --pad-x: var(--sp-2);
+    --pad-b: var(--sp-1);
+    padding: var(--sp-2) var(--pad-x) var(--pad-b);
+    gap: var(--sp-1);
+  }
+  .table[data-seats='5'] .seat-head { flex-wrap: nowrap; }
+  .table[data-seats='5'] .coins { flex-shrink: 0; }
+  .table[data-seats='5'] .seat.opponent :is(.card, .card-back) { width: 44px; height: 62px; }
+  .table[data-seats='5'] .rail--left > :first-child { grid-area: 2 / 1 / 4 / 2; align-self: end; }
+  .table[data-seats='5'] .rail--left > :last-child { grid-area: 2 / 2; }
+  .table[data-seats='5'] .rail--top > .seat { grid-area: 1 / 3 / 3 / 4; }
+  .table[data-seats='5'] .rail--right > :first-child { grid-area: 2 / 4; }
+  .table[data-seats='5'] .rail--right > :last-child { grid-area: 2 / 5 / 4 / 6; align-self: end; }
+  .table[data-seats='5'] .narration {
+    grid-area: 3 / 2 / 4 / 5;
+    position: static;
+    transform: none;
+    align-self: center;
+    justify-self: center;
+    width: 100%;
+    padding: var(--sp-2);
+    border: 0;
+    text-align: center;
+    justify-content: center;
+  }
+  .board-content:has(.table[data-seats='5']) { gap: var(--sp-3); }
+}
+
+@media (width >= 720px) and (max-height: 840px) {
+  .table[data-seats='5'] + .seat.self { padding-top: var(--sp-2); }
+  .table[data-seats='5'] + .seat.self .card { width: 58px; height: 82px; }
+  .table[data-seats='5'] + .seat.self .nameplate { margin-top: var(--sp-1); }
 }
 
