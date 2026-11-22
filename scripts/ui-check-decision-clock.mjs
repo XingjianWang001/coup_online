@@ -41,7 +41,7 @@ export default async function decisionClockScenario(ui) {
       const controls = document.querySelector('.controls');
       const narration = box(document.querySelector('.narration'));
       const hand = box(document.querySelector('.seat.self .cards-row'));
-      const wide = innerWidth > 768;
+      const wide = matchMedia('(width >= 720px)').matches;
       return {
         timers: document.querySelectorAll('[role="timer"]').length,
         seconds: Number.parseInt(timer.textContent),

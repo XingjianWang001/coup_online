@@ -5,11 +5,10 @@ const NAMES = ['MoonlightFox', 'Van', 'Mia', '小林', 'EastWindWolf'];
 
 export default async function tableScenario(ui) {
   const failures = [];
-  const narrow = await ui.evaluate("matchMedia('(max-width: 1024px)').matches");
-  const phone = await ui.evaluate("matchMedia('(max-width: 768px)').matches");
+  const compact = await ui.evaluate("matchMedia('(width < 720px)').matches");
   for (let opponents = 1; opponents <= 5; opponents++) {
     const names = NAMES.slice(0, opponents);
-    const actionRow = narrow && opponents >= 2 && (phone || opponents !== 5);
+    const actionRow = compact && opponents >= 2;
     const bots = names.map(() => ui.bot());
     const [host, ...guests] = bots;
     host.intent({ type: 'createRoom', name: names[0] });
@@ -60,15 +59,16 @@ export default async function tableScenario(ui) {
         text.selectNodeContents(document.querySelector('.narration-line'));
         if (!text.toString().includes(${JSON.stringify(names[0])})) out.push('行动缺少完整昵称');
         if (seats.some(s => s.bottom > row.top + 1) || row.bottom > self.top + 1) out.push('行动行不在对手与自己之间');
-        if (matchMedia('(max-width: 768px) and (min-height: 640px)').matches && hit(row, box(document.querySelector('.controls')))) out.push('操作区遮住行动行');
+        if (innerHeight >= 640 && hit(row, box(document.querySelector('.controls')))) out.push('操作区遮住行动行');
         for (const line of text.getClientRects()) {
           if (line.left < row.left || line.right > row.right || hit(line, timer)) out.push('行动文字越界或压住倒计时');
         }
       }
       if (document.querySelectorAll('[role="timer"]').length !== 1) out.push('倒计时应当只出现一次');
-      if (seats.length === 5 && !matchMedia('(max-width: 768px)').matches) {
-        if (narration.bottom > table.bottom + 1 || Math.abs(narration.left + narration.right - table.left - table.right) > 2) out.push('六人局叙述不在桌心');
-        if (innerHeight >= 768 && (timer.bottom > innerHeight || [...document.querySelectorAll('.controls button')].some(b => box(b).bottom > innerHeight))) out.push('首屏未显示完整操作区');
+      if (!${compact}) {
+        if (narration.bottom > table.bottom + 1 || Math.abs(narration.left + narration.right - table.left - table.right) > 2) out.push('叙述不在桌心');
+        if (seats.length > 1 && narration.top >= Math.max(...seats.map(s => s.bottom))) out.push('叙述落在所有对手下方');
+        if (seats.length === 5 && innerHeight >= 768 && (timer.bottom > innerHeight || [...document.querySelectorAll('.controls button')].some(b => box(b).bottom > innerHeight))) out.push('首屏未显示完整操作区');
       }
       for (const s of seats) {
         if (hit(s, narration)) out.push(s.name + ' 压住叙述');
