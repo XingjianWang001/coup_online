@@ -13,7 +13,7 @@ export type Showcase = { kind: 'deal'; cards: Card[] };
 
 // 对质舞台：进入对质时打开，揭晓后留到动画播完由舞台自己关闭（ShowdownStage 的 onDone）。
 export interface ShowdownView {
-  id: number; // 每场对质唯一（取开场时的日志序号），舞台以它为 key，连续两场对质也会重新挂载
+  id: number; // 每场对质唯一（取开场时的记录序号），舞台以它为 key，连续两场对质也会重新挂载
   challengerId: string;
   claimantId: string;
   role: Role;
@@ -24,7 +24,7 @@ export interface ShowdownView {
   newCard: Card | null; // 自己质疑失败后在原牌位换来的新牌
 }
 
-// 座位动效：一次性的，只由实时事件产生（重连时服务器不重放事件，所以不会补播）。id 取事件的日志序号。
+// 座位动效：一次性的，只由实时事件产生（重连时服务器不重放事件，所以不会补播）。id 取事件的记录序号。
 export type SeatMotion =
   | { id: number; playerId: string; kind: 'coins'; delta: number }
   // honest：自己声称、手里正好有这个角色（只有本机知道，别人的屏幕上永远是普通背后灵）
@@ -44,7 +44,7 @@ export interface Session {
   tunnelUrl: string | null;
   canStartTunnel: boolean;
   tunnelLoading: boolean;
-  gameNumber: number; // 日志属于房间里的第几局
+  gameNumber: number; // 记录属于房间里的第几局
   selectedAction: ActionType | null;
   // 下一份手牌到达时要展示的发牌类型
   awaitingShowcase: Showcase['kind'] | null;
@@ -85,12 +85,12 @@ export const initialSession: Session = {
 export function reduceSession(s: Session, msg: ServerMessage, now: number): Session {
   switch (msg.type) {
     case 'joined':
-      // 重连时离线期间牌局可能已推进：只沿用紧接着会被 publicState / privateState 刷新的牌桌与日志，其余（对质舞台、目标选择等）一律重置
+      // 重连时离线期间牌局可能已推进：只沿用紧接着会被 publicState / privateState 刷新的牌桌与记录，其余（对质舞台、目标选择等）一律重置
       return {
         ...initialSession,
         publicState: s.publicState,
         hand: s.hand,
-        // 离线期间再来一局并已开局（错过了 lobby 与 gameStarted）：上一局的日志不能带进这一局
+        // 离线期间再来一局并已开局（错过了 lobby 与 gameStarted）：上一局的记录不能带进这一局
         log: msg.gameNumber === s.gameNumber ? s.log : [],
         stories: msg.gameNumber === s.gameNumber ? s.stories : {},
         nextLogId: s.nextLogId,
@@ -170,7 +170,7 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
     case 'left':
       return initialSession;
     case 'reaction':
-      return s; // 表态一闪而过、不留痕，由 App 管理气泡，不进会话状态
+      return s; // 表态一闪而过、不留痕，由 App 管理铭牌上的表态，不进会话状态
   }
 }
 

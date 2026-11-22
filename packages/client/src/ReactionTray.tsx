@@ -8,7 +8,7 @@ import { translate, type Locale, type MessageKey } from './localization.ts';
 // 比服务器的限流多留 0.5 秒给网络抖动，正常冷却后的表态不会被服务器误丢
 const REACTION_COOLDOWN_MS = REACTION_MIN_INTERVAL_MS + 500;
 
-// 表态面板：记录上方，收起时只有一行。三类表态在同一块按钮区里切换；需要目标的行动预告沿用操作区「选目标」的做法。
+// 表态面板：记录上方，收起时只有一行。三类表态在同一块按钮区里切换；需要目标的行动预告沿用控制区「选目标」的做法。
 // 发出后收起并冷却 REACTION_COOLDOWN_MS；自己的铭牌等服务器转发回来才亮，与别人看到的一致
 export function ReactionTray(props: {
   state: PublicState;
