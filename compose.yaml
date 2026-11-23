@@ -6,6 +6,8 @@ services:
       TRUST_PROXY: ${TRUST_PROXY:-0}
     ports:
       - "127.0.0.1:8787:8787"
+    volumes:
+      - ./.private-credits:/app/.private-credits:ro
 
   caddy:
     profiles: [public]

@@ -108,6 +108,12 @@ try {
   Write-Host 'Uploading the release...'
   & scp @sshOptions -C -i $keyCopy $archive $remoteScript "${target}:.coup-online/uploads/$commit/"
   Assert-ExitCode 'Uploading the release archive'
+  $creditsPath = Join-Path $repoRoot '.private-credits/roster.json'
+  if (Test-Path -LiteralPath $creditsPath -PathType Leaf) {
+    $archiveName = Split-Path -Leaf $archive
+    & scp @sshOptions -C -i $keyCopy $creditsPath "${target}:.coup-online/uploads/$commit/$archiveName.credits.json"
+    Assert-ExitCode 'Uploading the private credits roster'
+  }
   Write-Host 'Building and starting the server app...'
   $archiveName = Split-Path -Leaf $archive
   & ssh @sshOptions -tt -i $keyCopy $target "cd && bash .coup-online/uploads/$commit/deploy-private-remote.sh $commit $archiveName $($config.Domain)"

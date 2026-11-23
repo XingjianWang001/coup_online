@@ -81,11 +81,25 @@ async function startServer(serverEnv = {}) {
 
 async function startChrome() {
   profileDir = mkdtempSync(join(tmpdir(), 'coup-ui-check-'));
-  launch(CHROME, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profileDir}`, '--no-first-run', 'about:blank'], {});
+  const chrome = launch(CHROME, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profileDir}`, '--no-first-run', 'about:blank'], {});
+  let startupLog = '';
+  chrome.stderr.on('data', chunk => { startupLog = (startupLog + chunk).slice(-4096); });
   // 端口 0 让 Chrome 自选端口，写在配置目录的 DevToolsActivePort 里
-  const port = await withTimeout((async () => {
-    for (;;) { try { return readFileSync(join(profileDir, 'DevToolsActivePort'), 'utf8').split('\n')[0]; } catch {} await sleep(100); }
-  })(), STEP_TIMEOUT_MS, 'Chrome 启动');
+  let port;
+  const deadline = Date.now() + 30_000;
+  while (!port) {
+    if (chrome.exitCode !== null || chrome.signalCode !== null) {
+      throw new Error(`Chrome 启动时退出（${chrome.signalCode ?? chrome.exitCode}）\n${startupLog}`);
+    }
+    if (Date.now() >= deadline) throw new Error(`超时：Chrome 启动\n${startupLog}`);
+    try {
+      const firstLine = readFileSync(join(profileDir, 'DevToolsActivePort'), 'utf8').split('\n')[0].trim();
+      if (/^\d+$/.test(firstLine)) port = firstLine;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    if (!port) await sleep(100);
+  }
   const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
   const ws = new WebSocket(targets.find((t) => t.type === 'page').webSocketDebuggerUrl);
   await withTimeout(new Promise((r) => ws.addEventListener('open', r)), STEP_TIMEOUT_MS, 'CDP 连接');
