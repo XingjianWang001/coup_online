@@ -10,6 +10,21 @@
 
 更新前请确认没有进行中的牌局。构建失败不会替换正在运行的容器；如果启动或健康检查失败，命令会报错并显示日志，不会自动回滚。需要恢复时可运行 `.\deploy.cmd -Revision <上次成功的完整提交 SHA>`，上次成功的 SHA 记录在服务器的 `~/.coup-online/current`。服务器上的旧版本目录会保留；磁盘空间不足时需人工清理。本机需要 Git 和 OpenSSH 客户端，服务器需要能访问软件源和 Docker 镜像仓库。
 
+## 制作人员名单
+
+在仓库根目录的 `.private-credits/roster.json` 维护公开署名。顶层键是完整域名，`*` 是本地预览和其他域名的默认名单。每个域名下按游戏语言列出署名和贡献，例如：
+
+```json
+{
+  "*": {
+    "zh-CN": [{ "name": "示例昵称", "contribution": "校对规则" }],
+    "en": [{ "name": "Example contributor", "contribution": "Proofread the rules" }]
+  }
+}
+```
+
+Git 和 Docker 构建均忽略这个目录。一键私有部署通过 SSH 单独传送名单；本地没有该文件时沿用服务器已有的名单。手动部署时把文件放在 Compose 项目同名目录中。每次打开制作人员页时，服务只返回当前域名和语言对应的条目。
+
 ## 私有部署与验证
 
 1. 在服务器安装 Docker Engine 和 Compose。Ubuntu 24.04 可使用系统软件源的 `docker.io` 与 `docker-compose-v2` 包：

@@ -16,6 +16,11 @@ archive="$root/uploads/$revision/$archive_name"
 [[ -f $archive ]] || { echo 'Release archive is missing.' >&2; exit 1; }
 tar -xf "$archive" -C "$release"
 rm -f -- "$archive"
+mkdir -p "$root/.private-credits"
+if [[ -f "$archive.credits.json" ]]; then
+  mv -- "$archive.credits.json" "$root/.private-credits/roster.json"
+fi
+ln -sfnT "$root/.private-credits" "$release/.private-credits"
 
 if ! command -v docker >/dev/null || ! sudo docker compose version >/dev/null 2>&1; then
   . /etc/os-release

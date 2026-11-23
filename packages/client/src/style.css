@@ -1289,6 +1289,20 @@ button.reaction-toggle:hover:not(:disabled) {
   gap: var(--sp-4);
 }
 
+.credits-list {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.credits-list strong {
+  color: var(--text);
+}
+
 .panel-heading h2 {
   margin: 0;
   color: var(--text);

@@ -446,6 +446,7 @@ dist/
 skills-lock.json
 PRODUCT.md
 .deploy-private.local.json
+/.private-credits/
 .edge/
 
 

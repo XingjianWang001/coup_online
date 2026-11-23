@@ -11,6 +11,7 @@ import { parseClientIntent, type ClientIntent, type ServerError } from '@coup/sh
 import { ClientError, toServerError } from './errors.ts';
 import { reserveRoomCreation } from './room-limits.ts';
 import { publish, pushJoined } from './push.ts';
+import { creditsFor, readRoster } from './credits.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -54,8 +55,13 @@ function genCode(): string {
   return code;
 }
 
-const httpServer = createServer((req, res) => {
+const httpServer = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost');
+  if (url.pathname === '/api/credits') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(creditsFor(await readRoster(), req.headers.host ?? '', url.searchParams.get('locale'))));
+    return;
+  }
   if (url.pathname === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
