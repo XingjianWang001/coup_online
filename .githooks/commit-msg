@@ -1,0 +1,8 @@
+#!/bin/sh
+# Rejects AI attribution in commit messages.
+pattern='^(co-authored-by:.*(claude|anthropic)|.*generated with \[claude code\])'
+if grep -Eiq "$pattern" "$1"; then
+  echo "commit-msg: this repository does not take AI attribution lines. Remove these and commit again:" >&2
+  grep -Ein "$pattern" "$1" >&2
+  exit 1
+fi

@@ -1206,6 +1206,24 @@ describe('电脑玩家自对弈', { timeout: 30_000 }, () => {
       : { type: 'chooseAction', action: 'coup', targetId: rivals[Math.floor(mind.random() * rivals.length)].id };
   };
 
+  // 引擎的不变量：自对弈每一步之后都查一遍，几千局随机牌局顺带当作引擎的模糊测试
+  // 每步都要查，用 throw 而不是 expect：expect 放在这么热的循环里会让整组自对弈慢上好几倍
+  function checkInvariants(g: GameState, where: string) {
+    const fail = (what: string) => { throw new Error(`invariant broken: ${what} (${where}, phase ${g.phase})`); };
+    const cards = [...g.deck, ...g.players.flatMap((p) => [...p.hand, ...p.revealed])];
+    const total = ROLE_ORDER.length * ROLE_COPIES;
+    if (cards.length !== total || new Set(cards.map((c) => c.id)).size !== total) fail('cards conserved with unique ids');
+    for (const role of ROLE_ORDER) if (cards.filter((c) => c.role === role).length !== ROLE_COPIES) fail(`${ROLE_COPIES} × ${role}`);
+    for (const p of g.players) {
+      if (p.coins < 0) fail(`${p.id} coins never negative`);
+      if (p.alive !== p.hand.length > 0) fail(`${p.id} alive iff holding a hidden card`);
+      const exchanging = g.phase === 'choosingExchange' && g.pending?.actorId === p.id;
+      if (!exchanging && p.hand.length + p.revealed.length !== 2) fail(`${p.id} holds two cards outside an exchange`);
+    }
+    const alive = g.players.filter((p) => p.alive);
+    if (g.phase === 'gameOver' ? alive.length !== 1 || alive[0].id !== g.winnerId : alive.length < 2) fail('survivors match the phase');
+  }
+
   // 打 games 局，返回各座位的胜局数和声称、质疑、阻挡窗口的统计。
   // overStory：一个座位自最近一次实际交换以来自愿声称超出故事上限的新角色的次数。上限是 3 个角色，诈唬倾向不低于 0.9 的是 4 个
   function play(games: number, seats: Seat[]) {
@@ -1253,6 +1271,7 @@ describe('电脑玩家自对弈', { timeout: 30_000 }, () => {
         }
         const wasBlockWindow = g.phase === 'awaitingBlock';
         const produced = apply(g, id, intent);
+        checkInvariants(g, where);
         events.push(...produced);
         stats.caught += produced.filter((e) => e.type === 'challengeResolved' && !e.truth).length;
         // 实际换了牌的座位故事重新计数

@@ -6,6 +6,8 @@
 
 Use Conventional Commits: `<type>(<optional-scope>): <imperative summary>`. Prefer the narrowest package scope for package-specific changes, such as `feat(client): animate transient notice dismissal`.
 
+Do not add AI attribution (`Co-Authored-By: Claude …`, "Generated with Claude Code") to commits or PR bodies. `.githooks/commit-msg` rejects it (`pnpm install` enables the hook).
+
 Pull requests target `dev`, the default branch; `main` holds only the initial commit.
 
 ## UI verification

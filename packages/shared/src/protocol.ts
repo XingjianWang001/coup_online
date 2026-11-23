@@ -1,4 +1,13 @@
-import type { ActionType, GameEvent, PublicState, PrivateState, Role, Card } from '@coup/engine';
+import { ACTION_CLAIM, ROLE_ORDER, type ActionType, type GameEvent, type PublicState, type PrivateState, type Role, type Card } from '@coup/engine';
+
+// 两端都按同一份时长行事：服务器据此计时、限流，客户端据此写规则说明、排动画、设冷却。改这里两端一起生效
+export const ACTION_TIMEOUT_MS = 60_000;
+export const WINDOW_TIMEOUT_MS = 20_000;
+export const DISCONNECT_GRACE_MS = 90_000;
+// 对质揭晓后下一段计时顺延这么久，留给客户端播完翻牌、换牌或落回座位的动画（client/src/motion.ts 的测试守着这个上限）
+export const REVEAL_MS = 6_000;
+// 服务器按玩家拦截更密的表态
+export const REACTION_MIN_INTERVAL_MS = 1_500;
 
 // 表态：协议里只传短语的 key、行动、角色和目标玩家 ID，文字由各端按自己的语言渲染（ADR 0008）
 export const PHRASES = ['doubt', 'sure', 'dare', 'honest', 'mercy', 'close', 'respect'] as const;
@@ -39,6 +48,76 @@ export type ClientIntent =
   // 赛后揭晓：获胜者在牌局结束后向全房间公开一张暗牌
   | { type: 'revealPostGameCard'; cardId: string }
   | { type: 'leaveRoom' };
+
+const isString = (value: unknown): value is string => typeof value === 'string';
+const isOptionalString = (value: unknown): value is string | undefined => value === undefined || typeof value === 'string';
+const isAction = (value: unknown): value is ActionType => typeof value === 'string' && Object.hasOwn(ACTION_CLAIM, value);
+const isRole = (value: unknown): value is Role => (ROLE_ORDER as readonly unknown[]).includes(value);
+const isPhrase = (value: unknown): value is Phrase => (PHRASES as readonly unknown[]).includes(value);
+const isStrength = (value: unknown): value is Strength => (STRENGTHS as readonly unknown[]).includes(value);
+
+// 表态来自客户端：只认预设内容，按已知字段重新组装，多余字段（比如自写文字）不会被转发出去
+export function parseReaction(raw: unknown): Reaction | null {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  if (r.kind === 'phrase' && isPhrase(r.phrase)) return { kind: 'phrase', phrase: r.phrase };
+  if (r.kind === 'announcement' && isAction(r.action) && isOptionalString(r.targetId)) {
+    return r.targetId === undefined
+      ? { kind: 'announcement', action: r.action }
+      : { kind: 'announcement', action: r.action, targetId: r.targetId };
+  }
+  if (r.kind === 'verbalClaim' && typeof r.has === 'boolean' && isRole(r.role)) {
+    return { kind: 'verbalClaim', has: r.has, role: r.role };
+  }
+  return null;
+}
+
+// 意图来自不可信的 socket：只在这里检查形状，按已知字段重新组装，不认识的返回 null。
+// 之后房间与引擎只判断合不合规则（轮到谁、目标在不在、牌在不在手里），不再对字段做类型断言
+export function parseClientIntent(raw: unknown): ClientIntent | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  switch (r.type) {
+    case 'startTunnel':
+    case 'startGame':
+    case 'rematch':
+    case 'addComputer':
+    case 'challenge':
+    case 'passChallenge':
+    case 'passBlock':
+    case 'leaveRoom':
+      return { type: r.type };
+    case 'createRoom':
+      return isString(r.name) ? { type: 'createRoom', name: r.name } : null;
+    case 'joinRoom':
+      return isString(r.roomCode) && isString(r.name) && isOptionalString(r.playerId) && isOptionalString(r.secret)
+        ? { type: 'joinRoom', roomCode: r.roomCode, name: r.name, playerId: r.playerId, secret: r.secret }
+        : null;
+    case 'removeComputer':
+      return isString(r.playerId) ? { type: 'removeComputer', playerId: r.playerId } : null;
+    case 'setComputerStrength':
+      return isString(r.playerId) && isStrength(r.strength) ? { type: 'setComputerStrength', playerId: r.playerId, strength: r.strength } : null;
+    case 'chooseAction':
+      return isAction(r.action) && isOptionalString(r.targetId) ? { type: 'chooseAction', action: r.action, targetId: r.targetId } : null;
+    case 'block':
+      return isRole(r.role) ? { type: 'block', role: r.role } : null;
+    case 'revealShowdownCard':
+    case 'resolveLoss':
+    case 'revealPostGameCard':
+      return isString(r.cardId) ? { type: r.type, cardId: r.cardId } : null;
+    case 'focusShowdownCard': {
+      const slot = r.slot;
+      return slot === null || (typeof slot === 'number' && Number.isInteger(slot) && slot >= 0) ? { type: 'focusShowdownCard', slot } : null;
+    }
+    case 'react': {
+      const reaction = parseReaction(r.reaction);
+      return reaction ? { type: 'react', reaction } : null;
+    }
+    case 'resolveExchange':
+      return Array.isArray(r.keepIds) && r.keepIds.every(isString) ? { type: 'resolveExchange', keepIds: [...r.keepIds] } : null;
+    default:
+      return null;
+  }
+}
 
 // 大厅玩家（开局前）。joined 也带这份名单，牌局中按 id 查 isComputer 给座位铭牌用：电脑玩家只在大厅阶段增减
 export interface LobbyPlayer {

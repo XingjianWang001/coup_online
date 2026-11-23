@@ -153,7 +153,7 @@ if (process.env.TUNE_WORKER) {
     sigma = Math.max(0.03, sigma * 0.97);
     if (gen % 5 === 4 || gen === GENS - 1) {
       const r = await evaluate(mean, 1200, N);
-      console.log(`gen ${gen + 1} sigma ${sigma.toFixed(3)} mean:`, FIELDS.map(([n], i) => `${r[i].toFixed(3)}`).join(' '), 'fit', fitness(r).toFixed(3));
+      console.log(`gen ${gen + 1} sigma ${sigma.toFixed(3)} mean:`, FIELDS.map((_, i) => `${r[i].toFixed(3)}`).join(' '), 'fit', fitness(r).toFixed(3));
     }
   }
   const final = await evaluate(mean, 12000, N);

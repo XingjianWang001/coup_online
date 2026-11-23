@@ -141,8 +141,17 @@ function lastIndex(events: readonly GameEvent[], match: GameEvent['type'] | ((e:
   while (at >= 0 && !matches(events[at])) at -= 1;
   return at;
 }
+// 同 lastIndex，但返回事件本身，类型按 match 收窄；配合 is('challenged') 或 isClaim 用，免得对 events[at] 做类型断言
+function lastEvent<E extends GameEvent>(events: readonly GameEvent[], match: (e: GameEvent) => e is E, end = events.length): E | undefined {
+  for (let at = end - 1; at >= 0; at -= 1) {
+    const e = events[at];
+    if (match(e)) return e;
+  }
+  return undefined;
+}
+const is = <T extends GameEvent['type']>(type: T) => (e: GameEvent): e is Extract<GameEvent, { type: T }> => e.type === type;
 // 声称：行动声称角色，或阻挡
-const isClaim = (e: GameEvent) => e.type === 'blocked' || (e.type === 'actionChosen' && !!e.claimedRole);
+const isClaim = (e: GameEvent): e is Claim => e.type === 'blocked' || (e.type === 'actionChosen' && !!e.claimedRole);
 
 // 任何行动预告都要看起来说得通：自己付得起（金币到 10 只能政变），针对性行动的目标在场、不是自己（偷窃还得对方有金币可偷），
 // 非针对性行动不带目标。只看公开信息
@@ -473,14 +482,13 @@ export function afterResult(state: PublicState, events: readonly GameEvent[], ba
   if (state.phase === 'gameOver') return NOTHING(AFTER_RESULT_MS);
   const start = events.length - batch;
   const fresh = events.slice(start);
-  const r = fresh.find((e) => e.type === 'challengeResolved');
-  const resolved = r?.type === 'challengeResolved' ? r : undefined;
+  const resolved = fresh.find(is('challengeResolved'));
   const resolvedAt = resolved ? events.indexOf(resolved) : start;
-  const chosen = events[lastIndex(events, 'actionChosen', resolvedAt)] as Extract<GameEvent, { type: 'actionChosen' }> | undefined;
+  const chosen = lastEvent(events, is('actionChosen'), resolvedAt);
   const claimAt = lastIndex(events, isClaim, resolvedAt);
   const blockAt = lastIndex(events, 'blocked', resolvedAt);
   const onBlock = blockAt >= 0 && blockAt === claimAt && blockAt > lastIndex(events, 'actionChosen', resolvedAt);
-  const blockerId = onBlock ? (events[blockAt] as Extract<GameEvent, { type: 'blocked' }>).blockerId : undefined;
+  const blockerId = onBlock ? lastEvent(events, is('blocked'), resolvedAt)?.blockerId : undefined;
 
   // 这次变化里失去影响力、被淘汰的人。这次只是在丢上一次对质结果定下的那张时（质疑失败者那张，或诈唬阻挡暗杀被抓后暗杀要的那张），
   // 已在那次结算里说过
@@ -492,7 +500,7 @@ export function afterResult(state: PublicState, events: readonly GameEvent[], ba
   const folded =
     !resolved && before?.type === 'challengeResolved' && first?.type === 'influenceLost' &&
     (before.truth ? first.playerId === before.loserId && lostSince(first.playerId) === 0 : first.playerId === before.claimantId && lostSince(first.playerId) === 1);
-  const challengerId = resolved && (events[lastIndex(events, 'challenged', resolvedAt)] as Extract<GameEvent, { type: 'challenged' }>).challengerId;
+  const challengerId = resolved && lastEvent(events, is('challenged'), resolvedAt)?.challengerId;
   // 谁让 id 失去了影响力：对质里输的是对质的另一方，否则是政变、暗杀他的行动者。没有的（弃权）不算结果
   const culprit = (id: string) =>
     resolved && resolved.loserId === id
@@ -513,7 +521,7 @@ export function afterResult(state: PublicState, events: readonly GameEvent[], ba
     : resolved && onBlock && resolved.truth && blockerId === me ? 'proven'
     : resolved && !onBlock && !resolved.truth && challengerId !== me ? 'caught'
     : undefined;
-  const claimEvent = events[claimAt] as Claim | undefined;
+  const claimEvent = lastEvent(events, isClaim, resolvedAt);
   const claimRole = claimEvent && (claimEvent.type === 'blocked' ? claimEvent.role : claimEvent.claimedRole);
   const party = resolved && (me === resolved.claimantId || me === challengerId);
   const attacker = culprit(me);
@@ -712,7 +720,7 @@ function replyOptions(state: PublicState, events: readonly GameEvent[], heard: r
     : kind === 'aimed' ? BLOCK_ROLES[announced!].find((x) => memory.standing.get(me)?.has(x))
     : undefined;
   const claimAt = lastIndex(events, isClaim);
-  const claim = events[claimAt] as Claim | undefined;
+  const claim = lastEvent(events, isClaim);
   // 自己的声称已经生效：最近一次声称是自己的，没人质疑，问询窗口已过
   const settledRole =
     claim && (claim.type === 'blocked' ? claim.blockerId : claim.actorId) === me && !claimantId && lastIndex(events, 'challenged') < claimAt
@@ -722,12 +730,12 @@ function replyOptions(state: PublicState, events: readonly GameEvent[], heard: r
   const justClaimed = mine?.reaction.kind === 'verbalClaim' && mine.reaction.has && to.at - mine.at <= JUST_SAID_MS ? mine.reaction.role : undefined;
   // 刚出的对质结果：最近一次对质之后还没有新的行动
   const resolvedAt = lastIndex(events, 'challengeResolved');
-  const resolved = resolvedAt > lastIndex(events, 'actionChosen') ? (events[resolvedAt] as Extract<GameEvent, { type: 'challengeResolved' }>) : undefined;
-  const challenger = resolved && (events[lastIndex(events, 'challenged', resolvedAt)] as Extract<GameEvent, { type: 'challenged' }>).challengerId;
+  const resolved = resolvedAt > lastIndex(events, 'actionChosen') ? lastEvent(events, is('challengeResolved')) : undefined;
+  const challenger = resolved && lastEvent(events, is('challenged'), resolvedAt)?.challengerId;
   const subject = kind === 'doubt' && claimantId === me ? me : to.playerId;
   // 手下留情：自己刚预告了针对说话者的行动，或最近一次行动是自己针对他的；再预告一遍同一目标（说得通才算候选）
   const actAt = lastIndex(events, 'actionChosen');
-  const act = events[actAt] as Extract<GameEvent, { type: 'actionChosen' }> | undefined;
+  const act = lastEvent(events, is('actionChosen'));
   const pressed =
     mine?.reaction.kind === 'announcement' && mine.reaction.targetId === to.playerId && to.at - mine.at <= JUST_SAID_MS ? [mine.reaction]
     : act?.actorId === me && act.targetId === to.playerId ? [announcement(act.action, to.playerId)]
@@ -763,7 +771,7 @@ function replyOptions(state: PublicState, events: readonly GameEvent[], heard: r
 function broken(events: readonly GameEvent[], earlier: readonly Heard[], speaker: string, me: string): number {
   const last = earlier.filter((h) => h.playerId === speaker && h.reaction.kind === 'announcement' && h.reaction.targetId === me).at(-1);
   if (last?.reaction.kind !== 'announcement') return 0;
-  const acts = events.slice(last.seen).filter((e) => e.type === 'actionChosen' && e.actorId === speaker) as Extract<GameEvent, { type: 'actionChosen' }>[];
+  const acts = events.slice(last.seen).filter(is('actionChosen')).filter((e) => e.actorId === speaker);
   const kept = acts[0]?.action === last.reaction.action && acts[0].targetId === me;
   return kept ? 0 : acts.length;
 }

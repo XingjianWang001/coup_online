@@ -2,6 +2,19 @@ import { useEffect, useLayoutEffect, useRef, type DependencyList, type RefObject
 
 const EASE_OUT = 'cubic-bezier(0.16, 1, 0.3, 1)';
 
+// 对质揭晓的串行步骤（毫秒）：悬念 → 快翻 → 判定停留 → 属实时证明牌飞走、新牌发回、停一下、淡出；不属实时牌缩回座位。
+// 服务器按 REVEAL_MS 顺延下一段计时，motion.test.ts 守着最长的那条路不超过它
+export const REVEAL_STEPS_MS = {
+  suspense: 1900, // 四周已暗，牌静止，只有牌框升温
+  flip: 340,
+  verdict: 1300,
+  toss: 420,
+  deal: 620,
+  settle: 1000,
+  fade: 300,
+  shrink: 650,
+} as const;
+
 /**
  * deps 变化（元素里换了内容）时，让元素高度从旧值平滑过渡到新值。
  * 旧高度由 ResizeObserver 持续记录：它在 layout 之后才回调，所以 useLayoutEffect 里读到的还是换内容之前的高度；

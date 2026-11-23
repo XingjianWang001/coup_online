@@ -13,7 +13,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { ACTION_CLAIM, ASSASSINATE_COST, BLOCK_ROLES, COUP_COST, FORCED_COUP_COINS, isValidNickname, MAX_PLAYERS, parseServerError, PHRASES, STRENGTHS } from '@coup/shared';
+import { ACTION_CLAIM, ASSASSINATE_COST, BLOCK_ROLES, COUP_COST, FORCED_COUP_COINS, isValidNickname, MAX_PLAYERS, parseServerError, PHRASES, REACTION_MIN_INTERVAL_MS, STRENGTHS } from '@coup/shared';
 import type { ActionType, Card, LobbyPlayer, PublicState, Reaction, Role, ServerError, Strength } from '@coup/shared';
 import {
   clearIdentity,
@@ -33,7 +33,7 @@ import type { LogEntry } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { strayFocusTarget, wrappedDialogFocus } from './dialog.ts';
 import { scheduleAutoDismiss } from './transient.ts';
-import { useSmoothHeight } from './motion.ts';
+import { REVEAL_STEPS_MS, useSmoothHeight } from './motion.ts';
 import { closeShowdown, dropMotion, initialSession, reduceSession, rejoinIntent, type CountdownSnapshot, type SeatMotion, type Session, type Showcase, type ShowdownView } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
 import { CARD_STYLES, loadCardStyle, loadDebug, persistCardStyle, type CardStyle } from './cardStyle.ts';
@@ -65,7 +65,8 @@ interface LatestReaction extends ReactionBubble {
   playerId: string;
 }
 const REACTION_MS = 3000; // 与 style.css 里 .nameplate-text 的淡出时刻对齐
-const REACTION_COOLDOWN_MS = 2000; // 服务器按玩家只拦 1.5 秒，留出网络抖动（见 server/src/room.ts）
+// 比服务器的限流多留 0.5 秒给网络抖动，正常冷却后的表态不会被服务器误丢
+const REACTION_COOLDOWN_MS = REACTION_MIN_INTERVAL_MS + 500;
 const CONTROLS_ARM_MS = 500; // 控制区换内容后多久才收输入，见 GameBoard 的 armedKey
 
 interface TransientErrorState {
@@ -1198,9 +1199,6 @@ const animate = (el: Element, frames: Keyframe[], options: KeyframeAnimationOpti
   el.animate(frames, { fill: 'forwards', ...options }).finished;
 // 翻牌器从 180°（牌背朝外）转到 0°（牌面朝外）
 const flipTo = (deg: number): Keyframe => ({ transform: `perspective(1000px) rotateY(${deg}deg)` });
-// 整段揭晓（悬念 + 翻牌 + 盖印 + 换牌或落回座位）约 6 秒：改动这里的时长要同步 server/src/room.ts 的 REVEAL_MS
-const SUSPENSE_MS = 1900; // 悬念：四周已暗，牌静止，只有牌框升温
-const VERDICT_HOLD_MS = 1300;
 const FOCUS_SEND_MS = 100;
 
 // 放大展示的一张牌：down 是翻开前朝外的一面，up 是翻开后的牌面；incoming 是质疑失败后换来的新牌
@@ -1377,12 +1375,12 @@ function ShowdownStage(props: {
       for (const other of others) animate(other, [{ opacity: 0.15 }], { duration: 450 });
       animate($('.stage-title'), [{ opacity: 0.5 }], { duration: 450 });
       animate(spot, [{ opacity: 1 }], { duration: 600, easing: 'ease-out' });
-      animate(heat, [{ opacity: 0 }, { opacity: 1 }], { duration: SUSPENSE_MS, easing: 'cubic-bezier(0.6, 0, 0.9, 0.5)' });
-      await sleep(SUSPENSE_MS);
+      animate(heat, [{ opacity: 0 }, { opacity: 1 }], { duration: REVEAL_STEPS_MS.suspense, easing: 'cubic-bezier(0.6, 0, 0.9, 0.5)' });
+      await sleep(REVEAL_STEPS_MS.suspense);
       if (!alive) return;
       const flipper = $('.stage-flipper', slot);
       if (reduced) flipper.animate([flipTo(0)], { duration: 0, fill: 'forwards' });
-      else await animate(flipper, [flipTo(0)], { duration: 340, easing: 'cubic-bezier(0.3, 0, 0.1, 1)' });
+      else await animate(flipper, [flipTo(0)], { duration: REVEAL_STEPS_MS.flip, easing: 'cubic-bezier(0.3, 0, 0.1, 1)' });
       animate(heat, [{ opacity: 0 }], { duration: 500 });
       if (reveal.truth) {
         // 属实：角色色从牌后漫开
@@ -1399,7 +1397,7 @@ function ShowdownStage(props: {
       if (!reduced) {
         animate($('.stage-stamp'), [{ transform: 'scale(1.3)' }, { transform: 'scale(1)' }], { duration: 260, easing: 'cubic-bezier(0.2, 0.9, 0.3, 1)' });
       }
-      await sleep(VERDICT_HOLD_MS);
+      await sleep(REVEAL_STEPS_MS.verdict);
       if (!alive) return;
 
       if (reveal.truth) {
@@ -1409,16 +1407,16 @@ function ShowdownStage(props: {
           await animate(card, [{ opacity: 0 }], { duration: 250 });
           await animate(incoming, [{ opacity: 0 }, { opacity: 1 }], { duration: 250 });
         } else {
-          await animate(card, [{ transform: 'translateY(-80vh) rotate(14deg)' }], { duration: 420, easing: 'cubic-bezier(0.7, 0, 0.84, 0)' });
+          await animate(card, [{ transform: 'translateY(-80vh) rotate(14deg)' }], { duration: REVEAL_STEPS_MS.toss, easing: 'cubic-bezier(0.7, 0, 0.84, 0)' });
           await animate(incoming, [
             { opacity: 1, transform: 'translateY(-80vh) rotate(-16deg)', easing: 'cubic-bezier(0.16, 1, 0.3, 1)' },
             { opacity: 1, transform: 'translateY(24px) rotate(-5deg)', offset: 0.65, easing: 'cubic-bezier(0.45, 0, 0.55, 1)' },
             { opacity: 1, transform: 'none' },
-          ], { duration: 620 });
+          ], { duration: REVEAL_STEPS_MS.deal });
         }
-        await sleep(1000);
+        await sleep(REVEAL_STEPS_MS.settle);
         if (!alive) return;
-        await animate(el, [{ opacity: 0 }], { duration: 300 });
+        await animate(el, [{ opacity: 0 }], { duration: REVEAL_STEPS_MS.fade });
       } else {
         // 翻开的牌缩回被质疑者座位，成为明牌
         for (const fading of [$('.stage-backdrop'), spot, $('.stage-title'), verdict, ...others]) {
@@ -1430,7 +1428,7 @@ function ShowdownStage(props: {
           const dx = target.left + target.width / 2 - (cur.left + cur.width / 2);
           const dy = target.top + target.height / 2 - (cur.top + cur.height / 2);
           await animate(card, [{ transform: `translate(${dx}px, ${dy}px) scale(${target.width / cur.width})`, opacity: 0.4 }], {
-            duration: 650,
+            duration: REVEAL_STEPS_MS.shrink,
             easing: 'cubic-bezier(0.65, 0, 0.35, 1)',
           });
         } else {
