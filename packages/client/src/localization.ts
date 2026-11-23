@@ -46,7 +46,6 @@ const english = {
   createRoom: 'Create room',
   or: 'or',
   roomCode: 'Room code',
-  roomCodeHelp: ' — share this code or the invite link with friends',
   roomCodePlaceholder: '6-character room code',
   joinRoom: 'Join room',
   inviteLink: 'Invite link',
@@ -55,12 +54,12 @@ const english = {
   copy: 'Copy',
   tunnelStarting: 'Starting tunnel…',
   generateInviteLink: 'Generate invite link',
-  playersCount: 'Players ({count})',
-  hostSuffix: ' (host)',
+  playersCount: 'Players {count}/{maximum}',
   previousWinner: 'Previous winner',
-  offlineSuffix: ' (offline)',
+  offline: 'Offline',
   startGame: 'Start game',
-  startGameRequirement: 'Requires at least 2 players',
+  notEnoughPlayers: 'Too few players',
+  waitingForStart: 'Waiting for host {name} to start the game…',
   computerPlayer: 'Computer player',
   strongComputerPlayer: 'Advanced computer player',
   addComputer: 'Add computer player',
@@ -79,7 +78,7 @@ const english = {
   errorIllegalIntent: 'That request is not supported.',
   errorInvalidGameAction: 'That action is not allowed right now.',
   errorGameNotStarted: 'The game has not started yet.',
-  errorRoomFull: 'This room is full (maximum {maximum} players).',
+  errorRoomFull: 'This room is full.',
   errorInvalidName: `Enter a nickname of 1–${MAX_NICKNAME_CHARACTERS} characters.`,
   chooseAction: 'Choose an action',
   errorRateLimited: 'Too many rooms created recently. Try again in a minute.',
@@ -175,7 +174,8 @@ const english = {
   logEliminated: '{player} is eliminated',
   logGameOver: '{winner} wins',
   logPostGameRevealed: '{player} unveils {role}',
-  logCoinsChanged: '{player} coins → {coins}',
+  logCoinsChanged: '{player} now has {coins} coins',
+  logCoinsChangedOne: '{player} now has {coins} coin',
   logExchangeDrew: '{player} draws {count} cards',
 } as const;
 
@@ -211,7 +211,6 @@ const simplifiedChinese = {
   createRoom: '创建房间',
   or: '或',
   roomCode: '房间码',
-  roomCodeHelp: '（把此码或链接发给朋友）',
   roomCodePlaceholder: '6 位房间码',
   joinRoom: '加入房间',
   inviteLink: '加入链接',
@@ -220,12 +219,12 @@ const simplifiedChinese = {
   copy: '复制',
   tunnelStarting: '正在启动隧道…',
   generateInviteLink: '生成加入链接',
-  playersCount: '玩家（{count}）',
-  hostSuffix: ' (房主)',
+  playersCount: '玩家 {count}/{maximum}',
   previousWinner: '上局获胜者',
-  offlineSuffix: ' (离线)',
+  offline: '离线',
   startGame: '开始游戏',
-  startGameRequirement: '需 ≥2 人',
+  notEnoughPlayers: '人数不足',
+  waitingForStart: '等待房主 {name} 开始游戏…',
   computerPlayer: '电脑玩家',
   strongComputerPlayer: '进阶电脑玩家',
   addComputer: '添加电脑玩家',
@@ -244,7 +243,7 @@ const simplifiedChinese = {
   errorIllegalIntent: '不支持此请求。',
   errorInvalidGameAction: '当前不能执行此行动。',
   errorGameNotStarted: '牌局尚未开始。',
-  errorRoomFull: '房间已满（最多 {maximum} 名玩家）。',
+  errorRoomFull: '房间已满。',
   errorInvalidName: `请输入 1～${MAX_NICKNAME_CHARACTERS} 个字符的昵称。`,
   chooseAction: '选择行动',
   errorRateLimited: '最近创建的房间过多，请一分钟后再试。',
@@ -275,7 +274,7 @@ const simplifiedChinese = {
   lossTitle: '选择要失去的影响力',
   rematch: '再来一局',
   waitingForRematch: '等待房主 {name} 发起再来一局…',
-  selfMarker: ' (你)',
+  selfMarker: '（你）',
   eliminatedMarker: '出局',
   targetedMarker: '，被针对',
   coinCount: '{count} 金币',
@@ -329,18 +328,19 @@ const simplifiedChinese = {
   expandLog: '展开{action}的详情',
   collapseLog: '收起{action}的详情',
   narrationAction: '{actor} 发动{action}',
-  narrationClaim: '{actor} 声称【{role}】发动{action}',
+  narrationClaim: '{actor} 声称{role}发动{action}',
   narrationTarget: '，目标 {target}',
-  narrationBlock: '；{blocker} 用【{role}】阻挡',
+  narrationBlock: '；{blocker} 用{role}阻挡',
   logChallenge: '{challenger} 质疑 {target}',
-  logChallengeFailed: '{claimant} 出示【{role}】，质疑失败：{loser} 失去影响力',
+  logChallengeFailed: '{claimant} 出示{role}，质疑失败：{loser} 失去影响力',
   logChallengeSucceeded: '质疑成功：{loser} 失去影响力',
-  logBlock: '{blocker} 用【{role}】阻挡',
-  logInfluenceLost: '{player} 翻开【{role}】',
+  logBlock: '{blocker} 用{role}阻挡',
+  logInfluenceLost: '{player} 翻开{role}',
   logEliminated: '{player} 被淘汰',
   logGameOver: '{winner} 获胜',
-  logPostGameRevealed: '{player} 揭晓【{role}】',
-  logCoinsChanged: '{player} 金币 → {coins}',
+  logPostGameRevealed: '{player} 揭晓{role}',
+  logCoinsChanged: '{player} 现有 {coins} 金币',
+  logCoinsChangedOne: '{player} 现有 {coins} 金币',
   logExchangeDrew: '{player} 抽取 {count} 张牌',
 } as const satisfies Record<MessageKey, string>;
 
@@ -350,9 +350,9 @@ const dictionaries: Record<Locale, Record<MessageKey, string>> = {
 };
 
 interface MessageValues {
-  playersCount: { count: number };
+  playersCount: { count: number; maximum: number };
+  waitingForStart: { name: string };
   errorMinimumPlayers: { minimum: number };
-  errorRoomFull: { maximum: number };
   removeComputer: { name: string };
   computerStrength: { name: string };
   winner: { name: string };
@@ -468,7 +468,7 @@ export function localizeServerError(locale: Locale, value: unknown): string {
     case 'illegalIntent': return translate(locale, 'errorIllegalIntent');
     case 'invalidGameAction': return translate(locale, 'errorInvalidGameAction');
     case 'gameNotStarted': return translate(locale, 'errorGameNotStarted');
-    case 'roomFull': return translate(locale, 'errorRoomFull', error.params);
+    case 'roomFull': return translate(locale, 'errorRoomFull');
     case 'invalidName': return translate(locale, 'errorInvalidName');
     case 'rateLimited': return translate(locale, 'errorRateLimited');
     case 'serverBusy': return translate(locale, 'errorServerBusy');

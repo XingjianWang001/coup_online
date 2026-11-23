@@ -122,6 +122,22 @@ export function ComputerBadge({ strength, locale }: { strength: Strength; locale
   );
 }
 
+// 离线：三道信号弧被一道斜线划断；可访问名称随语言
+export function OfflineBadge({ locale }: { locale: Locale }) {
+  const label = translate(locale, 'offline');
+  return (
+    <span className="offline-badge" role="img" aria-label={label} title={label}>
+      <Glyph size={16} className="inline-icon">
+        <path d="M2.5 9.5a14 14 0 0 1 19 0" />
+        <path d="M6 13a9 9 0 0 1 12 0" />
+        <path d="M9.4 16.5a4 4 0 0 1 5.2 0" />
+        <circle className="f" cx="12" cy="20" r="1.4" />
+        <line x1="4" y1="3" x2="20" y2="21" />
+      </Glyph>
+    </span>
+  );
+}
+
 // 添加电脑玩家：缩小的普通徽标，右下角一个＋，两者不相交
 export function AddComputerIcon() {
   return (

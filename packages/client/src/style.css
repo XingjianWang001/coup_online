@@ -401,9 +401,22 @@ input:focus-visible {
   border-bottom: none;
 }
 
-.playerlist li.host {
-  color: var(--gold);
-  font-weight: 600;
+/* 离线：名字退到三级文字色，后面的断线图标不靠颜色也能认出 */
+.playerlist .offline {
+  color: var(--text-3);
+}
+
+/* 两段文字叠在同一格，按钮宽度取较宽的一段；藏起的那段只占位 */
+.start-game {
+  display: inline-grid;
+}
+
+.start-game > span {
+  grid-area: 1 / 1;
+}
+
+.start-game > [aria-hidden='true'] {
+  visibility: hidden;
 }
 
 /* 带移除按钮的行：按钮保留 44px 触控高度，行内边距收紧，免得名单被撑高 */
@@ -682,13 +695,13 @@ input:focus-visible {
   vertical-align: bottom;
 }
 
-/* 亮起的底带（panel-2）上刺客红、女伯爵紫只有约 4:1：五色统一向象牙色提 20%，都过 4.5:1 */
-.nameplate-role { font-weight: 600; }
-.nameplate-role.role--duke       { color: color-mix(in oklch, var(--duke) 80%, var(--text)); }
-.nameplate-role.role--assassin   { color: color-mix(in oklch, var(--assassin) 80%, var(--text)); }
-.nameplate-role.role--captain    { color: color-mix(in oklch, var(--captain) 80%, var(--text)); }
-.nameplate-role.role--ambassador { color: color-mix(in oklch, var(--ambassador) 80%, var(--text)); }
-.nameplate-role.role--contessa   { color: color-mix(in oklch, var(--contessa) 80%, var(--text)); }
+/* 铭牌、叙述和记录里的角色名。亮起的底带（panel-2）上刺客红、女伯爵紫只有约 4:1：五色统一向象牙色提 20%，都过 4.5:1；叙述与记录的底色更暗，同样过 */
+.role-name { font-weight: 600; }
+.role-name.role--duke       { color: color-mix(in oklch, var(--duke) 80%, var(--text)); }
+.role-name.role--assassin   { color: color-mix(in oklch, var(--assassin) 80%, var(--text)); }
+.role-name.role--captain    { color: color-mix(in oklch, var(--captain) 80%, var(--text)); }
+.role-name.role--ambassador { color: color-mix(in oklch, var(--ambassador) 80%, var(--text)); }
+.role-name.role--contessa   { color: color-mix(in oklch, var(--contessa) 80%, var(--text)); }
 
 .visually-hidden {
   position: absolute;

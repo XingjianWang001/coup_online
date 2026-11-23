@@ -44,8 +44,8 @@ describe('locale selection', () => {
 
 describe('translate', () => {
   it('interpolates typed values into localized copy', () => {
-    expect(translate('en', 'playersCount', { count: 3 })).toBe('Players (3)');
-    expect(translate('zh-CN', 'playersCount', { count: 3 })).toBe('玩家（3）');
+    expect(translate('en', 'playersCount', { count: 3, maximum: 6 })).toBe('Players 3/6');
+    expect(translate('zh-CN', 'playersCount', { count: 3, maximum: 6 })).toBe('玩家 3/6');
   });
 
   it('localizes the leave-room notice without exposing a server reason', () => {
@@ -54,10 +54,12 @@ describe('translate', () => {
   });
 
   it('localizes parameterized server errors in the current locale', () => {
-    const error = { code: 'roomFull', params: { maximum: 6 } } as const;
+    const error = { code: 'minimumPlayers', params: { minimum: 2 } } as const;
 
-    expect(localizeServerError('en', error)).toBe('This room is full (maximum 6 players).');
-    expect(localizeServerError('zh-CN', error)).toBe('房间已满（最多 6 名玩家）。');
+    expect(localizeServerError('en', error)).toBe('At least 2 players are required to start.');
+    expect(localizeServerError('zh-CN', error)).toBe('至少需要 2 名玩家才能开始。');
+    // 房间已满不再报上限：进不来的人用不上这个数，房间里的人看名单的 n/6
+    expect(localizeServerError('zh-CN', { code: 'roomFull', params: { maximum: 6 } })).toBe('房间已满。');
   });
 
   it('uses a generic localized message for unknown server error input', () => {

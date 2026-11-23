@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { GameEvent, PublicState } from '@coup/shared';
-import { describeAction, describeCountdown, describeEvent, describePending, describeWaiting, estimateServerOffset, groupLog, remainingSinceReceipt, type LogEntry } from './narration.ts';
+import * as narration from './narration.ts';
+import { describeCountdown, describeWaiting, estimateServerOffset, remainingSinceReceipt, segmentsText, type LogEntry, type Segment } from './narration.ts';
+
+// 叙述与记录返回带角色标记的分段；文案断言比对拼起来的文字，上色另有一条断言
+const text = (segments: Segment[] | null) => (segments ? segmentsText(segments) : null);
+const describePending = (...args: Parameters<typeof narration.describePending>) => text(narration.describePending(...args));
+const describeEvent = (...args: Parameters<typeof narration.describeEvent>) => text(narration.describeEvent(...args));
+const describeAction = (...args: Parameters<typeof narration.describeAction>) => segmentsText(narration.describeAction(...args));
+const groupLog = (...args: Parameters<typeof narration.groupLog>) =>
+  narration.groupLog(...args).map((g) => ({ ...g, action: segmentsText(g.action), entries: g.entries.map((e) => ({ ...e, text: segmentsText(e.text) })) }));
 
 function state(overrides: Partial<PublicState>): PublicState {
   return {
@@ -32,14 +41,20 @@ describe('describePending', () => {
       challengeSubject: 'action',
       pending: { action: 'tax', actorId: 'a', claimedRole: 'duke' },
     });
-    expect(describePending(s)).toBe('张三 声称【公爵】发动征税');
+    expect(describePending(s)).toBe('张三 声称公爵发动征税');
   });
 
   it('描述带目标的行动', () => {
     const s = state({
       pending: { action: 'assassinate', actorId: 'a', targetId: 'b', claimedRole: 'assassin' },
     });
-    expect(describePending(s)).toBe('张三 声称【刺客】发动暗杀，目标 李四');
+    expect(describePending(s)).toBe('张三 声称刺客发动暗杀，目标 李四');
+  });
+
+  it('角色名单独成段，界面按角色上色', () => {
+    const s = state({ pending: { action: 'steal', actorId: 'a', targetId: 'b', claimedRole: 'captain', blockById: 'b', blockRole: 'ambassador' } });
+    const roles = narration.describePending(s)!.filter((x) => typeof x !== 'string');
+    expect(roles).toEqual([{ text: '队长', role: 'captain' }, { text: '大使', role: 'ambassador' }]);
   });
 
   it('描述外援（不声称角色）', () => {
@@ -61,7 +76,7 @@ describe('describePending', () => {
         blockRole: 'duke',
       },
     });
-    expect(describePending(s)).toBe('张三 发动外援；李四 用【公爵】阻挡');
+    expect(describePending(s)).toBe('张三 发动外援；李四 用公爵阻挡');
     expect(describePending(s, 'en')).toBe('张三 uses Foreign Aid; 李四 blocks with Duke');
   });
 });
@@ -111,7 +126,7 @@ describe('describeEvent', () => {
 
   it('描述质疑失败（声称者确实有该角色）', () => {
     expect(describeEvent({ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 0 }, s)).toBe(
-      '张三 出示【公爵】，质疑失败：李四 失去影响力',
+      '张三 出示公爵，质疑失败：李四 失去影响力',
     );
     expect(describeEvent({ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 0 }, s, 'en')).toBe(
       '张三 shows Duke; challenge failed: 李四 loses influence',
@@ -125,11 +140,11 @@ describe('describeEvent', () => {
   });
 
   it('描述阻挡', () => {
-    expect(describeEvent({ type: 'blocked', blockerId: 'b', role: 'duke' }, s)).toBe('李四 用【公爵】阻挡');
+    expect(describeEvent({ type: 'blocked', blockerId: 'b', role: 'duke' }, s)).toBe('李四 用公爵阻挡');
   });
 
   it('描述翻开明牌与淘汰', () => {
-    expect(describeEvent({ type: 'influenceLost', playerId: 'a', role: 'assassin' }, s)).toBe('张三 翻开【刺客】');
+    expect(describeEvent({ type: 'influenceLost', playerId: 'a', role: 'assassin' }, s)).toBe('张三 翻开刺客');
     expect(describeEvent({ type: 'eliminated', playerId: 'a' }, s)).toBe('张三 被淘汰');
   });
 
@@ -143,7 +158,7 @@ describe('describeEvent', () => {
   });
 
   it('描述金币变化与抽牌', () => {
-    expect(describeEvent({ type: 'coinsChanged', playerId: 'a', coins: 5 }, s)).toBe('张三 金币 → 5');
+    expect(describeEvent({ type: 'coinsChanged', playerId: 'a', coins: 5 }, s)).toBe('张三 现有 5 金币');
     expect(describeEvent({ type: 'exchangeDrew', playerId: 'a', count: 2 }, s)).toBe('张三 抽取 2 张牌');
   });
 });
@@ -153,14 +168,14 @@ describe('describeAction', () => {
 
   it('描述声称角色的行动', () => {
     expect(describeAction({ type: 'actionChosen', actorId: 'a', action: 'tax', claimedRole: 'duke' }, s)).toBe(
-      '张三 声称【公爵】发动征税',
+      '张三 声称公爵发动征税',
     );
   });
 
   it('描述带目标的行动', () => {
     expect(
       describeAction({ type: 'actionChosen', actorId: 'a', action: 'assassinate', targetId: 'b', claimedRole: 'assassin' }, s),
-    ).toBe('张三 声称【刺客】发动暗杀，目标 李四');
+    ).toBe('张三 声称刺客发动暗杀，目标 李四');
   });
 
   it('描述收入与外援（无声称）', () => {
@@ -184,11 +199,11 @@ describe('groupLog', () => {
       s,
     );
     expect(groups).toHaveLength(1);
-    expect(groups[0].action).toBe('张三 声称【公爵】发动征税');
+    expect(groups[0].action).toBe('张三 声称公爵发动征税');
     expect(groups[0].entries.map((x) => x.text)).toEqual([
       '李四 质疑 张三',
       '质疑成功：张三 失去影响力',
-      '张三 翻开【刺客】',
+      '张三 翻开刺客',
     ]);
   });
 
@@ -202,7 +217,7 @@ describe('groupLog', () => {
       s,
     );
     expect(groups).toHaveLength(1);
-    expect(groups[0].entries.map((x) => x.text)).toEqual(['张三 金币 → 3']);
+    expect(groups[0].entries.map((x) => x.text)).toEqual(['张三 现有 3 金币']);
   });
 
   it('gameOver 独立成组，turnChanged 不产生条目', () => {
@@ -224,7 +239,7 @@ describe('groupLog', () => {
       { id: 1, event: { type: 'postGameRevealed', playerId: 'a', role: 'duke', slot: 1 } },
       { id: 2, event: { type: 'postGameRevealed', playerId: 'a', role: 'contessa', slot: 0 } },
     ];
-    expect(groupLog(events, s, 'zh-CN').map((g) => g.action)).toEqual(['张三 获胜', '张三 揭晓【公爵】', '张三 揭晓【女伯爵】']);
+    expect(groupLog(events, s, 'zh-CN').map((g) => g.action)).toEqual(['张三 获胜', '张三 揭晓公爵', '张三 揭晓女伯爵']);
     expect(groupLog(events, s, 'en').map((g) => g.action)).toEqual(['张三 wins', '张三 unveils Duke', '张三 unveils Contessa']);
   });
 
@@ -244,7 +259,7 @@ describe('groupLog', () => {
     const chinese = groupLog(events, s, 'zh-CN');
     const english = groupLog(events, s, 'en');
 
-    expect(chinese[0].action).toBe('张三 声称【刺客】发动暗杀，目标 李四');
+    expect(chinese[0].action).toBe('张三 声称刺客发动暗杀，目标 李四');
     expect(english[0].action).toBe('张三 claims Assassin to Assassinate, targeting 李四');
     expect(english.flatMap((group) => [group.action, ...group.entries.map((entry) => entry.text)])).toEqual(
       expect.arrayContaining([
