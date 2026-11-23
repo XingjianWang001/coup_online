@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { strayFocusTarget, wrappedDialogFocus } from './dialog.ts';
+import { lockScroll, strayFocusTarget, wrappedDialogFocus } from './dialog.ts';
 
 describe('dialog keyboard focus', () => {
   it('wraps at either end and leaves interior movement to the browser', () => {
@@ -27,5 +27,19 @@ describe('stray focus', () => {
     ['上面还叠着别的对话框：交给最上层的那个', [dialog, node()], table, first, null],
   ])('%s', (_name, modals, target, initial, expected) => {
     expect(strayFocusTarget(modals, dialog, target, initial)).toBe(expected);
+  });
+});
+
+// 对质舞台盖着发牌展示时座位被接管或被淘汰：两个对话框在同一次渲染里关闭，先清理的是下面的发牌展示，页面滚动不能一直锁着
+describe('scroll lock', () => {
+  it('stays on until the last stacked dialog closes, in any order', () => {
+    const body = { overflow: 'auto' };
+    const closeShowcase = lockScroll(body);
+    const closeStage = lockScroll(body);
+    expect(body.overflow).toBe('hidden');
+    closeShowcase();
+    expect(body.overflow).toBe('hidden');
+    closeStage();
+    expect(body.overflow).toBe('auto');
   });
 });
