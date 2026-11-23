@@ -126,16 +126,16 @@ describe('describeEvent', () => {
 
   it('描述质疑失败（声称者确实有该角色）', () => {
     expect(describeEvent({ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 0 }, s)).toBe(
-      '张三 出示公爵，质疑失败：李四 失去影响力',
+      '张三 出示公爵，质疑失败，李四 失去影响力',
     );
     expect(describeEvent({ type: 'challengeResolved', truth: true, loserId: 'b', claimantId: 'a', role: 'duke', slot: 0 }, s, 'en')).toBe(
-      '张三 shows Duke; challenge failed: 李四 loses influence',
+      '张三 shows Duke; the challenge fails and 李四 loses influence',
     );
   });
 
   it('描述质疑成功（声称者在撒谎）', () => {
     expect(describeEvent({ type: 'challengeResolved', truth: false, loserId: 'a', claimantId: 'a', role: 'duke', slot: 0 }, s)).toBe(
-      '质疑成功：张三 失去影响力',
+      '质疑成功，张三 失去影响力',
     );
   });
 
@@ -202,7 +202,7 @@ describe('groupLog', () => {
     expect(groups[0].action).toBe('张三 声称公爵发动征税');
     expect(groups[0].entries.map((x) => x.text)).toEqual([
       '李四 质疑 张三',
-      '质疑成功：张三 失去影响力',
+      '质疑成功，张三 失去影响力',
       '张三 翻开刺客',
     ]);
   });
@@ -264,7 +264,7 @@ describe('groupLog', () => {
     expect(english.flatMap((group) => [group.action, ...group.entries.map((entry) => entry.text)])).toEqual(
       expect.arrayContaining([
         '李四 challenges 张三',
-        '张三 shows Duke; challenge failed: 李四 loses influence',
+        '张三 shows Duke; the challenge fails and 李四 loses influence',
         '李四 blocks with Contessa',
         '李四 reveals Duke',
         '李四 is eliminated',
@@ -286,27 +286,27 @@ describe('describeWaiting', () => {
   });
 
   it('说出正在等谁、等什么', () => {
-    expect(describeWaiting(state({}), 'b')).toBe('等待 张三 行动…');
-    expect(describeWaiting(state({ phase: 'choosingLoss', lossPlayerId: 'b' }), 'a')).toBe('等待 李四 选择要失去的影响力…');
-    expect(describeWaiting(state({ phase: 'showdown', showdown: { challengerId: 'b', claimantId: 'a', role: 'duke' } }), 'b')).toBe('等待 张三 选择要翻开的牌…');
-    expect(describeWaiting(state({ phase: 'choosingExchange', pending: { action: 'exchange', actorId: 'a', claimedRole: 'ambassador' } }), 'b')).toBe('等待 张三 交换手牌…');
+    expect(describeWaiting(state({}), 'b')).toBe('张三 正在选择行动');
+    expect(describeWaiting(state({ phase: 'choosingLoss', lossPlayerId: 'b' }), 'a')).toBe('李四 正在选择要失去的影响力');
+    expect(describeWaiting(state({ phase: 'showdown', showdown: { challengerId: 'b', claimantId: 'a', role: 'duke' } }), 'b')).toBe('张三 正在选择翻开哪张牌');
+    expect(describeWaiting(state({ phase: 'choosingExchange', pending: { action: 'exchange', actorId: 'a', claimedRole: 'ambassador' } }), 'b')).toBe('张三 正在交换手牌');
   });
 
   it('英文界面同样说出谁在选失去的影响力、谁在交换', () => {
-    expect(describeWaiting(state({ phase: 'choosingLoss', lossPlayerId: 'b' }), 'a', 'en')).toBe('Waiting for 李四 to choose an influence to lose…');
-    expect(describeWaiting(state({ phase: 'choosingExchange', pending: { action: 'exchange', actorId: 'a', claimedRole: 'ambassador' } }), 'b', 'en')).toBe('Waiting for 张三 to exchange cards…');
+    expect(describeWaiting(state({ phase: 'choosingLoss', lossPlayerId: 'b' }), 'a', 'en')).toBe('李四 is choosing an influence to lose');
+    expect(describeWaiting(state({ phase: 'choosingExchange', pending: { action: 'exchange', actorId: 'a', claimedRole: 'ambassador' } }), 'b', 'en')).toBe('张三 is exchanging cards');
   });
 
   it('声称者本人或已放弃的玩家等其他人决定是否质疑', () => {
     const s = state({ phase: 'awaitingChallenge', challengeSubject: 'action', pending: tax, passed: ['b'] });
-    expect(describeWaiting(s, 'a')).toBe('等待其他玩家决定是否质疑…');
-    expect(describeWaiting(s, 'b')).toBe('等待其他玩家决定是否质疑…');
+    expect(describeWaiting(s, 'a')).toBe('其他玩家正在考虑是否质疑');
+    expect(describeWaiting(s, 'b')).toBe('其他玩家正在考虑是否质疑');
   });
 
   it('阻挡窗口：暗杀等目标，外援等其他玩家', () => {
     const assassinate = { action: 'assassinate' as const, actorId: 'a', targetId: 'b', claimedRole: 'assassin' as const };
-    expect(describeWaiting(state({ phase: 'awaitingBlock', pending: assassinate }), 'a')).toBe('等待 李四 决定是否阻挡…');
+    expect(describeWaiting(state({ phase: 'awaitingBlock', pending: assassinate }), 'a')).toBe('李四 正在考虑是否阻挡');
     expect(describeWaiting(state({ phase: 'awaitingBlock', pending: assassinate }), 'b')).toBeNull();
-    expect(describeWaiting(state({ phase: 'awaitingBlock', pending: { action: 'foreignAid', actorId: 'a' } }), 'a')).toBe('等待其他玩家决定是否阻挡…');
+    expect(describeWaiting(state({ phase: 'awaitingBlock', pending: { action: 'foreignAid', actorId: 'a' } }), 'a')).toBe('其他玩家正在考虑是否阻挡');
   });
 });

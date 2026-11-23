@@ -28,7 +28,7 @@ export default async function showdownHesitationScenario(ui) {
   // 电脑每回合 2～6 秒出手，多数回合会声称角色：给 60 s。房里只有一个对手，能质疑的就是电脑的声称
   let challenged = false;
   for (let i = 0; i < 600 && !challenged; i += 1) {
-    challenged = await clickIf('^(Challenge!|质疑！)$');
+    challenged = await clickIf('^(Challenge|质疑)$');
     if (challenged) break;
     await clickIf('^(Income|收入)$');
     await clickIf('^(Do not block|不阻挡)$');

@@ -66,7 +66,7 @@ describe('translate', () => {
     const unknown = { code: 'futureError', message: 'database password leaked' };
 
     expect(localizeServerError('en', unknown)).toBe('Something went wrong. Please try again.');
-    expect(localizeServerError('zh-CN', unknown)).toBe('出现意外错误，请重试。');
+    expect(localizeServerError('zh-CN', unknown)).toBe('发生错误，请重试。');
   });
 
   it('formats a stable transient-notice descriptor in the current locale', () => {
