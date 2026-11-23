@@ -12,7 +12,6 @@ export default async function blockSwitchScenario(ui) {
   b.intent({ type: 'joinRoom', roomCode, name: 'B' });
   await b.next('joined');
   await ui.joinAs('Me', roomCode);
-  await a.next('lobby');
   a.intent({ type: 'startGame' });
   await ui.waitFor('.showcase');
   await ui.evaluate(`document.querySelector('.showcase-overlay').click()`);

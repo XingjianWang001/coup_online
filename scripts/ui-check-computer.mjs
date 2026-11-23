@@ -1,5 +1,5 @@
 // ui-check 场景：电脑玩家。真人独自建房，用标题行的图标按钮加两个电脑（一律普通），把第二个切成进阶，开局。
-// 断言：加人前后添加按钮不挪位置；名单和座位铭牌的电脑徽标按强度有不同的无障碍名称（自己座位没有）；名单行不横向溢出；开局后电脑玩家在时限内自己行动（记录里出现它的行动）。
+// 断言：加人前后添加按钮不挪位置；名单和座位名字旁的电脑徽标按强度有不同的无障碍名称（自己座位没有）；名单行不横向溢出；开局后电脑玩家在时限内自己行动（记录里出现它的行动）。
 // 真人先手时电脑要等真人行动，所以轮到真人就点「收入」。
 // 用法：pnpm ui-check scripts/ui-check-computer.mjs [截图目录]；英文加 LOCALE=en，手机加 MOBILE=1 W=375 H=812
 export default async function computerScenario(ui) {
@@ -21,7 +21,7 @@ export default async function computerScenario(ui) {
     await ui.evaluate(`document.querySelector(${JSON.stringify(ADD)}).click()`);
     for (let i = 0; i < 50 && (await count('.playerlist li')) < n; i += 1) await sleep(100);
   }
-  assert((await count('.playerlist li')) === 3, '大厅应有 3 个座位');
+  assert((await count('.playerlist li')) === 3, '名单应有 3 位玩家');
   assert((await addTop()) === top, '加人后添加按钮挪了位置');
   const fresh = await labels('.playerlist');
   assert(fresh.length === 2 && fresh.every((l) => /^(Computer player|电脑玩家)$/.test(l)), `新加的电脑应都是普通：${fresh}`);
@@ -41,7 +41,7 @@ export default async function computerScenario(ui) {
   await ui.evaluate(`document.querySelector('.showcase-overlay').click()`);
   await ui.waitFor('.seat.opponent .name');
   const seatLabels = await labels('.seat.opponent .name');
-  assert(seatLabels.length === 2 && new Set(seatLabels).size === 2, `两个对手铭牌应有普通、进阶两种电脑徽标：${seatLabels}`);
+  assert(seatLabels.length === 2 && new Set(seatLabels).size === 2, `两个对手座位的名字旁应有普通、进阶两种电脑徽标：${seatLabels}`);
   assert((await count(`.seat.self ${BADGE}`)) === 0, '自己座位不应有电脑徽标');
   const computers = await ui.evaluate(`[...document.querySelectorAll('.seat.opponent .name')].map((e) => e.textContent.trim())`);
 
@@ -49,7 +49,7 @@ export default async function computerScenario(ui) {
   const acted = `[...document.querySelectorAll('.log-header')].map((e) => e.textContent).find((t) => ${JSON.stringify(computers)}.some((n) => t.startsWith(n)))`;
   let action = null;
   for (let i = 0; i < 200 && !action; i += 1) {
-    await ui.evaluate(`[...document.querySelectorAll('.actions button:not(:disabled)')].find((b) => /^(Income|收入)$/.test(b.textContent.trim()))?.click()`);
+    await ui.evaluate(`[...document.querySelectorAll('.controls button:not(:disabled)')].find((b) => /^(Income|收入)$/.test(b.textContent.trim()))?.click()`);
     action = await ui.evaluate(acted);
     if (!action) await sleep(100);
   }

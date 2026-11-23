@@ -55,3 +55,8 @@ export function useSmoothHeight(
     if (fade) el.animate([{ opacity: 0.2 }, { opacity: 1 }], { duration: 200, easing: 'ease-out' });
   }, deps); // 由调用方声明「什么算换了内容」
 }
+
+export const prefersReducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+export const animate = (el: Element, frames: Keyframe[], options: KeyframeAnimationOptions) =>
+  el.animate(frames, { fill: 'forwards', ...options }).finished;

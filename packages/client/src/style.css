@@ -973,7 +973,7 @@ input:focus-visible {
   font-size: 15px;
 }
 
-/* ---------- 叙述条 ---------- */
+/* ---------- 叙述 ---------- */
 /* 桌面端：牌桌中央的一行金字，无底板（座位稀疏，底板会显得错位） */
 .narration {
   position: absolute;
@@ -1003,7 +1003,7 @@ input:focus-visible {
   animation: fade-in 240ms ease;
 }
 
-/* 行动栏每个阶段的第一行：提示在左、倒计时钉在右端，换阶段时倒计时不挪位置。
+/* 控制区每个阶段的第一行：提示在左、倒计时钉在右端，换阶段时倒计时不挪位置。
    不换行：提示过长时在自身内折行，倒计时不会被挤到下一行开头 */
 .decision-heading {
   display: flex;
@@ -1641,7 +1641,7 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   pointer-events: none;
 }
 
-/* 提示条 / 叙述条 / 控制区 / 记录 入场 */
+/* 提示条 / 叙述 / 控制区 / 记录 入场 */
 @keyframes rise-in {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -2422,7 +2422,7 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
   }
 
   .controls {
-    /* sticky 而非 fixed：滚到底时回到记录区之后，不遮挡最后几行 */
+    /* sticky 而非 fixed：滚到底时回到记录之后，不遮挡最后几行 */
     position: sticky;
     bottom: 0;
     order: 1;
@@ -2432,12 +2432,12 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));
     z-index: 5;
     /* 不设 overflow：滚动容器会裁掉第一排行动按钮的气泡。
-       ponytail: 视口矮于行动栏（约 260px）时栏顶看不全；真遇到再加 max-height + 气泡朝下。 */
+       ponytail: 视口矮于控制区（约 260px）时栏顶看不全；真遇到再加 max-height + 气泡朝下。 */
     box-shadow: 0 -8px 24px oklch(0.08 0.01 155 / 0.55);
   }
 }
 
-/* 窄桌的行动叙述可换行，计时跟随决定区域。 */
+/* 窄桌的行动叙述可换行，计时跟随控制区。 */
 @media (width < 720px) {
   .table:not([data-seats='1']) {
     display: flex;

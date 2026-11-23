@@ -57,7 +57,7 @@
 
 取得域名并完成公开发布所需手续后，将域名的 A 记录指向服务器公网 IP，并在腾讯云轻量应用服务器的防火墙开放 TCP 80 和 443。
 
-使用一键部署时，在 `.deploy-private.local.json` 中加入 `"Domain": "实际域名"`（例如 `"coup.davidxjwang.com"`），再运行部署命令。同一个应用可用多个域名访问，用逗号分隔，例如 `"coup.davidxjwang.com,coup.surwhy.com"`；各域名共用同一批房间。脚本每次发布都会在新版本目录写入 `SITE_DOMAIN` 与 `TRUST_PROXY=1`，以 `public` 配置同时启动应用和 Caddy，最后从本机逐个检查 `https://域名/healthz`，任一域名失败即报错并指出该域名；全部成功后直接退出，不再开 SSH 隧道。新增域名时先配置 A 记录，再部署。删去 `Domain` 后再次部署会移除 Caddy 容器、恢复私有部署行为；`.\deploy.cmd -AccessOnly` 仍可打开 SSH 隧道排查问题。首页底部的 ICP 与公安备案号按访问域名取自 `packages/client/src/App.tsx` 的 `FILINGS`；未登记的域名（含 localhost 和 SSH 隧道）不显示页脚。新增或更换域名、备案主体时需同步修改，并且要先合入 `dev` 再部署。
+使用一键部署时，在 `.deploy-private.local.json` 中加入 `"Domain": "实际域名"`（例如 `"coup.davidxjwang.com"`），再运行部署命令。同一个应用可用多个域名访问，用逗号分隔，例如 `"coup.davidxjwang.com,coup.surwhy.com"`；各域名共用同一批房间。脚本每次发布都会在新版本目录写入 `SITE_DOMAIN` 与 `TRUST_PROXY=1`，以 `public` 配置同时启动应用和 Caddy，最后从本机逐个检查 `https://域名/healthz`，任一域名失败即报错并指出该域名；全部成功后直接退出，不再开 SSH 隧道。新增域名时先配置 A 记录，再部署。删去 `Domain` 后再次部署会移除 Caddy 容器、恢复私有部署行为；`.\deploy.cmd -AccessOnly` 仍可打开 SSH 隧道排查问题。首页底部的 ICP 与公安备案号按访问域名取自 `packages/client/src/Entry.tsx` 的 `FILINGS`；未登记的域名（含 localhost 和 SSH 隧道）不显示页脚。新增或更换域名、备案主体时需同步修改，并且要先合入 `dev` 再部署。
 
 手动部署时，在项目目录的 `.env` 写入 `SITE_DOMAIN=实际域名` 与 `TRUST_PROXY=1`（多个域名写成 `SITE_DOMAIN=a.example.com, b.example.com`，逗号后须有空格），然后执行：
 

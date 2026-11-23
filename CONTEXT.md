@@ -64,7 +64,7 @@ _Avoid_: 用「大厅」指代房间本身，或指创建/加入房间之前的�
 _Avoid_: 内网穿透
 
 **加入链接 Invite Link**
-房主生成的、带房间号后缀（`?room=`）的可复制链接，发给朋友即可加入。
+房主生成的、带房间码后缀（`?room=`）的可复制链接，发给朋友即可加入。
 _Avoid_: 邀请码（那是房间码）
 
 ### 游戏
@@ -185,3 +185,84 @@ _Avoid_: 退出、逃跑
 **离开房间 Leave Room**
 玩家主动退出当前房间：大厅阶段或牌局结束后直接移除；牌局进行中立即视为弃权。
 _Avoid_: 退出、逃跑
+
+### 界面
+
+**房间码 Room Code**
+标识一个房间的 6 位码：大厅阶段显示在房间里，在入口填上它即可加入。
+_Avoid_: 邀请码、房间号
+
+**名单 Roster**
+大厅阶段房间里的玩家列表；房主在这里添加、移除电脑玩家，改它们的强度。
+
+**牌桌 Table**
+牌局中对手座位围成的区域，叙述落在桌心；自己的座位在牌桌下方。
+_Avoid_: 用「牌桌」指房间
+
+**座位 Seat**
+牌桌上代表一位玩家的一块：名字、金币、牌列和铭牌。
+
+**牌列 Card Row**
+座位里排成一行的该玩家的牌：先是暗牌（自己座位是牌面，对手座位是牌背），后是明牌。
+_Avoid_: 手牌区
+
+**铭牌 Nameplate**
+贴在座位下沿、常驻占位的一条，有人表态时亮起，显示他的表态。
+_Avoid_: 名牌、气泡（气泡是悬浮看名字、看功能说明时弹出的提示）
+
+**叙述 Narration**
+桌心的一行字，说眼下这一步谁在对谁做什么；轮到自己选行动时提示轮到自己。
+_Avoid_: 叙述条、旁白
+
+**提示条 Notice**
+牌局区域顶上短暂出现、随后自动消失的一条消息，如牌局开始、质疑成败、有人出局；牌局结束后另有一条常驻的获胜者提示条。
+_Avoid_: 通知
+
+**控制区 Controls**
+自己座位下方、放自己眼下要作的决定的区域：行动与目标按钮、质疑与阻挡按钮、等待提示和决策倒计时；牌局结束后是再来一局。
+_Avoid_: 操作区、行动栏
+
+**决策倒计时 Decision Clock**
+眼下这个决定还剩的时间：平时钉在控制区当前一行的右端，发牌展示、对质和私下选牌时在放大展示里。
+
+**对质舞台 Showdown Stage**
+对质时盖住牌桌的放大展示：被声称的角色、被质疑者的大牌和裁定。
+
+**表态面板 Reaction Tray**
+记录上方可展开收起的面板，三类表态分页，表态从这里发出。
+_Avoid_: 表情栏、聊天框
+
+**记录 Log**
+牌局事件的文字流：按行动分组、最新的在上，每组可展开看结算细节。
+_Avoid_: 日志
+
+**规则中心 Rules Center**
+从页头随时打开的规则说明，含角色、行动与角色图标的对照，可切换详细程度。
+_Avoid_: 规则面板
+
+**设置 Settings**
+从页头打开的个人偏好：界面语言和牌面风格，只对自己生效。
+
+#### 选择器与 ui-check 场景
+
+主选择器沿用现有 class 和 role；场景名对应 `scripts/ui-check-<场景>.mjs`，「默认」是 `scripts/ui-check.mjs` 的内置场景。场景覆盖一个区域，指它对这个区域（按主选择器或括号里的子部分找到）作断言，或专为看它截图；截图里只是碰巧拍到不算。
+
+| 区域 | 主选择器 | 覆盖它的场景 |
+| --- | --- | --- |
+| 房间码 | `.roomcode` | — |
+| 加入链接 | `.invite` | — |
+| 名单 | `.playerlist`（添加电脑的按钮在 `.roster-head`） | computer、announce、speech、reply、showdown-hesitation |
+| 发牌展示 | `.showcase`（点 `.showcase-overlay` 关闭） | 默认，以及其余开局的场景 |
+| 牌桌 | `.table` | table、decision-clock |
+| 座位 | `.seat`（`.seat.self`、`.seat.opponent`；按玩家找用 `[data-seat="<玩家 ID>"]`） | table、motion、reaction |
+| 牌列 | `.seat .cards-row` | decision-clock、motion、after-game |
+| 铭牌 | `.nameplate`（亮起时 `.nameplate.speaking`） | reaction、announce、speech、reply、after-game、table |
+| 叙述 | `.narration` | table、decision-clock |
+| 提示条 | `.notice`（获胜者 `.notice.big`） | table、decision-clock |
+| 控制区 | `.controls`（行动与目标按钮在 `.actions`） | block-switch、decision-clock、table、motion |
+| 决策倒计时 | `[role="timer"]` | decision-clock、table |
+| 对质舞台 | `.stage-overlay:has(.stage-spot)` | showdown-hesitation |
+| 表态面板 | `.reaction` | reaction、reply |
+| 记录 | `.log`（每组的标题行 `.log-header`） | announce、computer |
+| 规则中心 | `.rules` | — |
+| 设置 | `.settings-panel` | — |

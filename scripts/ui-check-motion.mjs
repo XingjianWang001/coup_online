@@ -20,7 +20,7 @@ export default async function motionScenario(ui) {
   const text = (sel) => ui.evaluate(`document.querySelector(${JSON.stringify(sel)})?.textContent ?? null`);
   // 控制区换内容后有短暂 inert（CONTROLS_ARM_MS）：按钮没反应就再点
   const press = (pattern) => ui.evaluate(`(() => {
-    const b = [...document.querySelectorAll('.controls button:not(:disabled), .actions button:not(:disabled)')].find((b) => new RegExp(${JSON.stringify(pattern)}).test(b.textContent.trim()));
+    const b = [...document.querySelectorAll('.controls button:not(:disabled)')].find((b) => new RegExp(${JSON.stringify(pattern)}).test(b.textContent.trim()));
     b?.click();
     return !!b;
   })()`);
@@ -32,7 +32,6 @@ export default async function motionScenario(ui) {
   van.intent({ type: 'joinRoom', roomCode, name: 'Van' });
   await van.next('joined');
   await ui.joinAs('Me', roomCode);
-  await host.next('lobby');
   host.intent({ type: 'startGame' });
   await ui.waitFor('.showcase');
   await ui.evaluate(`document.querySelector('.showcase-overlay').click()`);

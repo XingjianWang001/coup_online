@@ -1,5 +1,5 @@
 // ui-check 场景：牌桌几何。对手 1～5 人各开一局，让当前玩家声称行动、对手都表态（铭牌亮起），
-// 断言叙述、通知、各座位互不重叠，对手座位不越出牌桌；每种人数截一张图。
+// 断言叙述、提示条、各座位互不重叠，对手座位不越出牌桌；每种人数截一张图。
 // 用法：pnpm ui-check scripts/ui-check-table.mjs [截图目录]；手机布局加 MOBILE=1 W=390 H=844
 const NAMES = ['MoonlightFox', 'Van', 'Mia', '小林', 'EastWindWolf'];
 
@@ -18,7 +18,6 @@ export default async function tableScenario(ui) {
       await bot.next('joined');
     }
     await ui.joinAs('Me', roomCode);
-    await host.next('lobby');
     host.intent({ type: 'startGame' });
     await ui.waitFor('.showcase');
     await ui.evaluate(`document.querySelector('.showcase-overlay').click()`);
@@ -57,23 +56,23 @@ export default async function tableScenario(ui) {
         const row = box(document.querySelector('.narration'));
         const text = document.createRange();
         text.selectNodeContents(document.querySelector('.narration-line'));
-        if (!text.toString().includes(${JSON.stringify(names[0])})) out.push('行动缺少完整昵称');
-        if (seats.some(s => s.bottom > row.top + 1) || row.bottom > self.top + 1) out.push('行动行不在对手与自己之间');
-        if (innerHeight >= 640 && hit(row, box(document.querySelector('.controls')))) out.push('操作区遮住行动行');
+        if (!text.toString().includes(${JSON.stringify(names[0])})) out.push('叙述缺少完整昵称');
+        if (seats.some(s => s.bottom > row.top + 1) || row.bottom > self.top + 1) out.push('叙述不在对手与自己之间');
+        if (innerHeight >= 640 && hit(row, box(document.querySelector('.controls')))) out.push('控制区遮住叙述');
         for (const line of text.getClientRects()) {
-          if (line.left < row.left || line.right > row.right || hit(line, timer)) out.push('行动文字越界或压住倒计时');
+          if (line.left < row.left || line.right > row.right || hit(line, timer)) out.push('叙述文字越界或压住决策倒计时');
         }
       }
-      if (document.querySelectorAll('[role="timer"]').length !== 1) out.push('倒计时应当只出现一次');
+      if (document.querySelectorAll('[role="timer"]').length !== 1) out.push('决策倒计时应当只出现一次');
       if (!${compact}) {
         if (narration.bottom > table.bottom + 1 || Math.abs(narration.left + narration.right - table.left - table.right) > 2) out.push('叙述不在桌心');
         if (seats.length > 1 && narration.top >= Math.max(...seats.map(s => s.bottom))) out.push('叙述落在所有对手下方');
-        if (seats.length === 5 && innerHeight >= 768 && (timer.bottom > innerHeight || [...document.querySelectorAll('.controls button')].some(b => box(b).bottom > innerHeight))) out.push('首屏未显示完整操作区');
+        if (seats.length === 5 && innerHeight >= 768 && (timer.bottom > innerHeight || [...document.querySelectorAll('.controls button')].some(b => box(b).bottom > innerHeight))) out.push('首屏未显示完整控制区');
       }
       for (const s of seats) {
         if (hit(s, narration)) out.push(s.name + ' 压住叙述');
         if (s.top < table.top - 1) out.push(s.name + ' 越出牌桌上沿');
-        for (const n of notices) if (hit(s, n)) out.push(s.name + ' 压住通知');
+        for (const n of notices) if (hit(s, n)) out.push(s.name + ' 压住提示条');
         if (hit(s, self)) out.push(s.name + ' 压住自己的座位');
       }
       seats.forEach((a, i) => seats.slice(i + 1).forEach((b) => { if (hit(a, b)) out.push(a.name + ' 与 ' + b.name + ' 重叠'); }));

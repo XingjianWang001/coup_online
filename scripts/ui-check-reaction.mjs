@@ -10,7 +10,6 @@ export default async function reactionScenario(ui) {
   other.intent({ type: 'joinRoom', roomCode, name: 'Van' });
   await other.next('joined');
   await ui.joinAs('Me', roomCode);
-  await host.next('lobby');
   host.intent({ type: 'startGame' });
   await ui.waitFor('.showcase');
   await ui.evaluate(`document.querySelector('.showcase-overlay').click()`);
@@ -70,7 +69,7 @@ export default async function reactionScenario(ui) {
   const trayClosed = await ui.evaluate(`!document.querySelector('.reaction.open') && document.querySelector('.reaction-collapse').hasAttribute('inert')`);
   assert(trayClosed, '发出后表态面板应收起且 inert');
 
-  // 截图前把动画定在气泡完全显示的时刻
+  // 截图前把动画定在铭牌上的表态完全显示的时刻
   await ui.evaluate(`document.getAnimations().forEach((a) => { a.pause(); a.currentTime = 900; })`);
   await ui.evaluate(`document.querySelector('.seat.self').scrollIntoView({ block: 'center' })`);
   await ui.shot('reaction');
