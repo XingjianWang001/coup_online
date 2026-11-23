@@ -24,6 +24,19 @@ export function strayFocusTarget<T extends { contains(other: Node | null): boole
   return initial ?? dialog;
 }
 
+// 叠开的对话框不一定按打开的倒序关闭（同一次渲染里一起卸载时按组件树顺序清理），所以按计数锁滚动，最后一个关掉才恢复
+let scrollLocks = 0;
+let unlockedOverflow = '';
+export function lockScroll(style: { overflow: string }): () => void {
+  if (scrollLocks++ === 0) {
+    unlockedOverflow = style.overflow;
+    style.overflow = 'hidden';
+  }
+  return () => {
+    if (--scrollLocks === 0) style.overflow = unlockedOverflow;
+  };
+}
+
 export function useDialogFocus(
   onClose: () => void,
   dialogRef: RefObject<HTMLDivElement>,
@@ -34,7 +47,6 @@ export function useDialogFocus(
   onCloseRef.current = onClose;
   useEffect(() => {
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const previousOverflow = document.body.style.overflow;
     const onKeyDown = (event: KeyboardEvent) => {
       // 对话框叠开时（如发牌展示盖在规则上）只由最上层的那个响应
       const modals = document.querySelectorAll('[aria-modal="true"]');
@@ -64,12 +76,12 @@ export function useDialogFocus(
       if (!dialogRef.current) return;
       strayFocusTarget(document.querySelectorAll('[aria-modal="true"]'), dialogRef.current, event.target, initialFocusRef.current)?.focus();
     };
-    document.body.style.overflow = 'hidden';
+    const unlockScroll = lockScroll(document.body.style);
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('focusin', onFocusIn);
     (initialFocusRef.current ?? dialogRef.current)?.focus();
     return () => {
-      document.body.style.overflow = previousOverflow;
+      unlockScroll();
       document.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('focusin', onFocusIn);
       previouslyFocused?.focus();
