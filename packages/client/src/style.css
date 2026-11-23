@@ -695,13 +695,14 @@ input:focus-visible {
   vertical-align: bottom;
 }
 
-/* 铭牌、叙述和记录里的角色名。亮起的底带（panel-2）上刺客红、女伯爵紫只有约 4:1：五色统一向象牙色提 20%，都过 4.5:1；叙述与记录的底色更暗，同样过 */
+/* 铭牌、叙述和记录里的角色名。亮起的底带（panel-2）上刺客红、女伯爵紫只有约 4:1：五色明度统一向象牙色提 20%（L×0.8+0.19，彩度×0.8），都过 4.5:1；记录沿用。
+   色相不动：和象牙色 color-mix 会把色相拉向 92°，队长变青、女伯爵变粉。不支持相对颜色的浏览器退回 .role--* 的原色。叙述另见下方，用原色 */
 .role-name { font-weight: 600; }
-.role-name.role--duke       { color: color-mix(in oklch, var(--duke) 80%, var(--text)); }
-.role-name.role--assassin   { color: color-mix(in oklch, var(--assassin) 80%, var(--text)); }
-.role-name.role--captain    { color: color-mix(in oklch, var(--captain) 80%, var(--text)); }
-.role-name.role--ambassador { color: color-mix(in oklch, var(--ambassador) 80%, var(--text)); }
-.role-name.role--contessa   { color: color-mix(in oklch, var(--contessa) 80%, var(--text)); }
+.role-name.role--duke       { color: oklch(from var(--duke) calc(l * 0.8 + 0.19) calc(c * 0.8) h); }
+.role-name.role--assassin   { color: oklch(from var(--assassin) calc(l * 0.8 + 0.19) calc(c * 0.8) h); }
+.role-name.role--captain    { color: oklch(from var(--captain) calc(l * 0.8 + 0.19) calc(c * 0.8) h); }
+.role-name.role--ambassador { color: oklch(from var(--ambassador) calc(l * 0.8 + 0.19) calc(c * 0.8) h); }
+.role-name.role--contessa   { color: oklch(from var(--contessa) calc(l * 0.8 + 0.19) calc(c * 0.8) h); }
 
 .visually-hidden {
   position: absolute;
@@ -987,7 +988,7 @@ input:focus-visible {
 }
 
 /* ---------- 叙述 ---------- */
-/* 桌面端：牌桌中央的一行金字，无底板（座位稀疏，底板会显得错位） */
+/* 桌面端：牌桌中央的一行象牙色字，无底板（座位稀疏，底板会显得错位）。金色只留给 One Flame，公爵铜色在金字里看不出 */
 .narration {
   position: absolute;
   left: 50%;
@@ -1008,8 +1009,15 @@ input:focus-visible {
   font-weight: 600;
   font-size: 17px;
   line-height: 1.4;
-  color: var(--gold);
+  color: var(--text);
 }
+
+/* 叙述在最暗的桌面上，角色名用原色就够对比度，不提亮，和象牙色正文拉开距离 */
+.narration-text .role-name.role--duke       { color: var(--duke); }
+.narration-text .role-name.role--assassin   { color: var(--assassin); }
+.narration-text .role-name.role--captain    { color: var(--captain); }
+.narration-text .role-name.role--ambassador { color: var(--ambassador); }
+.narration-text .role-name.role--contessa   { color: var(--contessa); }
 
 .narration-line {
   display: block;
