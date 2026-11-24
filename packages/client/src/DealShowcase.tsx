@@ -1,6 +1,6 @@
 import { useRef, useState, type CSSProperties } from 'react';
 import { roleDescription } from './rules.ts';
-import { useDialogFocus } from './dialog.ts';
+import { useModalDialog } from './dialog.ts';
 import type { Showcase } from './session.ts';
 import { translate, type Locale } from './localization.ts';
 import { DecisionTimer, type Clock } from './clock.tsx';
@@ -15,23 +15,21 @@ export function DealShowcase({ showcase, locale, clock, onClose }: {
   onClose: () => void;
 }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const [openTip, setOpenTip] = useState<number | null>(null);
-  useDialogFocus(onClose, dialogRef, confirmRef);
+  useModalDialog(onClose, dialogRef, confirmRef);
 
   return (
-    <div className="overlay showcase-overlay" onClick={onClose}>
+    <dialog
+      ref={dialogRef}
+      className="overlay showcase-overlay"
+      aria-label={translate(locale, 'showcaseDeal')}
+      onClick={(event) => event.target === event.currentTarget && onClose()}
+    >
       <div
-        ref={dialogRef}
         className="showcase"
-        role="dialog"
-        aria-modal="true"
-        aria-label={translate(locale, 'showcaseDeal')}
         style={{ '--n': showcase.cards.length } as CSSProperties}
-        onClick={(event) => {
-          event.stopPropagation();
-          setOpenTip(null);
-        }}
+        onClick={() => setOpenTip(null)}
       >
         <div className="showcase-cards">
           {showcase.cards.map((card, i) => {
@@ -64,6 +62,6 @@ export function DealShowcase({ showcase, locale, clock, onClose }: {
           <button ref={confirmRef} onClick={onClose}>{translate(locale, 'confirm')}</button>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

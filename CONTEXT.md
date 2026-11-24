@@ -252,7 +252,7 @@ _Avoid_: 规则面板
 | 房间码 | `.roomcode` | — |
 | 加入链接 | `.invite` | — |
 | 名单 | `.playerlist`（添加电脑的按钮在 `.roster-head`） | computer、announce、speech、reply、showdown-hesitation |
-| 发牌展示 | `.showcase`（点 `.showcase-overlay` 关闭） | 默认，以及其余开局的场景 |
+| 发牌展示 | `.showcase`（点 `.showcase-overlay` 关闭） | 默认，以及其余开局的场景；dialog |
 | 牌桌 | `.table` | table、decision-clock |
 | 座位 | `.seat`（`.seat.self`、`.seat.opponent`；按玩家找用 `[data-seat="<玩家 ID>"]`） | table、motion、reaction |
 | 牌列 | `.seat .cards-row` | decision-clock、motion、after-game |
@@ -261,8 +261,8 @@ _Avoid_: 规则面板
 | 提示条 | `.notice`（获胜者 `.notice.big`） | table、decision-clock |
 | 控制区 | `.controls`（行动与目标按钮在 `.actions`） | block-switch、decision-clock、table、motion |
 | 决策倒计时 | `[role="timer"]` | decision-clock、table |
-| 对质舞台 | `.stage-overlay:has(.stage-spot)` | showdown-hesitation |
+| 对质舞台 | `.stage-overlay:has(.stage-spot)` | showdown-hesitation、dialog |
 | 表态面板 | `.reaction` | reaction、reply |
 | 记录 | `.log`（每组的标题行 `.log-header`） | announce、computer |
-| 规则中心 | `.rules` | — |
-| 设置 | `.settings-panel` | — |
+| 规则中心 | `.rules` | dialog |
+| 设置 | `.settings-panel`（点 `.settings-overlay` 关闭） | dialog |

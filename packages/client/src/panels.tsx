@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { coinLegend, roleDescription, roleName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
-import { useDialogFocus } from './dialog.ts';
+import { useModalDialog } from './dialog.ts';
 import { CARD_STYLES, type CardStyle } from './cardStyle.ts';
 import { LANGUAGE_OPTIONS, translate, type Locale } from './localization.ts';
 import { CoinIcon, RoleIcon } from './icons.tsx';
@@ -17,9 +17,9 @@ export function SettingsPanel(props: SettingsProps) {
   const [showCredits, setShowCredits] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const creditsButtonRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const close = showCredits ? () => setShowCredits(false) : props.onClose;
-  useDialogFocus(close, dialogRef, closeButtonRef);
+  useModalDialog(close, dialogRef, closeButtonRef);
 
   const previousView = useRef(showCredits);
   useLayoutEffect(() => {
@@ -30,15 +30,13 @@ export function SettingsPanel(props: SettingsProps) {
   }, [showCredits]);
 
   return (
-    <div className="overlay settings-overlay" onClick={close}>
-      <div
-        ref={dialogRef}
-        className="panel settings-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-title"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <dialog
+      ref={dialogRef}
+      className="overlay settings-overlay"
+      aria-labelledby="settings-title"
+      onClick={(event) => event.target === event.currentTarget && close()}
+    >
+      <div className="panel settings-panel">
         <div className="panel-heading">
           <h2 id="settings-title">{translate(props.locale, showCredits ? 'credits' : 'settingsTitle')}</h2>
           <button ref={closeButtonRef} className="ghost" onClick={close}>
@@ -56,7 +54,7 @@ export function SettingsPanel(props: SettingsProps) {
           </>
         )}
       </div>
-    </div>
+    </dialog>
   );
 }
 
@@ -135,27 +133,26 @@ function SettingsOptions(props: SettingsProps) {
 
 export function LeaveConfirmation(props: { locale: Locale; onConfirm: () => void; onClose: () => void }) {
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogFocus(props.onClose, dialogRef, cancelButtonRef);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useModalDialog(props.onClose, dialogRef, cancelButtonRef);
 
   return (
-    <div className="overlay" onClick={props.onClose}>
-      <div
-        ref={dialogRef}
-        className="panel"
-        role="alertdialog"
-        aria-modal="true"
-        aria-label={translate(props.locale, 'leaveRoom')}
-        aria-describedby="leave-confirmation-description"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <dialog
+      ref={dialogRef}
+      className="overlay"
+      role="alertdialog"
+      aria-label={translate(props.locale, 'leaveRoom')}
+      aria-describedby="leave-confirmation-description"
+      onClick={(event) => event.target === event.currentTarget && props.onClose()}
+    >
+      <div className="panel">
         <p id="leave-confirmation-description">{translate(props.locale, 'leaveConfirmation')}</p>
         <button onClick={props.onConfirm}>{translate(props.locale, 'confirmLeave')}</button>
         <button ref={cancelButtonRef} className="ghost" onClick={props.onClose}>
           {translate(props.locale, 'cancel')}
         </button>
       </div>
-    </div>
+    </dialog>
   );
 }
 
@@ -170,19 +167,17 @@ export function RulesPanel({
 }) {
   const [level, setLevel] = useState<RuleLevel>('quick');
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
-  useDialogFocus(onClose, dialogRef, closeButtonRef);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useModalDialog(onClose, dialogRef, closeButtonRef);
 
   return (
-    <div className="overlay rules-overlay" onClick={onClose}>
-      <div
-        ref={dialogRef}
-        className="panel rules"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="rules-title"
-        onClick={(event) => event.stopPropagation()}
-      >
+    <dialog
+      ref={dialogRef}
+      className="overlay rules-overlay"
+      aria-labelledby="rules-title"
+      onClick={(event) => event.target === event.currentTarget && onClose()}
+    >
+      <div className="panel rules">
         <div className="panel-heading rules-heading">
           <h2 id="rules-title">{translate(locale, 'rulesTitle')}</h2>
           <div className="rules-heading-actions">
@@ -254,6 +249,6 @@ export function RulesPanel({
           ))}
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

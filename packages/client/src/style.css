@@ -1249,16 +1249,39 @@ button.reaction-toggle:hover:not(:disabled) {
 }
 
 /* ---------- 浮层 ---------- */
+/* 浮层是原生模态 <dialog>，自身铺满视口充当遮罩（点它而不是里面的面板就算点外面），::backdrop 透明；
+   叠放顺序由 top layer 按打开先后决定，不用 z-index。复位 UA 给 dialog 的边框、外边距、尺寸上限和底色 */
 .overlay {
   position: fixed;
   inset: 0;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  color: inherit;
   background: oklch(0.1 0.012 155 / 0.72);
   backdrop-filter: blur(4px);
-  display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--sp-4);
-  z-index: 10;
+  /* 面板自己滚动；对质换牌飞回座位时不能撑出滚动条 */
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+/* display 只能在打开时设，否则会盖掉关闭态的 display: none */
+.overlay[open] {
+  display: flex;
+}
+.overlay::backdrop {
+  background: transparent;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+/* 背后页面不随滚动：overscroll-behavior 对不可滚动容器的约束 Safari 还不支持，所以仍锁住根滚动（叠开多个对话框也只看有没有 :modal） */
+:root:has(dialog:modal) {
+  overflow: hidden;
 }
 
 .panel {
@@ -1753,7 +1776,6 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
 
 /* ---------- 发牌展示：从屏幕上方的牌堆依次发牌、落定、翻开 ---------- */
 .showcase-overlay {
-  z-index: 20;
   background: oklch(0.1 0.012 155 / 0.84);
 }
 
@@ -1988,7 +2010,6 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
 
 /* ---------- 对质舞台 / 私下选牌：放大展示的手牌（方案 A：暗场 + 牌框升温 + 快翻） ---------- */
 .stage-overlay {
-  z-index: 20;
   background: none;
   backdrop-filter: none;
 }
