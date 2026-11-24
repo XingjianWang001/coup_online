@@ -64,6 +64,9 @@ try {
     Assert-ExitCode 'Fetching origin/dev'
     $commit = (& git rev-parse --verify 'FETCH_HEAD^{commit}').Trim()
     Assert-ExitCode 'Resolving origin/dev'
+    # 发布的是 origin/dev，跑的却是本地这两份脚本：本地分支落后或改过时两边对不上（例如漏传新的私有配置）。-Revision 回滚旧版本时本地脚本本就更新，不查
+    & git diff --quiet $commit -- scripts/deploy-private.ps1 scripts/deploy-private-remote.sh
+    if ($LASTEXITCODE -ne 0) { throw "The local deploy scripts differ from origin/dev $commit. Update this checkout to origin/dev and run again." }
   }
 
   $trackedFiles = @(& git ls-tree -r --name-only $commit)

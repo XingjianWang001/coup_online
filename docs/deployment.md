@@ -6,7 +6,7 @@
 
 在仓库根目录运行：Windows PowerShell 中为 `.\deploy.cmd`，Mac 上为 `./deploy.sh`（需要 PowerShell 7：`brew install powershell`）。两者运行同一个 `scripts/deploy-private.ps1`，下文的 `-Revision`、`-AccessOnly` 等参数用法相同。首次运行输入服务器 IPv4 地址或域名、SSH 用户名（默认 `ubuntu`）和本机 PEM 文件完整路径；设置保存在 Git 忽略的 `.deploy-private.local.json`，其中只记录 PEM 的路径，PEM 文件始终留在本机。每次连接时脚本使用一份收紧权限的临时副本，结束后删除。之后每次运行相同命令即可更新。
 
-命令从 `origin/dev` 取得最新提交，只打包该提交中的文件，不包含未提交改动；通过 SSH 上传、在 Ubuntu 24.04 上检查或安装 Docker、构建并启动应用，然后检查服务器和本机隧道两端的 `/healthz`。成功后打开 `http://127.0.0.1:18887`，保持命令窗口运行；按 `Ctrl+C` 关闭隧道；若 Windows 继续询问 `Terminate batch job (Y/N)?`，输入 `Y`。之后只想重新打开私有访问而不更新服务器时，运行 `.\deploy.cmd -AccessOnly`（Mac 为 `./deploy.sh -AccessOnly`）。SSH 密钥口令或远端 `sudo` 密码如有要求，会在运行时提示，不会保存。
+命令从 `origin/dev` 取得最新提交，只打包该提交中的文件，不包含未提交改动；运行的却是本地的部署脚本，所以本地 `scripts/deploy-private*` 与该提交不一致时（本地分支落后或改过）直接报错，先把本地更新到 `origin/dev` 再部署（`-Revision` 回滚时不检查）；通过 SSH 上传、在 Ubuntu 24.04 上检查或安装 Docker、构建并启动应用，然后检查服务器和本机隧道两端的 `/healthz`。成功后打开 `http://127.0.0.1:18887`，保持命令窗口运行；按 `Ctrl+C` 关闭隧道；若 Windows 继续询问 `Terminate batch job (Y/N)?`，输入 `Y`。之后只想重新打开私有访问而不更新服务器时，运行 `.\deploy.cmd -AccessOnly`（Mac 为 `./deploy.sh -AccessOnly`）。SSH 密钥口令或远端 `sudo` 密码如有要求，会在运行时提示，不会保存。
 
 更新前请确认没有进行中的牌局。构建失败不会替换正在运行的容器；如果启动或健康检查失败，命令会报错并显示日志，不会自动回滚。需要恢复时可运行 `.\deploy.cmd -Revision <上次成功的完整提交 SHA>`，上次成功的 SHA 记录在服务器的 `~/.coup-online/current`。服务器上的旧版本目录会保留；磁盘空间不足时需人工清理。本机需要 Git 和 OpenSSH 客户端，服务器需要能访问软件源和 Docker 镜像仓库。
 
