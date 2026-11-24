@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type TransitionEvent as ReactTransitionEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type TransitionEvent as ReactTransitionEvent } from 'react';
 import { PHRASES, REACTION_MIN_INTERVAL_MS, type ActionType, type PublicState, type Reaction } from '@coup/shared';
 import { actionName, ACTIONS, roleName, ROLES } from './rules.ts';
 import { describeReaction, segmentsText } from './narration.ts';
@@ -52,6 +52,25 @@ export function ReactionTray(props: {
     props.onReact(reaction);
     setCoolingDown(true);
     close();
+  };
+  // 标签页的方向键：←/→ 循环、Home/End 到两端，选中随焦点走（WAI-ARIA 标签页模式）；只剩短语时其余标签禁用、不参与
+  const selectTab = (next: Tab) => {
+    setTab(next);
+    setPickingTargetFor(null);
+  };
+  const onTabKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const enabled: Tab[] = phrasesOnly ? ['phrase'] : ['phrase', 'announcement', 'verbalClaim'];
+    const i = enabled.indexOf(activeTab);
+    const next = ({
+      ArrowRight: enabled[(i + 1) % enabled.length],
+      ArrowLeft: enabled[(i - 1 + enabled.length) % enabled.length],
+      Home: enabled[0],
+      End: enabled[enabled.length - 1],
+    } as Record<string, Tab | undefined>)[e.key];
+    if (!next) return;
+    e.preventDefault();
+    selectTab(next);
+    e.currentTarget.querySelector<HTMLElement>(`#reaction-tab-${next}`)?.focus();
   };
   const onCollapseEnd = (e: ReactTransitionEvent) => {
     if (e.target !== e.currentTarget || e.propertyName !== 'grid-template-rows') return;
@@ -123,14 +142,17 @@ export function ReactionTray(props: {
       <div className={`collapse reaction-collapse${open ? ' open' : ''}`} onTransitionEnd={onCollapseEnd} {...{ inert: open ? undefined : '' }}>
         <div className="reaction-collapse-inner">
           <div id="reaction-tray" ref={trayRef} className="reaction-tray">
-            <div className="reaction-tabs" role="tablist" aria-label={translate(locale, 'reactionToggle')}>
+            <div className="reaction-tabs" role="tablist" aria-label={translate(locale, 'reactionToggle')} onKeyDown={onTabKeyDown}>
               {(['phrase', 'announcement', 'verbalClaim'] as const).map((t) => (
                 <button
                   key={t}
+                  type="button"
+                  id={`reaction-tab-${t}`}
                   role="tab"
                   aria-selected={activeTab === t}
+                  tabIndex={activeTab === t ? 0 : -1}
                   disabled={phrasesOnly && t !== 'phrase'}
-                  onClick={() => { setTab(t); setPickingTargetFor(null); }}
+                  onClick={() => selectTab(t)}
                 >
                   {translate(locale, TAB_LABELS[t])}
                 </button>
@@ -139,8 +161,8 @@ export function ReactionTray(props: {
             <div
               ref={gridRef}
               className={`reaction-grid reaction-grid--${activeTab}`}
-              role={targeting ? 'group' : undefined}
-              aria-labelledby={targeting ? 'reaction-target-heading' : undefined}
+              role="tabpanel"
+              aria-labelledby={targeting ? 'reaction-target-heading' : `reaction-tab-${activeTab}`}
             >
               {phrasesOnly && <p className="reaction-hint">{translate(locale, ended ? 'reactionGameOverHint' : 'reactionEliminatedHint')}</p>}
               {buttons()}

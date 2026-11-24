@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type R
 import type { Card, PublicState } from '@coup/shared';
 import { roleName } from './rules.ts';
 import { nameOf } from './narration.ts';
-import { useDialogFocus } from './dialog.ts';
+import { useModalDialog } from './dialog.ts';
 import { animate, prefersReducedMotion, REVEAL_STEPS_MS } from './motion.ts';
 import type { ShowdownView } from './session.ts';
 import { translate, type Locale } from './localization.ts';
@@ -89,13 +89,13 @@ export function ShowdownStage(props: {
   const [picked, setPicked] = useState<number | null>(null);
   const [asking, setAsking] = useState(false);
   const [sent, setSent] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDialogElement>(null);
   const slots = useRef<(HTMLElement | null)[]>([]);
   const backRef = useRef<HTMLButtonElement>(null);
   const firstFocus = useRef<HTMLElement | null>(null);
   const onDone = useRef(props.onDone);
   onDone.current = props.onDone;
-  useDialogFocus(() => {}, root, firstFocus as RefObject<HTMLElement>);
+  useModalDialog(() => {}, root, firstFocus as RefObject<HTMLElement>);
 
   const choosing = !view.reveal && !sent;
   // 被质疑者对准的牌：悬停优先，其次点选；旁观者看服务器转发的。揭晓时被翻开的那张保持抬起，牌不再动
@@ -244,11 +244,9 @@ export function ShowdownStage(props: {
       : translate(locale, 'showdownTitle', { challenger, claimant });
 
   return (
-    <div
+    <dialog
       ref={root}
       className="overlay stage-overlay"
-      role="dialog"
-      aria-modal="true"
       aria-label={`${title} ${roleLabel}`}
       tabIndex={-1}
       data-revealing={sent || !!view.reveal || undefined}
@@ -318,7 +316,7 @@ export function ShowdownStage(props: {
           )}
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }
 
@@ -327,10 +325,10 @@ export function LossStage(props: { hand: Card[]; locale: Locale; clock: Clock | 
   const { hand, locale } = props;
   const [picked, setPicked] = useState<number | null>(null);
   const [sent, setSent] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDialogElement>(null);
   const firstFocus = useRef<HTMLElement | null>(null);
   const slots = useRef<(HTMLElement | null)[]>([]);
-  useDialogFocus(() => {}, root, firstFocus as RefObject<HTMLElement>);
+  useModalDialog(() => {}, root, firstFocus as RefObject<HTMLElement>);
 
   async function lose() {
     if (picked === null || sent) return;
@@ -347,7 +345,7 @@ export function LossStage(props: { hand: Card[]; locale: Locale; clock: Clock | 
 
   const title = translate(locale, 'lossTitle');
   return (
-    <div ref={root} className="overlay stage-overlay" role="dialog" aria-modal="true" aria-label={title}>
+    <dialog ref={root} className="overlay stage-overlay" aria-label={title}>
       <div className="stage-backdrop" />
       <div className="stage">
         <h2 className="stage-title">{title}</h2>
@@ -377,7 +375,7 @@ export function LossStage(props: { hand: Card[]; locale: Locale; clock: Clock | 
           </div>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }
 
@@ -392,10 +390,10 @@ export function ExchangeStage(props: {
   const { hand, keepCount, locale } = props;
   const [kept, setKept] = useState<string[]>([]);
   const [sent, setSent] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDialogElement>(null);
   const firstFocus = useRef<HTMLElement | null>(null);
   const slots = useRef<(HTMLElement | null)[]>([]);
-  useDialogFocus(() => {}, root, firstFocus as RefObject<HTMLElement>);
+  useModalDialog(() => {}, root, firstFocus as RefObject<HTMLElement>);
 
   // 选满后再点未选的牌不响应，须先取消一张
   const toggle = (id: string) =>
@@ -419,7 +417,7 @@ export function ExchangeStage(props: {
 
   const title = translate(locale, 'exchangePrompt', { count: keepCount });
   return (
-    <div ref={root} className="overlay stage-overlay" role="dialog" aria-modal="true" aria-label={title}>
+    <dialog ref={root} className="overlay stage-overlay" aria-label={title}>
       <div className="stage-backdrop" />
       <div className="stage">
         <h2 className="stage-title">{title}</h2>
@@ -449,6 +447,6 @@ export function ExchangeStage(props: {
           </div>
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }
