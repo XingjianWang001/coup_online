@@ -1,5 +1,5 @@
 // ui-check 场景：表态。机器人对真人发一条行动预告，真人从表态面板发一条短语。
-// 断言：对手铭牌亮起、只有行动名上角色色、目标是真人昵称；短语页是当前语言的 7 句、每行排满、不溢出；真人自己的铭牌经服务器转发后亮起，座位尺寸不变。
+// 断言：对手铭牌亮起、只有行动名上角色色、目标是真人昵称；短语页是当前语言的 7 句、每行排满、不溢出；标签页支持 ←/→/Home/End；真人自己的铭牌经服务器转发后亮起，座位尺寸不变。
 // 用法：pnpm ui-check scripts/ui-check-reaction.mjs [截图目录]；手机布局加 MOBILE=1 W=390 H=844；中英文各跑一遍加 LOCALE=zh-CN / LOCALE=en
 export default async function reactionScenario(ui) {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -61,6 +61,24 @@ export default async function reactionScenario(ui) {
   assert(locales.some((l) => JSON.stringify(expected[l]) === JSON.stringify(page.texts)), `短语页应是 7 句预设，实际 ${JSON.stringify(page.texts)}`);
   assert(page.holes === 0, `短语页有 ${page.holes} 行没排满`);
   assert(!page.overflow, '短语页有文字溢出');
+
+  // 标签页键盘：只有选中的标签在 Tab 序列里，←/→/Home/End 切换并带走焦点，面板由选中的标签命名
+  const press = async (key, code) => {
+    for (const type of ['rawKeyDown', 'keyUp']) await ui.cdp('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: code });
+  };
+  const tabs = `(() => ({
+    focused: document.activeElement.id,
+    selected: document.querySelector('[role="tab"][aria-selected="true"]').id,
+    tabbable: [...document.querySelectorAll('[role="tab"]')].filter((t) => t.tabIndex === 0).length,
+    panel: document.querySelector('[role="tabpanel"]').getAttribute('aria-labelledby'),
+  }))()`;
+  await ui.evaluate(`document.querySelector('#reaction-tab-phrase').focus()`);
+  for (const [key, code, id] of [['ArrowRight', 39, 'announcement'], ['End', 35, 'verbalClaim'], ['ArrowRight', 39, 'phrase'], ['ArrowLeft', 37, 'verbalClaim'], ['Home', 36, 'phrase']]) {
+    await press(key, code);
+    const t = await ui.evaluate(tabs);
+    const want = `reaction-tab-${id}`;
+    assert(t.focused === want && t.selected === want && t.panel === want && t.tabbable === 1, `${key} 后应选中 ${id}：${JSON.stringify(t)}`);
+  }
 
   await ui.evaluate(`[...document.querySelectorAll('.reaction-grid button')].find((b) => /你确定|You sure/.test(b.textContent)).click()`);
   await ui.waitFor('.seat.self .nameplate.speaking');
