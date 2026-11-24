@@ -1,4 +1,4 @@
-import { createServer } from 'node:http';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join, extname, normalize, relative, isAbsolute, sep } from 'node:path';
@@ -55,8 +55,24 @@ function genCode(): string {
   return code;
 }
 
-const httpServer = createServer(async (req, res) => {
-  const url = new URL(req.url ?? '/', 'http://localhost');
+// 和 socket 意图一样，一个请求出错只影响这个请求：漏出去的异常会让进程退出，内存里的所有房间随之丢失
+const httpServer = createServer((req, res) => {
+  serveHttp(req, res).catch((error) => {
+    console.error('http request error', error);
+    if (!res.headersSent) res.writeHead(500);
+    res.end();
+  });
+});
+
+async function serveHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  let url: URL;
+  try {
+    url = new URL(req.url ?? '/', 'http://localhost'); // 请求目标来自网络，/\[ 这类目标会让它抛错
+  } catch {
+    res.writeHead(400);
+    res.end('bad request');
+    return;
+  }
   if (url.pathname === '/api/credits') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(creditsFor(await readRoster(), req.headers.host ?? '', url.searchParams.get('locale'))));
@@ -100,7 +116,7 @@ const httpServer = createServer(async (req, res) => {
   if (relativePath.startsWith(`assets${sep}`)) headers['Cache-Control'] = 'public, max-age=31536000, immutable';
   res.writeHead(200, headers);
   res.end(readFileSync(filePath));
-});
+}
 
 const io = new Server(httpServer);
 

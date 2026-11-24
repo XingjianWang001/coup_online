@@ -149,7 +149,7 @@ const english = {
   announcementSteal: "I'll {action} from {target}.",
   verbalClaimHas: "I'm the {role}.",
   verbalClaimHasNot: "I'm not the {role}.",
-  exchangePrompt: 'Choose {count} cards to keep',
+  exchangePrompt: 'Choose {count} to keep', // 只剩一点影响力时 count 为 1，不写 cards 免得出现「1 cards」
   confirmKeep: 'Keep selected cards',
   cardBack: 'Hidden card',
   cardFace: '{role} card',
