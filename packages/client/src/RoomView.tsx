@@ -2,14 +2,14 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSPropert
 import { ACTION_CLAIM, ASSASSINATE_COST, BLOCK_ROLES, COUP_COST, FORCED_COUP_COINS, MAX_PLAYERS, STRENGTHS, type ActionType, type Card, type LobbyPlayer, type PublicState, type Reaction, type Role, type Strength } from '@coup/shared';
 import { connect, send } from './socket.ts';
 import { actionName, ACTIONS, roleName, roleShortName } from './rules.ts';
-import { describePending, describeReaction, describeWaiting, groupLog, nameOf, reactionText, type LogEntry } from './narration.ts';
+import { describePending, describeReaction, describeWaiting, groupLog, nameOf, segmentsText, type LogEntry, type Segment } from './narration.ts';
 import { copyToClipboard } from './clipboard.ts';
 import { prefersReducedMotion, useSmoothHeight } from './motion.ts';
 import type { SeatMotion } from './session.ts';
 import { placeSeats, type PlacedSeat, type SeatSide } from './seating.ts';
 import { localizeCoinCount, localizeNotice, translate, type Locale, type NoticeDescriptor } from './localization.ts';
 import { DecisionTimer, type Clock } from './clock.tsx';
-import { AddComputerIcon, CoinIcon, ComputerBadge, CrownIcon, Glyph, RoleIcon } from './icons.tsx';
+import { AddComputerIcon, CoinIcon, ComputerBadge, CrownIcon, Glyph, OfflineBadge, RoleIcon } from './icons.tsx';
 import { ReactionTray } from './ReactionTray.tsx';
 
 export interface TransientNoticeState {
@@ -102,12 +102,8 @@ export function RoomView(props: RoomViewProps) {
   if (!publicState) {
     return (
       <div className="room">
-        <div
-          className="roomcode"
-          aria-label={`${translate(props.locale, 'roomCode')} ${props.roomCode}${translate(props.locale, 'roomCodeHelp')}`}
-        >
+        <div className="roomcode">
           {translate(props.locale, 'roomCode')} <b>{props.roomCode}</b>
-          {translate(props.locale, 'roomCodeHelp')}
         </div>
         {me === props.hostId && (!isLocal || props.canStartTunnel || props.tunnelUrl) && (
           <InviteLink
@@ -120,7 +116,7 @@ export function RoomView(props: RoomViewProps) {
         )}
         {/* 添加按钮钉在标题行右侧：人数变了它也不挪位置 */}
         <div className="roster-head">
-          <h3>{translate(props.locale, 'playersCount', { count: props.players.length })}</h3>
+          <h3>{translate(props.locale, 'playersCount', { count: props.players.length, maximum: MAX_PLAYERS })}</h3>
           {me === props.hostId && (
             <button
               className="ghost icon-button"
@@ -135,8 +131,8 @@ export function RoomView(props: RoomViewProps) {
         </div>
         <ul className="playerlist">
           {props.players.map((p) => (
-            <li key={p.id} className={p.isHost ? 'host' : ''}>
-              <span>
+            <li key={p.id}>
+              <span className={p.connected ? undefined : 'offline'}>
                 {p.isPreviousWinner && (
                   <span role="img" aria-label={translate(props.locale, 'previousWinner')} title={translate(props.locale, 'previousWinner')}>
                     <CrownIcon />{' '}
@@ -144,8 +140,7 @@ export function RoomView(props: RoomViewProps) {
                 )}
                 {p.strength && <ComputerBadge strength={p.strength} locale={props.locale} />}
                 {p.name}
-                {p.isHost && translate(props.locale, 'hostSuffix')}
-                {!p.connected && translate(props.locale, 'offlineSuffix')}
+                {!p.connected && <> <OfflineBadge locale={props.locale} /></>}
               </span>
               {p.strength && me === props.hostId && (
                 <span className="computer-controls">
@@ -177,10 +172,14 @@ export function RoomView(props: RoomViewProps) {
             </li>
           ))}
         </ul>
-        {me === props.hostId && (
-          <button className="primary" onClick={props.onStart} disabled={props.players.length < 2}>
-            {translate(props.locale, 'startGame')} ({translate(props.locale, 'startGameRequirement')})
+        {me === props.hostId ? (
+          // 两段文字叠在同一格里，按钮取较宽的那段，人数变化时宽度不跳
+          <button className="primary start-game" onClick={props.onStart} disabled={props.players.length < 2}>
+            <span aria-hidden={props.players.length < 2}>{translate(props.locale, 'startGame')}</span>
+            <span aria-hidden={props.players.length >= 2}>{translate(props.locale, 'notEnoughPlayers')}</span>
           </button>
+        ) : (
+          <div className="waiting">{translate(props.locale, 'waitingForStart', { name: props.players.find((p) => p.id === props.hostId)?.name ?? '？' })}</div>
         )}
       </div>
     );
@@ -211,6 +210,15 @@ export function RoomView(props: RoomViewProps) {
 }
 
 // 明牌只靠视觉暗淡区分；读屏另给「已翻开」文案，界面不加字。
+// 叙述、记录和铭牌共用：角色名（或角色行动名）按角色上色，目标昵称单独加粗
+function Segments({ segments }: { segments: Segment[] }) {
+  return segments.map((s, i) =>
+    typeof s === 'string' ? s : (
+      <span key={i} className={s.role ? `role-name role--${s.role}` : s.target ? 'nameplate-target' : undefined}>{s.text}</span>
+    ),
+  );
+}
+
 // 悬浮看名字：自己的大牌把图标换成名字，对手的小牌弹出同色气泡（仅限有悬浮的设备）。
 // postGameRevealed：赛后揭晓的牌，全彩牌面（不置灰），以此与明牌区分（ADR 0005）
 function CardView({ role, locale, unavailable, small, postGameRevealed }: { role: Role; locale: Locale; unavailable?: boolean; small?: boolean; postGameRevealed?: boolean }) {
@@ -428,7 +436,7 @@ function GameBoard(props: {
   const timer = <DecisionTimer clock={props.clock} locale={props.locale} />;
 
   const narration = describePending(state, props.locale);
-  const centerText = narration ?? (isMyTurn && state.phase === 'choosingAction' ? translate(props.locale, 'yourTurn') : null);
+  const centerText = narration ?? (isMyTurn && state.phase === 'choosingAction' ? [translate(props.locale, 'yourTurn')] : null);
 
   type SeatPlayer = PublicState['players'][number];
   const seats = placeSeats(state.players, me);
@@ -449,13 +457,7 @@ function GameBoard(props: {
       >
         {bubble && (
           <span key={bubble.id} className="nameplate-text">
-            {describe(bubble.reaction).map((segment, i) =>
-              typeof segment === 'string' ? segment : (
-                <span key={i} className={segment.role ? `nameplate-role role--${segment.role}` : segment.target ? 'nameplate-target' : undefined}>
-                  {segment.text}
-                </span>
-              ),
-            )}
+            <Segments segments={describe(bubble.reaction)} />
           </span>
         )}
       </div>
@@ -485,7 +487,7 @@ function GameBoard(props: {
           <span className="name">
             {props.computers.has(p.id) && <ComputerBadge strength={props.computers.get(p.id)!} locale={props.locale} />}
             {p.name}
-            {p.id === me && translate(props.locale, 'selfMarker')}
+            {p.id === me && <span className="visually-hidden">{translate(props.locale, 'selfMarker')}</span>}
             {isTargeted && <span className="visually-hidden">{translate(props.locale, 'targetedMarker')}</span>}
           </span>
           {p.alive ? (
@@ -598,7 +600,7 @@ function GameBoard(props: {
         {/* live 区常驻；倒计时放在外面，避免读屏每秒播报 */}
         <div className={`narration${centerText ? '' : ' is-empty'}`}>
           <span className="narration-text" aria-live="polite">
-            {centerText && <span key={centerText} className="narration-line">{centerText}</span>}
+            {centerText && <span key={segmentsText(centerText)} className="narration-line"><Segments segments={centerText} /></span>}
           </span>
         </div>
       </div>
@@ -663,7 +665,7 @@ function GameBoard(props: {
         <div className="visually-hidden" aria-live="polite">
           {latest && latest.playerId !== me && (
             <span key={latest.id}>
-              {translate(props.locale, 'reactionLive', { name: nameOf(state, latest.playerId), text: reactionText(describe(latest.reaction)) })}
+              {translate(props.locale, 'reactionLive', { name: nameOf(state, latest.playerId), text: segmentsText(describe(latest.reaction)) })}
             </span>
           )}
         </div>
@@ -678,12 +680,12 @@ function GameBoard(props: {
                     className="log-header"
                     onClick={g.entries.length ? () => toggleGroup(g.id) : undefined}
                     aria-expanded={g.entries.length ? expanded.has(g.id) : undefined}
-                    aria-label={g.entries.length ? translate(props.locale, expanded.has(g.id) ? 'collapseLog' : 'expandLog', { action: g.action }) : undefined}
+                    aria-label={g.entries.length ? translate(props.locale, expanded.has(g.id) ? 'collapseLog' : 'expandLog', { action: segmentsText(g.action) }) : undefined}
                   >
                     {g.entries.length > 0 && (
                       <span className={`log-chevron${expanded.has(g.id) ? ' open' : ''}`}>▸</span>
                     )}
-                    <span>{g.action}</span>
+                    <span><Segments segments={g.action} /></span>
                   </button>
                   {/* 条目常驻，高度在 0fr ↔ 1fr 之间过渡（同 .notice-region）；收起时 inert，读屏和 Tab 跳过 */}
                   {g.entries.length > 0 && (
@@ -694,7 +696,7 @@ function GameBoard(props: {
                       <div className="log-entries">
                         {g.entries.map((en) => (
                           <div key={en.id} className="log-entry">
-                            {en.text}
+                            <Segments segments={en.text} />
                           </div>
                         ))}
                       </div>
