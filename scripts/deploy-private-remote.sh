@@ -17,9 +17,11 @@ archive="$root/uploads/$revision/$archive_name"
 tar -xf "$archive" -C "$release"
 rm -f -- "$archive"
 mkdir -p "$root/.private-credits"
-if [[ -f "$archive.credits.json" ]]; then
-  mv -- "$archive.credits.json" "$root/.private-credits/roster.json"
-fi
+for name in roster sites; do
+  if [[ -f "$archive.$name.json" ]]; then
+    mv -- "$archive.$name.json" "$root/.private-credits/$name.json"
+  fi
+done
 ln -sfnT "$root/.private-credits" "$release/.private-credits"
 
 if ! command -v docker >/dev/null || ! sudo docker compose version >/dev/null 2>&1; then

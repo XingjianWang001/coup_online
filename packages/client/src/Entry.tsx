@@ -59,20 +59,13 @@ export function EntryForm(props: {
   );
 }
 
-// 备案号为官方编号，任何语言下都不翻译；只在登记过的域名显示，未登记的域名（含 localhost、SSH 隧道）不显示页脚
-const FILINGS: Record<string, { icp: string; police?: { code: string; label: string } }> = {
-  'coup.davidxjwang.com': {
-    icp: '粤ICP备2026157913号-1',
-    police: { code: '44010602017448', label: '粤公网安备44010602017448号' },
-  },
-  'coup.surwhy.com': {
-    icp: '粤ICP备2026157913号-2',
-    police: { code: '44010602017609', label: '粤公网安备44010602017609号' },
-  },
-};
+// 备案号为官方编号，任何语言下都不翻译；按访问域名由服务端的 /api/site 给出，未登记的域名没有，不显示页脚
+export interface Filing {
+  icp: string;
+  police?: { code: string; label: string };
+}
 
-export function FilingFooter() {
-  const filing = FILINGS[location.hostname];
+export function FilingFooter({ filing }: { filing?: Filing }) {
   if (!filing) return null;
   return (
     <footer className="filing">
