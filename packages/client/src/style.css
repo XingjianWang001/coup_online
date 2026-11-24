@@ -205,6 +205,13 @@ button.primary:hover:not(:disabled) {
   border-color: var(--gold-soft);
 }
 
+/* 金色只给「现在能点」：不可点的主按钮退回普通按钮的禁用样子，免得半透明金块成了页面上最醒目的东西 */
+button.primary:disabled {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+
 button.ghost {
   background: transparent;
   border-color: var(--line);
@@ -893,11 +900,15 @@ input:focus-visible {
 .card--ambassador { border-color: var(--ambassador); color: var(--ambassador); }
 .card--contessa   { border-color: var(--contessa);   color: var(--contessa); }
 
+/* 牌背：斜纹外留一圈毡边，再压一道黄铜细框，座位上的小牌才读作一张牌而不是一块底纹。
+   内框用零模糊的 inset 阴影画，不加元素。舞台、发牌的大牌背各自换掉 box-shadow：大牌本身够像牌，
+   选中时外面还有一圈金框，再加内框就是三道线 */
 .card-back {
   display: block;
   border-radius: var(--r-md);
   border: 1px solid var(--gold-dim);
   background: repeating-linear-gradient(45deg, oklch(0.34 0.03 152) 0 5px, oklch(0.28 0.03 152) 5px 10px);
+  box-shadow: inset 0 0 0 3px var(--felt), inset 0 0 0 4px color-mix(in srgb, var(--gold) 35%, transparent);
 }
 
 .inline-icon {
@@ -1228,7 +1239,7 @@ button.reaction-toggle:hover:not(:disabled) {
 .log-chevron {
   display: inline-block;
   width: 14px;
-  color: var(--gold);
+  color: var(--text-3);
   transition: transform 0.15s ease;
 }
 
@@ -1811,6 +1822,7 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
 }
 .showcase-flipper .card-back {
   width: auto;
+  box-shadow: none;
   height: auto;
   border-radius: var(--r-lg);
   transform: rotateY(180deg);
@@ -2248,19 +2260,20 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     font-size: 24px;
   }
 
+  /* 页头的规则、设置、离开是很少用的页面功能：无边框文字按钮跟标题同一行，不和控制区的行动按钮长得一样。
+     放不下时整组折到下一行靠右 */
   .header {
-    align-items: flex-start;
     flex-wrap: wrap;
   }
 
   .header-actions {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-    width: 100%;
+    gap: 0;
+    margin-inline: auto calc(-1 * var(--sp-2));
   }
 
   .header-actions button {
-    padding-inline: var(--sp-3);
+    border-color: transparent;
+    padding-inline: var(--sp-2);
   }
 
   .settings-overlay {
@@ -2456,12 +2469,24 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     font-size: 14px;
   }
 
+  /* 内容不满一屏时页面撑满视口，控制区被 margin-top: auto 推到底边，不悬在半空 */
+  .app:has(.controls) {
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+  }
+
+  .app:has(.controls) > .board,
+  .board-content {
+    flex: 1;
+  }
+
   .controls {
     /* sticky 而非 fixed：滚到底时回到记录之后，不遮挡最后几行 */
     position: sticky;
     bottom: 0;
     order: 1;
-    margin: 0 calc(-1 * var(--sp-4));
+    margin: auto calc(-1 * var(--sp-4)) 0;
     border-radius: var(--r-lg) var(--r-lg) 0 0;
     border-bottom: none;
     padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));
@@ -2577,10 +2602,6 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     gap: var(--sp-1);
     padding-bottom: var(--sp-2);
     margin-bottom: var(--sp-2);
-  }
-
-  .app:has(.table) .header-actions {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .app:has(.table) .header-actions button { padding-inline: var(--sp-1); }
