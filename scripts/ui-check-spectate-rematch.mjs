@@ -1,6 +1,6 @@
 // ui-check 场景：真人玩家都已出局时房主再来一局（#106）。真人 Me（页面）建房当房主，机器人 Bot 加入，Me 再加两个电脑，开局。
 // Bot 只按自己真有的公爵征税，Me 每次都质疑 Bot、每次都输，两次后出局；Bot 随后离开，只剩两个电脑在打。
-// 断言：牌局仍在进行时，房主 Me 的控制区出现「再来一局」；点了回到大厅阶段，名单上是 Me 和两个电脑。
+// 断言：Bot 还在打时，出局的 Me 不显示控制区；Bot 离开后牌局仍在进行，Me 的控制区只有「再来一局」（没有等待提示和倒计时）；点了回到大厅阶段，名单上是 Me 和两个电脑。
 // 服务端 COMPUTER_DELAY_MS=1500：Me 抢在电脑前面质疑，旁观时电脑也走得够慢，截得到牌局还没打完的样子。
 // 发牌和先手固定（入座顺序 Me、Bot、电脑、电脑）：Me 两张女伯爵、先手，只拿收入；Bot 两张公爵
 // 用法：pnpm ui-check scripts/ui-check-spectate-rematch.mjs [截图目录]；英文加 LOCALE=en
@@ -68,6 +68,10 @@ export default async function spectateRematchScenario(ui) {
   }
   assert(!meOf(bot.state.pub).alive, `Me 没有出局：${JSON.stringify(bot.state.pub.players.map((p) => [p.name, p.handCount]))}`);
   assert(!(await rematchShown()), 'Bot 还在打时，出局的房主不该看到再来一局');
+  // 等出局的对质或失去影响力收起
+  for (let i = 0; i < 80 && (await ui.evaluate(`getComputedStyle(document.querySelector('.controls')).display`)) !== 'none'; i += 1) await sleep(100);
+  await ui.shot('spectate-out');
+  assert((await ui.evaluate(`getComputedStyle(document.querySelector('.controls')).display`)) === 'none', '出局后没有要作的决定，控制区应隐藏');
   bot.intent({ type: 'leaveRoom' });
   console.log('Me 已出局，Bot 离开，剩两个电脑');
 
@@ -79,6 +83,8 @@ export default async function spectateRematchScenario(ui) {
   const over = await count('.notice.big');
   assert(!over, '截图时牌局已经结束，截不到旁观中的样子');
   assert(await rematchShown(), '真人玩家都已出局时，房主的控制区没有再来一局');
+  const extra = await ui.evaluate(`document.querySelectorAll('.controls-body .waiting, .controls-body [role="timer"]').length`);
+  assert(extra === 0, '有再来一局时控制区只放按钮，不该有等待提示或倒计时');
 
   await ui.click(REMATCH, '.controls-body');
   await ui.waitFor('.playerlist');

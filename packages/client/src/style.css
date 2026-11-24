@@ -930,6 +930,9 @@ input:focus-visible {
   padding: var(--sp-4);
 }
 
+/* 没有要作的决定也没有消息（例如出局后旁观）时不显示空框 */
+.controls:has(> .controls-body:empty) { display: none; }
+
 .actions {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
