@@ -54,16 +54,18 @@ export function describeWaiting(state: PublicState, me: string, locale: Locale =
   const name = (id: string | null | undefined) => ({ name: nameOf(state, id) });
   const alive = state.players.find((x) => x.id === me)?.alive ?? false;
   const passed = state.passed.includes(me);
+  // 出局的玩家不再等谁：控制区没有等待提示，也就没有倒计时
+  if (!alive) return null;
   switch (state.phase) {
     case 'choosingAction':
       return state.currentPlayerId === me ? null : translate(locale, 'waitingForAction', name(state.currentPlayerId));
     case 'awaitingChallenge': {
       const claimant = state.challengeSubject === 'block' ? p?.blockById : p?.actorId;
-      return alive && claimant !== me && !passed ? null : translate(locale, 'waitingForChallenge');
+      return claimant !== me && !passed ? null : translate(locale, 'waitingForChallenge');
     }
     case 'awaitingBlock': {
-      if (p?.action === 'foreignAid') return alive && p.actorId !== me && !passed ? null : translate(locale, 'waitingForBlockAny');
-      return p?.targetId === me && alive && !passed ? null : translate(locale, 'waitingForBlock', name(p?.targetId));
+      if (p?.action === 'foreignAid') return p.actorId !== me && !passed ? null : translate(locale, 'waitingForBlockAny');
+      return p?.targetId === me && !passed ? null : translate(locale, 'waitingForBlock', name(p?.targetId));
     }
     case 'showdown':
       return state.showdown?.claimantId === me ? null : translate(locale, 'waitingForShowdown', name(state.showdown?.claimantId));

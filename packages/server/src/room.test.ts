@@ -794,6 +794,58 @@ describe('Room 电脑玩家', () => {
     expect(computers(room)).toHaveLength(1);
   });
 
+  it('真人玩家都已出局、牌局仍在进行时，房主能再来一局：回到大厅阶段，电脑留下，弃权的真人移除', () => {
+    vi.useFakeTimers();
+    // 电脑不出手：等宽限期时牌局走向不随 Math.random 变
+    const { room } = makeRoom({ startingPlayerRandom: () => 0, computerDelayMs: () => 10 * 60_000 });
+    const alice = room.addPlayer('Alice', 'sock1');
+    const bob = room.addPlayer('Bob', 'sock2');
+    room.addComputer(alice.id, 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    room.apply((g) => forfeit(g, alice.id));
+    expect(() => room.rematch(alice.id, 'sock1')).toThrow('illegalIntent');
+    room.markDisconnected(bob.id, 'sock2');
+    vi.advanceTimersByTime(90_000 - 1); // Bob 断线但仍在宽限期内，牌局里仍存活
+    expect(() => room.rematch(alice.id, 'sock1')).toThrow('illegalIntent');
+    vi.advanceTimersByTime(1); // 宽限期到，Bob 弃权出局
+    expect(room.game?.phase).not.toBe('gameOver');
+    room.rematch(alice.id, 'sock1');
+    expect(room.game).toBeNull();
+    expect(room.playerList.map((p) => p.isComputer)).toEqual([false, true, true]);
+  });
+
+  it('中途再来一局后没有上局获胜者', () => {
+    vi.useFakeTimers();
+    const { room, alice, bob } = lobby();
+    room.addComputer(alice.id, 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    room.leavePlayer(bob.id, 'sock2');
+    for (const c of computers(room)) room.apply((g) => forfeit(g, c.id));
+    room.rematch(alice.id, 'sock1');
+    expect(room.playerList.filter((p) => p.isPreviousWinner).map((p) => p.name)).toEqual(['Alice']);
+    room.startGame(alice.id, 'sock1');
+    room.apply((g) => forfeit(g, alice.id));
+    room.rematch(alice.id, 'sock1');
+    expect(room.playerList.filter((p) => p.isPreviousWinner)).toEqual([]);
+  });
+
+  it('真人玩家都已出局时房主离线，下一位在线的真人立即成为房主并能再来一局', () => {
+    vi.useFakeTimers();
+    const { room, alice, bob } = lobby();
+    room.addComputer(alice.id, 'sock1');
+    room.addComputer(alice.id, 'sock1');
+    room.startGame(alice.id, 'sock1');
+    room.apply((g) => forfeit(g, alice.id));
+    room.markDisconnected(alice.id, 'sock1');
+    expect(room.hostId).toBe(alice.id); // Bob 还在打
+    room.apply((g) => forfeit(g, bob.id));
+    expect(room.hostId).toBe(bob.id);
+    room.rematch(bob.id, 'sock2');
+    expect(room.game).toBeNull();
+  });
+
   function soloGame() {
     // 电脑随机源固定：宽限期里电脑照常出手，牌局走向要确定
     const made = makeRoom({ startingPlayerRandom: () => 0, computerRandom: () => 0 });

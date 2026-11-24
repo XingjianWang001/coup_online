@@ -309,4 +309,11 @@ describe('describeWaiting', () => {
     expect(describeWaiting(state({ phase: 'awaitingBlock', pending: assassinate }), 'b')).toBeNull();
     expect(describeWaiting(state({ phase: 'awaitingBlock', pending: { action: 'foreignAid', actorId: 'a' } }), 'a')).toBe('其他玩家正在考虑是否阻挡');
   });
+
+  it('出局的玩家不再等谁：控制区没有等待提示和倒计时', () => {
+    const players = state({}).players.map((p) => (p.id === 'b' ? { ...p, alive: false, handCount: 0 } : p));
+    expect(describeWaiting(state({ players }), 'b')).toBeNull();
+    expect(describeWaiting(state({ players, phase: 'awaitingChallenge', challengeSubject: 'action', pending: tax }), 'b')).toBeNull();
+    expect(describeWaiting(state({ players, phase: 'awaitingBlock', pending: { action: 'foreignAid', actorId: 'a' } }), 'b')).toBeNull();
+  });
 });

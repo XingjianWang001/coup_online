@@ -431,6 +431,8 @@ function GameBoard(props: {
   const canPostGameReveal = state.phase === 'gameOver' && !!me && state.winnerId === me;
   const postGameRevealLeft = canPostGameReveal && (myView?.postGameRevealed.length ?? 0) < props.hand.length;
   const amExchanging = state.phase === 'choosingExchange' && pending?.actorId === me;
+  // 牌局结束后，或真人玩家都已出局（只剩电脑在打）时，房主可以再来一局；旁观的其他真人照常旁观，不提示等房主
+  const rematchOpen = state.phase === 'gameOver' || !state.players.some((p) => p.alive && !props.computers.has(p.id));
   // 对质时等待提示由对质舞台给出，控制区不再重复
   const waiting = me && state.phase !== 'showdown' ? describeWaiting(state, me, props.locale) : null;
   const timer = <DecisionTimer clock={props.clock} locale={props.locale} />;
@@ -550,7 +552,9 @@ function GameBoard(props: {
   else if (canBlock) controlMode = 'block';
   else if (amLosing) controlMode = 'loss';
   else if (amExchanging) controlMode = 'exchange';
-  const controlKey = `${controlMode}:${state.currentPlayerId ?? ''}:${pending?.actorId ?? ''}:${state.lossPlayerId ?? ''}`;
+  else if (me === props.hostId && rematchOpen) controlMode = 'rematch';
+  // 再来一局的键不随行动者变：旁观时电脑约 1 秒一步，按钮不能每步重挂载、短暂 inert
+  const controlKey = controlMode === 'rematch' ? controlMode : `${controlMode}:${state.currentPlayerId ?? ''}:${pending?.actorId ?? ''}:${state.lossPlayerId ?? ''}`;
   // 控制区外壳常驻，换内容（换模式、进出选目标、等待提示变化）时高度平滑过渡；内层按 controlKey 重挂载播入场动画
   const controlsRef = useRef<HTMLDivElement>(null);
   useSmoothHeight(controlsRef, [controlKey, props.selectedAction, waiting, props.locale]);
@@ -647,13 +651,15 @@ function GameBoard(props: {
 
         {postGameRevealLeft && <div className="waiting">{translate(props.locale, 'postGameRevealHint')}</div>}
 
-        {state.phase === 'gameOver' && (me === props.hostId ? (
+        {controlMode === 'rematch' && (
           <button className="primary" onClick={() => props.onIntent({ type: 'rematch' })}>
             {translate(props.locale, 'rematch')}
           </button>
-        ) : (
+        )}
+
+        {state.phase === 'gameOver' && me !== props.hostId && (
           <div className="waiting">{translate(props.locale, 'waitingForRematch', { name: nameOf(state, props.hostId) })}</div>
-        ))}
+        )}
 
         {waiting && <div className="waiting decision-heading"><span>{waiting}</span>{timer}</div>}
       </div>
