@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api/credits': { target: 'http://localhost:8787', changeOrigin: false },
+      '/api': { target: 'http://localhost:8787', changeOrigin: false },
       '/socket.io': {
         target: 'http://localhost:8787',
         ws: true,
