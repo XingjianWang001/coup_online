@@ -900,17 +900,15 @@ input:focus-visible {
 .card--ambassador { border-color: var(--ambassador); color: var(--ambassador); }
 .card--contessa   { border-color: var(--contessa);   color: var(--contessa); }
 
-/* 牌背：斜纹外留一圈毡边，再压一道黄铜细框（同大牌 .big-card::before 的内框），读作一张牌而不是一块底纹。
-   内框用零模糊的 inset 阴影画，不加元素；--back-inset 随牌的大小调 */
+/* 牌背：斜纹外留一圈毡边，再压一道黄铜细框，座位上的小牌才读作一张牌而不是一块底纹。
+   内框用零模糊的 inset 阴影画，不加元素。舞台、发牌的大牌背各自换掉 box-shadow：大牌本身够像牌，
+   选中时外面还有一圈金框，再加内框就是三道线 */
 .card-back {
-  --back-inset: 3px;
-  --back-frame: inset 0 0 0 var(--back-inset) var(--felt),
-    inset 0 0 0 calc(var(--back-inset) + 1px) color-mix(in srgb, var(--gold) 35%, transparent);
   display: block;
   border-radius: var(--r-md);
   border: 1px solid var(--gold-dim);
   background: repeating-linear-gradient(45deg, oklch(0.34 0.03 152) 0 5px, oklch(0.28 0.03 152) 5px 10px);
-  box-shadow: var(--back-frame);
+  box-shadow: inset 0 0 0 3px var(--felt), inset 0 0 0 4px color-mix(in srgb, var(--gold) 35%, transparent);
 }
 
 .inline-icon {
@@ -1823,8 +1821,8 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   backface-visibility: hidden;
 }
 .showcase-flipper .card-back {
-  --back-inset: 6px;
   width: auto;
+  box-shadow: none;
   height: auto;
   border-radius: var(--r-lg);
   transform: rotateY(180deg);
@@ -2152,13 +2150,12 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
 
 /* 双类选择器：压过移动端对 .card-back 的座位尺寸 */
 .card-back.stage-back {
-  --back-inset: 6px;
   width: var(--w);
   height: auto;
   aspect-ratio: 5 / 7;
   border-radius: var(--r-lg);
   animation: none;
-  box-shadow: var(--back-frame), 0 18px 40px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.3);
+  box-shadow: 0 18px 40px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.3);
 }
 
 .stage-incoming {
