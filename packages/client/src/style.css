@@ -211,6 +211,13 @@ button.primary:hover:not(:disabled) {
   border-color: var(--gold-soft);
 }
 
+/* 金色只给「现在能点」：不可点的主按钮退回普通按钮的禁用样子，免得半透明金块成了页面上最醒目的东西 */
+button.primary:disabled {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+
 button.ghost {
   background: transparent;
   border-color: var(--line);
@@ -2483,12 +2490,24 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     font-size: 14px;
   }
 
+  /* 内容不满一屏时页面撑满视口，控制区被 margin-top: auto 推到底边，不悬在半空 */
+  .app:has(.controls) {
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+  }
+
+  .app:has(.controls) > .board,
+  .board-content {
+    flex: 1;
+  }
+
   .controls {
     /* sticky 而非 fixed：滚到底时回到记录之后，不遮挡最后几行 */
     position: sticky;
     bottom: 0;
     order: 1;
-    margin: 0 calc(-1 * var(--sp-4));
+    margin: auto calc(-1 * var(--sp-4)) 0;
     border-radius: var(--r-lg) var(--r-lg) 0 0;
     border-bottom: none;
     padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));

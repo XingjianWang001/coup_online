@@ -14,7 +14,9 @@ export function EntryForm(props: {
 }) {
   const canCreate = isValidNickname(props.name);
   const invalid = !!props.name && !canCreate;
-  const canJoin = canCreate && props.roomCode.trim().length === 6;
+  // 房间码填满（多半是从加入链接进来）时主按钮换成「加入」，和回车的选择一致
+  const hasCode = props.roomCode.trim().length === 6;
+  const canJoin = canCreate && hasCode;
   // 回车：填了完整房间码就加入，否则创建房间。输入法确认候选词的回车不算：Safari 先派发 compositionend，
   // 这时 isComposing 已是 false，只能靠 keyCode 229 认出来（WebKit bug 165004）
   const onEnter = (event: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -36,7 +38,7 @@ export function EntryForm(props: {
         />
       </label>
       {invalid && <span id="nickname-error" role="status">{translate(props.locale, 'errorInvalidName')}</span>}
-      <button className="primary" onClick={props.onCreate} disabled={!canCreate}>
+      <button className={hasCode ? 'ghost' : 'primary'} onClick={props.onCreate} disabled={!canCreate}>
         {translate(props.locale, 'createRoom')}
       </button>
       <div className="divider">{translate(props.locale, 'or')}</div>
@@ -50,7 +52,7 @@ export function EntryForm(props: {
           maxLength={6}
         />
       </label>
-      <button className="ghost" onClick={props.onJoin} disabled={!canJoin}>
+      <button className={hasCode ? 'primary' : 'ghost'} onClick={props.onJoin} disabled={!canJoin}>
         {translate(props.locale, 'joinRoom')}
       </button>
     </div>
