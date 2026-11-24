@@ -259,7 +259,7 @@ _Avoid_: 规则面板
 | 铭牌 | `.nameplate`（亮起时 `.nameplate.speaking`） | reaction、announce、speech、reply、after-game、table |
 | 叙述 | `.narration` | table、decision-clock |
 | 提示条 | `.notice`（获胜者 `.notice.big`） | table、decision-clock |
-| 控制区 | `.controls`（行动与目标按钮在 `.actions`） | block-switch、decision-clock、table、motion |
+| 控制区 | `.controls`（行动与目标按钮在 `.actions`） | block-switch、decision-clock、table、motion、spectate-rematch |
 | 决策倒计时 | `[role="timer"]` | decision-clock、table |
 | 对质舞台 | `.stage-overlay:has(.stage-spot)` | showdown-hesitation、dialog |
 | 表态面板 | `.reaction` | reaction、reply |
