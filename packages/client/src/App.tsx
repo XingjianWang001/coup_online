@@ -4,7 +4,7 @@ import { clearIdentity, clearRoomCode, connect, loadIdentity, loadRoomCode, onMe
 import { estimateServerOffset } from './narration.ts';
 import { scheduleAutoDismiss } from './transient.ts';
 import { closeShowdown, dropMotion, initialSession, reduceSession, rejoinIntent, type Session } from './session.ts';
-import { loadCardStyle, loadDebug, persistCardStyle, type CardStyle } from './cardStyle.ts';
+import { cardStylesAvailable, loadCardStyle, persistCardStyle, type CardStyle } from './cardStyle.ts';
 import { loadLocale, localizeServerError, persistLocale, translate, type Locale, type NoticeDescriptor } from './localization.ts';
 import type { Clock } from './clock.tsx';
 import { DealShowcase } from './DealShowcase.tsx';
@@ -47,7 +47,7 @@ let pendingLinkRoom = LINK_ROOM;
 let replaced = false;
 
 // 调试开关打开时，设置里才出现牌面风格；关掉后大牌一律按默认风格显示，选过的风格留着下次用。
-const DEBUG = loadDebug(browserStorage(), window.location.search, window.location.hostname);
+const CARD_STYLES_ON = cardStylesAvailable(window.location.hostname);
 
 function browserStorage(): Storage | null {
   try {
@@ -314,7 +314,7 @@ export function App() {
 
   // 大牌的画风全在 style.css 里按这个属性切换，组件不用知道风格
   useEffect(() => {
-    document.documentElement.dataset.cardStyle = DEBUG ? cardStyle : 'default';
+    document.documentElement.dataset.cardStyle = CARD_STYLES_ON ? cardStyle : 'default';
   }, [cardStyle]);
 
   return (
@@ -342,7 +342,7 @@ export function App() {
         <SettingsPanel
           locale={locale}
           onLocaleChange={changeLocale}
-          cardStyle={DEBUG ? cardStyle : undefined}
+          cardStyle={CARD_STYLES_ON ? cardStyle : undefined}
           onCardStyleChange={changeCardStyle}
           onClose={closeSettings}
         />

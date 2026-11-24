@@ -4,23 +4,12 @@ import type { LocaleStorage } from './localization.ts';
 export const CARD_STYLES = ['default', 'totem'] as const;
 export type CardStyle = (typeof CARD_STYLES)[number];
 
-const DEBUG_KEY = 'coup.debug';
 const STYLE_KEY = 'coup.cardStyle';
 
-// 同一个应用也挂在 coup.davidxjwang.com 上；调试开关只在这些主机上开放，其他域名的玩家永远看不到。
-const DEBUG_HOSTS = ['coup.surwhy.com', 'localhost', '127.0.0.1'];
+// 同一个应用也挂在 coup.davidxjwang.com 上；牌面风格切换只在这些主机上开放，其他域名的玩家永远看不到。
+const CARD_STYLE_HOSTS = ['coup.surwhy.com', 'localhost', '127.0.0.1'];
 
-// 调试开关：网址带 ?debug=1 打开、?debug=0 关闭，记在本浏览器；不带参数时沿用上次。存储被禁用时只看这次的网址。
-export function loadDebug(storage: LocaleStorage | null, search: string, hostname: string): boolean {
-  if (!DEBUG_HOSTS.includes(hostname)) return false;
-  const flag = new URLSearchParams(search).get('debug');
-  try {
-    if (flag === '1' || flag === '0') storage?.setItem(DEBUG_KEY, flag);
-    return (flag ?? storage?.getItem(DEBUG_KEY)) === '1';
-  } catch {
-    return flag === '1';
-  }
-}
+export const cardStylesAvailable = (hostname: string): boolean => CARD_STYLE_HOSTS.includes(hostname);
 
 export function loadCardStyle(storage: LocaleStorage | null): CardStyle {
   try {
