@@ -325,20 +325,20 @@ export class Room {
   }
 
   // 还有真人在打：牌局进行中且有真人未出局（断线但在宽限期内的仍存活）。不在打时房主能开局或再来一局
-  private inPlay(): boolean {
+  private humansStillPlaying(): boolean {
     return !!this.game && this.game.phase !== 'gameOver' && this.humanAlive();
   }
 
   // 没有真人在打时房主离线：开局或再来一局的权利立即交给最早加入的在线玩家，不等宽限期。
   private handOffOfflineHost(): void {
-    if (this.inPlay() || this.players.get(this.hostId)?.connected) return;
+    if (this.humansStillPlaying() || this.players.get(this.hostId)?.connected) return;
     const next = [...this.players.values()].find((p) => p.connected);
     if (next) this.hostId = next.id;
   }
 
   rematch(playerId: string, socketId: string): void {
     this.requireCurrentConnection(playerId, socketId);
-    if (!this.game || this.inPlay()) throw new ClientError({ code: 'illegalIntent' });
+    if (!this.game || this.humansStillPlaying()) throw new ClientError({ code: 'illegalIntent' });
     if (playerId !== this.hostId) throw new ClientError({ code: 'hostOnly' });
     this.returnToLobby();
     this.events.onBroadcast(this, []);
