@@ -24,7 +24,7 @@ export default async function reactionScenario(ui) {
     const plate = document.querySelector('.seat.opponent .nameplate.speaking');
     return {
       text: plate.textContent,
-      roles: [...plate.querySelectorAll('.nameplate-role')].map((e) => e.className + ':' + e.textContent),
+      roles: [...plate.querySelectorAll('.role-name')].map((e) => e.className + ':' + e.textContent),
       target: plate.querySelector('.nameplate-target')?.textContent,
       seat: plate.closest('.seat').querySelector('.name').textContent,
     };

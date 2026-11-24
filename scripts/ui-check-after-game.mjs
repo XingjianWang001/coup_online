@@ -58,7 +58,7 @@ export default async function afterGameScenario(ui) {
     const pub = bot.state.pub;
     if (pub.phase === 'awaitingChallenge') {
       const claimant = pub.challengeSubject === 'block' ? pub.pending.blockById : pub.pending.actorId;
-      await clickIf(claimant === bot.state.playerId ? '^(Challenge!|质疑！)$' : '^(Do not challenge|不质疑)$');
+      await clickIf(claimant === bot.state.playerId ? '^(Challenge|质疑)$' : '^(Do not challenge|不质疑)$');
     }
     await clickIf('^(Income|收入)$');
     await clickIf('^(Do not block|不阻挡)$');

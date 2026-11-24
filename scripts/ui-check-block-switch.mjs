@@ -45,7 +45,7 @@ export default async function blockSwitchScenario(ui) {
 
   // 稍后有意点「质疑」照常生效
   await sleep(600);
-  await ui.click('^(质疑！|Challenge!)$', '.controls');
+  await ui.click('^(质疑|Challenge)$', '.controls');
   await until(a, (s) => s.phase !== 'awaitingChallenge', '有意质疑生效');
   console.log('换成质疑后误点被忽略，有意质疑生效：', a.state.pub.phase);
 }

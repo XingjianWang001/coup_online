@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type TransitionEvent as ReactTransitionEvent } from 'react';
 import { PHRASES, REACTION_MIN_INTERVAL_MS, type ActionType, type PublicState, type Reaction } from '@coup/shared';
 import { actionName, ACTIONS, roleName, ROLES } from './rules.ts';
-import { describeReaction, reactionText } from './narration.ts';
+import { describeReaction, segmentsText } from './narration.ts';
 import { useSmoothHeight } from './motion.ts';
 import { translate, type Locale, type MessageKey } from './localization.ts';
 
@@ -83,7 +83,7 @@ export function ReactionTray(props: {
     if (activeTab === 'phrase') {
       return PHRASES.map((phrase) => (
         <button key={phrase} disabled={coolingDown} onClick={() => send({ kind: 'phrase', phrase })}>
-          {reactionText(describeReaction(locale, { kind: 'phrase', phrase }, () => ''))}
+          {segmentsText(describeReaction(locale, { kind: 'phrase', phrase }, () => ''))}
         </button>
       ));
     }
