@@ -100,18 +100,24 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
 }
-*::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-*::-webkit-scrollbar-thumb {
-  background: var(--line);
-  border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
+/* 不支持 scrollbar-color 的旧 Safari 才用 webkit 伪元素；scrollbar-width: thin 会让它们失效，先复位 */
+@supports not (scrollbar-color: auto) {
+  * {
+    scrollbar-width: auto;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
 /* ---------- 布局骨架 ---------- */
@@ -1262,7 +1268,7 @@ button.reaction-toggle:hover:not(:disabled) {
   border-radius: var(--r-xl);
   padding: var(--sp-6);
   max-width: min(600px, 100%);
-  max-height: 85vh;
+  max-height: 85dvh;
   overflow-y: auto;
 }
 
@@ -2287,7 +2293,7 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
   .settings-panel {
     width: 100%;
     max-width: none;
-    max-height: min(85vh, 640px);
+    max-height: min(85dvh, 640px);
     padding: var(--sp-5) var(--sp-4) calc(var(--sp-5) + env(safe-area-inset-bottom));
     border-right: 0;
     border-bottom: 0;

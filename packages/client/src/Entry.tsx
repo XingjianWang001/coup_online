@@ -15,9 +15,10 @@ export function EntryForm(props: {
   const canCreate = isValidNickname(props.name);
   const invalid = !!props.name && !canCreate;
   const canJoin = canCreate && props.roomCode.trim().length === 6;
-  // 回车：填了完整房间码就加入，否则创建房间
+  // 回车：填了完整房间码就加入，否则创建房间。输入法确认候选词的回车不算：Safari 先派发 compositionend，
+  // 这时 isComposing 已是 false，只能靠 keyCode 229 认出来（WebKit bug 165004）
   const onEnter = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (canJoin) props.onJoin();
     else if (canCreate && !props.roomCode.trim()) props.onCreate();
   };
