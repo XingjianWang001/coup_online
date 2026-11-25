@@ -10,15 +10,12 @@ type Track = keyof typeof manifest.files;
 
 const STATES = manifest.states as Record<MusicState, Partial<Record<Track, number>>>;
 const TRACKS = Object.keys(manifest.files) as Track[];
-// 自成一曲的分轨（manifest 的 loops 里有自己的循环长度，现在只有胜利曲）：不和其余分轨一起从 origin 循环，
-// 每次进入都在小节线上从第 1 小节起，所以小节、拍子仍和主循环对齐
+// 自成一曲的分轨（manifest 的 loops 里有自己的循环长度，现在只有胜利曲）：不和其余分轨一起从 origin 循环。
+// 进出都不等，从下一拍起，拍子仍和主循环对齐：
+// - 进：它在那一拍从第 1 小节（crash）整个进来，其余分轨 1 s 退场，D 小调不在 D 大调底下多拖
+// - 出：主循环在那一拍从第 1 小节重新起（萨克斯长音 A，两个调都有这个音），照常 1 s 进场，它照常 2 s 退场
 const OWN_LOOPS: Partial<Record<Track, number>> = manifest.loops;
 const ownPiece = (t: Track) => t in OWN_LOOPS;
-// 进自成一曲的分轨：退场的在下一条小节线前淡出、正好落到 0，它从那条小节线的强拍起；离小节线不到一拍就等下一条
-const KEY_CHANGE_FADE_SECONDS = 1.5;
-// 出来时等它走完一个 4 小节乐句：胜利曲每个乐句都收在属和弦（A13）或小 iv（Gm6）上，正好解决到主循环第 1 小节的
-// Dm9 和萨克斯长音 A。主循环在那里从第 1 小节重新起，和它交叉淡变：它从乐句最后一拍淡到交接后 RISE_SECONDS
-const PHRASE_BARS = 4;
 // 放在 src/ 下由 Vite 打进带哈希的 assets/，服务端对 assets/ 长期缓存
 const URLS = import.meta.glob<string>('./music/*.mp3', { eager: true, query: '?url', import: 'default' });
 // 换一套音色时互相交接的分轨：交出的一方和进来的一方一样快，免得两套叠在一起发闷
@@ -151,7 +148,6 @@ export function createMusic(): Music {
   // 同步循环的分轨在 when 放到 origin 起算的位置（origin 可以在 when 之后：主循环重新起头前载入的，正好在那时转回第 1 小节）；
   // 自成一曲的从头放。替下这一条之前的声源
   const sources: Partial<Record<Track, AudioBufferSourceNode>> = {};
-  const pieceStart: Partial<Record<Track, number>> = {};
   function play(track: Track, at?: number) {
     const c = context();
     const source = c.createBufferSource();
@@ -166,11 +162,10 @@ export function createMusic(): Music {
     source.start(when, manifest.loop_start_seconds + position);
     sources[track]?.stop(when);
     sources[track] = source;
-    if (ownPiece(track)) pieceStart[track] = when;
   }
 
   // 从下一拍起换配器：进场 1 s，退场 2 s。目标状态有分轨还没到时先维持当前配器，到了再换
-  // 进出胜利曲（D 大调，主循环是 D 小调）在和声对得上的地方交接：见 KEY_CHANGE_FADE_SECONDS 和 PHRASE_BARS
+  // 进出胜利曲见 OWN_LOOPS
   function apply() {
     if (!ctx || wanted === current) return;
     const to = STATES[wanted];
@@ -181,41 +176,24 @@ export function createMusic(): Music {
     const rising = new Set(TRACKS.filter((t) => (to[t] ?? 0) > (from[t] ?? 0)));
     const changed = TRACKS.filter((t) => (from[t] ?? 0) !== (to[t] ?? 0));
     const leaving = current ? changed.find((t) => ownPiece(t) && !to[t]) : undefined;
+    const entering = !leaving && changed.some(ownPiece);
+    const at = current ? origin + Math.ceil((now + 0.02 - origin) / beat) * beat : now;
     if (leaving) {
-      const phrase = PHRASE_BARS * manifest.bar_seconds;
-      const start = pieceStart[leaving] ?? now;
-      const at = start + Math.max(0, Math.ceil((now + beat - start) / phrase)) * phrase;
-      origin = at; // 主循环从这里重新数起：全部同步分轨在 at 回到第 1 小节
+      origin = at; // 主循环从这一拍重新数起：全部同步分轨在 at 回到第 1 小节
       for (const track of TRACKS) if (!ownPiece(track) && buffers[track]) play(track, at);
-      for (const track of changed) {
-        const g = gains[track].gain;
-        g.cancelScheduledValues(now);
-        g.setValueAtTime(g.value, now);
-        g.setValueAtTime(g.value, track === leaving ? Math.max(now, at - beat) : at);
-        g.linearRampToValueAtTime(to[track] ?? 0, at + RISE_SECONDS);
-      }
-      sources[leaving]?.stop(at + RISE_SECONDS);
-      current = wanted;
-      return;
+      sources[leaving]?.stop(at + FALL_SECONDS);
     }
-    const keyChange = changed.some(ownPiece);
-    const step = keyChange ? manifest.bar_seconds : beat;
-    const lead = keyChange ? beat : 0.02;
-    const at = current ? origin + Math.ceil((now + lead - origin) / step) * step : now;
     for (const track of changed) {
       const [a, b] = [from[track] ?? 0, to[track] ?? 0];
       const g = gains[track].gain;
       g.cancelScheduledValues(now);
       g.setValueAtTime(g.value, now);
-      if (keyChange && b < a) {
-        g.setValueAtTime(g.value, Math.max(now, at - KEY_CHANGE_FADE_SECONDS));
-        g.linearRampToValueAtTime(b, at);
-      } else if (ownPiece(track)) {
+      if (ownPiece(track) && b > a) {
         play(track, at); // 从第 1 小节的强拍整个进来
         g.setValueAtTime(0, at);
         g.linearRampToValueAtTime(b, at + 0.02);
       } else {
-        const handsOver = SWAPS.some((pair) => pair.includes(track) && pair.some((t) => t !== track && rising.has(t)));
+        const handsOver = entering || SWAPS.some((pair) => pair.includes(track) && pair.some((t) => t !== track && rising.has(t)));
         g.setValueAtTime(g.value, at);
         g.linearRampToValueAtTime(b, at + (b > a || handsOver ? RISE_SECONDS : FALL_SECONDS));
       }

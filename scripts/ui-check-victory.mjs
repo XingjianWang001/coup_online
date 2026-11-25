@@ -1,7 +1,7 @@
 // ui-check 场景：赢家的胜利曲（CONTEXT.md「背景音乐」）。真人 Me 和机器人 Bot 单挑：Bot 先手、没有公爵却每回合声称征税，
 // Me 每次都质疑，Bot 两次被抓后出局。页面载入前装一个探针，记下每个声源的开始时刻和每个增益的排程。
-// 断言：进胜利曲时主循环的分轨在小节线前淡到 0，胜利曲在那条小节线上从第 1 小节进来；
-// Bot（房主）再来一局后，胜利曲放到下一个 4 小节乐句的结尾，主循环在那里从第 1 小节重新起，两边交叉淡变。
+// 断言：赢了下一拍胜利曲就从第 1 小节整个进来，主循环的分轨从那一拍起 1 s 落到 0；
+// Bot（房主）再来一局后，下一拍起交叉淡变：主循环在那一拍从第 1 小节重新起、1 s 进场，胜利曲 2 s 退场。
 // 用法：pnpm ui-check scripts/ui-check-victory.mjs [截图目录]
 export const serverEnv = {
   STARTING_PLAYER_RANDOM: '0',
@@ -20,7 +20,7 @@ AudioNode.prototype.connect = function (dest, ...rest) {
 };
 const start = AudioBufferSourceNode.prototype.start;
 AudioBufferSourceNode.prototype.start = function (when, offset) {
-  log({ kind: 'start', loop: Math.round(this.buffer.duration), t: when, offset });
+  log({ kind: 'start', loop: Math.round(this.buffer.duration), t: when, offset, now: this.context.currentTime });
   return start.call(this, when, offset);
 };
 for (const kind of ['setValueAtTime', 'linearRampToValueAtTime']) {
@@ -32,10 +32,11 @@ for (const kind of ['setValueAtTime', 'linearRampToValueAtTime']) {
 }`;
 
 const BAR = 3;
+const BEAT = 0.75;
 const VICTORY = 49;
 const MAIN = 193;
 const near = (a, b) => Math.abs(a - b) < 1e-6;
-const onBar = (t) => Math.abs(t / BAR - Math.round(t / BAR)) < 1e-6; // AudioContext 新建时 currentTime 为 0，就是 origin
+const onBeat = (t) => near(t / BEAT, Math.round(t / BEAT)); // AudioContext 新建时 currentTime 为 0，就是 origin
 
 export default async function victoryScenario(ui) {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -83,15 +84,15 @@ export default async function victoryScenario(ui) {
   const enter = await waitFor('胜利曲开始', (es) => es.find((e) => e.kind === 'start' && e.loop === VICTORY));
   let es = await events();
   assert(near(enter.offset, 0.5), `胜利曲没有从第 1 小节放：offset ${enter.offset}`);
-  assert(onBar(enter.t), `胜利曲不在小节线上进来：${enter.t}`);
-  const fadedOut = es.filter((e) => e.kind === 'linearRampToValueAtTime' && e.loop === MAIN && near(e.t, enter.t));
-  assert(fadedOut.length > 0 && fadedOut.every((e) => e.v === 0), `主循环没有在这条小节线上落到 0：${JSON.stringify(fadedOut)}`);
+  const delay = enter.t - enter.now;
+  assert(delay <= BEAT + 0.02 && onBeat(enter.t), `胜利曲排程后 ${delay.toFixed(2)} s 才进来（${enter.t} s），应在下一拍`);
+  const fadedOut = es.filter((e) => e.kind === 'linearRampToValueAtTime' && e.loop === MAIN && near(e.t, enter.t + 1));
+  assert(fadedOut.length > 0 && fadedOut.every((e) => e.v === 0), `主循环没有从那一拍起 1 s 落到 0：${JSON.stringify(fadedOut)}`);
   const up = es.find((e) => e.kind === 'linearRampToValueAtTime' && e.loop === VICTORY && e.v > 0);
   assert(up && near(up.t, enter.t + 0.02), `胜利曲没有在强拍上整个进来：${JSON.stringify(up)}`);
   await ui.shot('victory');
 
-  // 再来一局：胜利曲放到下一个 4 小节乐句的结尾，主循环在那里从第 1 小节重新起，两边交叉淡变、有一段重叠。
-  // 先等胜利曲真的响起来（最多一小节加一拍之后）
+  // 再来一局：下一拍起交叉淡变，主循环在那一拍从第 1 小节重新起。先等胜利曲真的响起来（最多一小节加一拍之后）
   await sleep((BAR + 1) * 1000);
   const before = es.length;
   bot.intent({ type: 'rematch' });
@@ -100,11 +101,11 @@ export default async function victoryScenario(ui) {
   const restarts = es.filter((e) => e.kind === 'start' && e.loop === MAIN);
   assert(restarts.length === 6 && restarts.every((e) => near(e.t, restarts[0].t) && near(e.offset, 0.5)), `主循环没有一齐从第 1 小节重新起：${JSON.stringify(restarts)}`);
   const handover = restarts[0].t;
-  assert(near((handover - enter.t) % (4 * BAR), 0) && handover > enter.t, `交接点不在胜利曲的乐句结尾：进场 ${enter.t}，交接 ${handover}`);
+  assert(handover - restarts[0].now <= 0.75 + 0.02 && near((handover - enter.t) / 0.75, Math.round((handover - enter.t) / 0.75)), `交接点不是紧接着的下一拍：排程时 ${restarts[0].now}，交接 ${handover}`);
   const fadeFrom = es.findLast((e) => e.kind === 'setValueAtTime' && e.loop === VICTORY && e.t < out.t);
-  assert(fadeFrom.v > 0 && near(fadeFrom.t, handover - 0.75) && near(out.t, handover + 1), `胜利曲没有从乐句最后一拍淡到交接后 1 s：${JSON.stringify([fadeFrom, out])}`);
+  assert(fadeFrom.v > 0 && near(fadeFrom.t, handover) && near(out.t, handover + 2), `胜利曲没有从交接点起 2 s 退场：${JSON.stringify([fadeFrom, out])}`);
   const lobby = es.filter((e) => e.loop === MAIN && e.kind === 'linearRampToValueAtTime' && e.v > 0);
   assert(lobby.length === 1 && near(lobby[0].t, handover + 1), `大厅配器没有从交接点起 1 s 进场：${JSON.stringify(lobby)}`);
   assert(es.some((e) => e.kind === 'setValueAtTime' && e.loop === MAIN && near(e.t, handover)), '大厅配器的进场不是从交接点起');
-  console.log(`✓ 胜利曲在 ${enter.t} s 的小节线上进来（主循环 ${fadedOut.length} 条同时落到 0）；再来一局后在 ${handover} s 的乐句结尾交叉淡变回主循环第 1 小节，重叠 ${(out.t - fadeFrom.t).toFixed(2)} s`);
+  console.log(`✓ 赢了 ${delay.toFixed(2)} s 后胜利曲进来（主循环 ${fadedOut.length} 条 1 s 落到 0）；再来一局 ${(handover - restarts[0].now).toFixed(2)} s 后交叉淡变回主循环第 1 小节，重叠 ${(out.t - fadeFrom.t).toFixed(2)} s`);
 }
