@@ -11,7 +11,7 @@ import { parseClientIntent, type ClientIntent, type ServerError } from '@coup/sh
 import { ClientError, toServerError } from './errors.ts';
 import { reserveRoomCreation } from './room-limits.ts';
 import { publish, pushJoined } from './push.ts';
-import { creditsFor, readRoster } from './credits.ts';
+import { creditsFor, readRoster, readSites, siteFor } from './credits.ts';
 import { appendRecord } from './data-file.ts';
 import { pruneVisits, recordVisit } from './visits.ts';
 import { readStats } from './stats.ts';
@@ -85,6 +85,11 @@ async function serveHttp(req: IncomingMessage, res: ServerResponse): Promise<voi
     res.end(JSON.stringify(creditsFor(await readRoster(), req.headers.host ?? '', url.searchParams.get('locale'))));
     return;
   }
+  if (url.pathname === '/api/site') {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(siteFor(await readSites(), req.headers.host ?? '')));
+    return;
+  }
   if (url.pathname === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('ok');
@@ -117,6 +122,7 @@ async function serveHttp(req: IncomingMessage, res: ServerResponse): Promise<voi
     '.css': 'text/css',
     '.svg': 'image/svg+xml',
     '.png': 'image/png',
+    '.webp': 'image/webp',
     '.json': 'application/json',
     '.woff2': 'font/woff2',
   };

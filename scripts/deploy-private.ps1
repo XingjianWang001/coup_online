@@ -64,6 +64,9 @@ try {
     Assert-ExitCode 'Fetching origin/dev'
     $commit = (& git rev-parse --verify 'FETCH_HEAD^{commit}').Trim()
     Assert-ExitCode 'Resolving origin/dev'
+    # 发布的是 origin/dev，跑的却是本地这两份脚本：本地分支落后或改过时两边对不上（例如漏传新的私有配置）。-Revision 回滚旧版本时本地脚本本就更新，不查
+    & git diff --quiet $commit -- scripts/deploy-private.ps1 scripts/deploy-private-remote.sh
+    if ($LASTEXITCODE -ne 0) { throw "The local deploy scripts differ from origin/dev $commit. Update this checkout to origin/dev and run again." }
   }
 
   $trackedFiles = @(& git ls-tree -r --name-only $commit)
@@ -108,14 +111,15 @@ try {
   Write-Host 'Uploading the release...'
   & scp @sshOptions -C -i $keyCopy $archive $remoteScript "${target}:.coup-online/uploads/$commit/"
   Assert-ExitCode 'Uploading the release archive'
-  $creditsPath = Join-Path $repoRoot '.private-credits/roster.json'
-  if (Test-Path -LiteralPath $creditsPath -PathType Leaf) {
-    $archiveName = Split-Path -Leaf $archive
-    & scp @sshOptions -C -i $keyCopy $creditsPath "${target}:.coup-online/uploads/$commit/$archiveName.credits.json"
-    Assert-ExitCode 'Uploading the private credits roster'
+  $archiveName = Split-Path -Leaf $archive
+  foreach ($name in 'roster', 'sites') {
+    $privatePath = Join-Path $repoRoot ".private-credits/$name.json"
+    if (Test-Path -LiteralPath $privatePath -PathType Leaf) {
+      & scp @sshOptions -C -i $keyCopy $privatePath "${target}:.coup-online/uploads/$commit/$archiveName.$name.json"
+      Assert-ExitCode "Uploading the private $name.json"
+    }
   }
   Write-Host 'Building and starting the server app...'
-  $archiveName = Split-Path -Leaf $archive
   & ssh @sshOptions -tt -i $keyCopy $target "cd && bash .coup-online/uploads/$commit/deploy-private-remote.sh $commit $archiveName $($config.Domain)"
   # 3：房间检查处运营者答了不继续（deploy-private-remote.sh），不算部署失败
   if ($LASTEXITCODE -eq 3) {

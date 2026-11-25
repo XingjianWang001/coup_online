@@ -1962,11 +1962,11 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
 /* 牌面风格「图腾」：5:7 插画自带边框和英文角色名，整幅铺满；角标、圆章不显示，角色名只留给读屏。
    插画只在命中规则时才下载。五个角色都有画，所以统一隐藏默认样式；以后新风格缺画时，要把隐藏规则限定到有画的角色上。 */
 :root[data-card-style='totem'] .big-card { border: 0; background: var(--canvas) center / cover; }
-:root[data-card-style='totem'] .big-card.card--duke       { background-image: url('/card-styles/totem/duke.jpg'); }
-:root[data-card-style='totem'] .big-card.card--assassin   { background-image: url('/card-styles/totem/assassin.jpg'); }
-:root[data-card-style='totem'] .big-card.card--captain    { background-image: url('/card-styles/totem/captain.jpg'); }
-:root[data-card-style='totem'] .big-card.card--ambassador { background-image: url('/card-styles/totem/ambassador.jpg'); }
-:root[data-card-style='totem'] .big-card.card--contessa   { background-image: url('/card-styles/totem/contessa.jpg'); }
+:root[data-card-style='totem'] .big-card.card--duke       { background-image: url('./card-styles/totem/duke.webp'); }
+:root[data-card-style='totem'] .big-card.card--assassin   { background-image: url('./card-styles/totem/assassin.webp'); }
+:root[data-card-style='totem'] .big-card.card--captain    { background-image: url('./card-styles/totem/captain.webp'); }
+:root[data-card-style='totem'] .big-card.card--ambassador { background-image: url('./card-styles/totem/ambassador.webp'); }
+:root[data-card-style='totem'] .big-card.card--contessa   { background-image: url('./card-styles/totem/contessa.webp'); }
 :root[data-card-style='totem'] .big-card::before,
 :root[data-card-style='totem'] .big-card > .glyph,
 :root[data-card-style='totem'] .big-card > .medallion { display: none; }

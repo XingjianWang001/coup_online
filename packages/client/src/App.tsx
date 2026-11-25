@@ -4,11 +4,11 @@ import { clearIdentity, clearRoomCode, connect, loadIdentity, loadRoomCode, onMe
 import { estimateServerOffset } from './narration.ts';
 import { scheduleAutoDismiss } from './transient.ts';
 import { closeShowdown, dropMotion, initialSession, reduceSession, rejoinIntent, type Session } from './session.ts';
-import { loadCardStyle, loadDebug, persistCardStyle, type CardStyle } from './cardStyle.ts';
+import { loadCardStyle, persistCardStyle, preloadCardStyle, type CardStyle } from './cardStyle.ts';
 import { loadLocale, localizeServerError, persistLocale, translate, type Locale, type NoticeDescriptor } from './localization.ts';
 import type { Clock } from './clock.tsx';
 import { DealShowcase } from './DealShowcase.tsx';
-import { EntryForm, FilingFooter } from './Entry.tsx';
+import { EntryForm, FilingFooter, type Filing } from './Entry.tsx';
 import { LeaveConfirmation, RulesPanel, SettingsPanel } from './panels.tsx';
 import { RoomView, TransientMessage, type LatestReaction, type ReactionBubble, type TransientNoticeState } from './RoomView.tsx';
 import { ExchangeStage, LossStage, ShowdownStage } from './ShowdownStage.tsx';
@@ -45,9 +45,6 @@ const LINK_ROOM = (() => {
 let pendingLinkRoom = LINK_ROOM;
 // 座位被其他标签页接管后，本标签页断线重连不再自动加入，直到用户在这里重新进房。
 let replaced = false;
-
-// 调试开关打开时，设置里才出现牌面风格；关掉后大牌一律按默认风格显示，选过的风格留着下次用。
-const DEBUG = loadDebug(browserStorage(), window.location.search, window.location.hostname);
 
 function browserStorage(): Storage | null {
   try {
@@ -130,6 +127,13 @@ export function App() {
     persistLocale(browserStorage(), nextLocale);
   }
 
+  // 按域名的站点设置不进公开仓库，由服务端给出（见 server/src/credits.ts）。取不到就当这个域名什么都没开。
+  const [site, setSite] = useState<{ filing?: Filing; cardStyles?: boolean }>({});
+  useEffect(() => {
+    fetch('/api/site').then((response) => (response.ok ? response.json() : {})).then(setSite, () => {});
+  }, []);
+
+  // 只有开放了牌面风格的域名，设置里才出现这一项；其他域名大牌一律按默认风格显示，选过的风格留着下次用。
   const [cardStyle, setCardStyle] = useState(() => loadCardStyle(browserStorage()));
   function changeCardStyle(nextStyle: CardStyle) {
     setCardStyle(nextStyle);
@@ -316,8 +320,10 @@ export function App() {
 
   // 大牌的画风全在 style.css 里按这个属性切换，组件不用知道风格
   useEffect(() => {
-    document.documentElement.dataset.cardStyle = DEBUG ? cardStyle : 'default';
-  }, [cardStyle]);
+    const style = site.cardStyles ? cardStyle : 'default';
+    document.documentElement.dataset.cardStyle = style;
+    preloadCardStyle(style);
+  }, [cardStyle, site.cardStyles]);
 
   return (
     <div className="app">
@@ -344,7 +350,7 @@ export function App() {
         <SettingsPanel
           locale={locale}
           onLocaleChange={changeLocale}
-          cardStyle={DEBUG ? cardStyle : undefined}
+          cardStyle={site.cardStyles ? cardStyle : undefined}
           onCardStyleChange={changeCardStyle}
           onClose={closeSettings}
         />
@@ -419,7 +425,7 @@ export function App() {
             onJoin={joinRoom}
             locale={locale}
           />
-          <FilingFooter />
+          <FilingFooter filing={site.filing} />
         </>
       ) : (
         <RoomView
