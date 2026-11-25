@@ -172,7 +172,7 @@ try {
   } else {
     Write-Host 'Deployment and local access verified: http://127.0.0.1:18887'
   }
-  Write-Host 'Console: http://127.0.0.1:18888/api/state'
+  Write-Host 'Console: http://127.0.0.1:18888/'
   Write-Host 'Leave this window open to use the private site. Press Ctrl+C to close the tunnel.'
   while (-not $tunnel.HasExited) { Start-Sleep -Seconds 1 }
   throw "SSH tunnel exited with code $($tunnel.ExitCode)."

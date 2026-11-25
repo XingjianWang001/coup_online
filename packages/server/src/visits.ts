@@ -14,7 +14,7 @@ export function recordVisit(ip: string, visit: Visit, now = new Date()): Promise
 }
 
 // 北京时间（UTC+8）的 ISO 串：前 10 位是日期，前 13 位精确到小时
-const beijing = (now: Date) => new Date(now.getTime() + 8 * 3_600_000).toISOString();
+export const beijing = (now: Date) => new Date(now.getTime() + 8 * 3_600_000).toISOString();
 
 // 独立访客：IP 的 HMAC，密钥按北京时间每天一换，只在内存里。跨天、跨重启都认不出同一个人
 let key = { day: '', secret: Buffer.alloc(0) };
