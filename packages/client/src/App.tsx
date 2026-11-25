@@ -4,7 +4,7 @@ import { clearIdentity, clearRoomCode, connect, loadIdentity, loadRoomCode, onMe
 import { estimateServerOffset } from './narration.ts';
 import { scheduleAutoDismiss } from './transient.ts';
 import { closeShowdown, dropMotion, initialSession, reduceSession, rejoinIntent, type Session } from './session.ts';
-import { loadCardStyle, persistCardStyle, type CardStyle } from './cardStyle.ts';
+import { loadCardStyle, persistCardStyle, preloadCardStyle, type CardStyle } from './cardStyle.ts';
 import { loadLocale, localizeServerError, persistLocale, translate, type Locale, type NoticeDescriptor } from './localization.ts';
 import type { Clock } from './clock.tsx';
 import { DealShowcase } from './DealShowcase.tsx';
@@ -318,7 +318,9 @@ export function App() {
 
   // 大牌的画风全在 style.css 里按这个属性切换，组件不用知道风格
   useEffect(() => {
-    document.documentElement.dataset.cardStyle = site.cardStyles ? cardStyle : 'default';
+    const style = site.cardStyles ? cardStyle : 'default';
+    document.documentElement.dataset.cardStyle = style;
+    preloadCardStyle(style);
   }, [cardStyle, site.cardStyles]);
 
   return (
