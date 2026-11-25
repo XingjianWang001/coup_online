@@ -1,15 +1,18 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { coinLegend, roleDescription, roleName, ROLES, rulesFor, type RuleLevel } from './rules.ts';
 import { useModalDialog } from './dialog.ts';
 import { CARD_STYLES, type CardStyle } from './cardStyle.ts';
 import { LANGUAGE_OPTIONS, translate, type Locale } from './localization.ts';
-import { CoinIcon, RoleIcon } from './icons.tsx';
+import { CoinIcon, RoleIcon, SpeakerIcon } from './icons.tsx';
+import { slideVolume, type MusicSettings } from './music.ts';
 
 interface SettingsProps {
   locale: Locale;
   onLocaleChange: (locale: Locale) => void;
   cardStyle?: CardStyle;
   onCardStyleChange: (style: CardStyle) => void;
+  music: MusicSettings;
+  onMusicChange: (settings: MusicSettings) => void;
   onClose: () => void;
 }
 
@@ -76,15 +79,76 @@ function CreditsList({ locale }: { locale: Locale }) {
     return () => controller.abort();
   }, [locale]);
 
-  if (failed) return <p role="status">{translate(locale, 'creditsUnavailable')}</p>;
-  if (!rows) return <p role="status">{translate(locale, 'creditsLoading')}</p>;
-  if (!rows.length) return <p>{translate(locale, 'creditsEmpty')}</p>;
   return (
-    <ul className="credits-list">
-      {rows.map(({ name, contribution }) => (
-        <li key={name}><strong>{name}</strong> · {contribution}</li>
-      ))}
-    </ul>
+    <>
+      {failed ? (
+        <p role="status">{translate(locale, 'creditsUnavailable')}</p>
+      ) : !rows ? (
+        <p role="status">{translate(locale, 'creditsLoading')}</p>
+      ) : !rows.length ? (
+        <p>{translate(locale, 'creditsEmpty')}</p>
+      ) : (
+        <ul className="credits-list">
+          {rows.map(({ name, contribution }) => (
+            <li key={name}><strong>{name}</strong> · {contribution}</li>
+          ))}
+        </ul>
+      )}
+      <MusicCredits locale={locale} />
+    </>
+  );
+}
+
+// 只列授权要求署名的音源（CC BY 4.0）；其余音源不要求署名。所有域名都一样，不走私有名单
+function MusicCredits({ locale }: { locale: Locale }) {
+  return (
+    <section className="music-credits" aria-labelledby="music-credits-title">
+      <h3 id="music-credits-title">{translate(locale, 'musicCredits')}</h3>
+      <ul className="credits-list">
+        <li>
+          <strong><a href="https://github.com/sfzinstruments/MTG.SoloSax" target="_blank" rel="noreferrer">MTG Solo Saxophones</a></strong>
+          {' · '}{translate(locale, 'saxSamples')}{' · '}
+          <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer">CC BY 4.0</a>
+        </li>
+      </ul>
+    </section>
+  );
+}
+
+// 喇叭只切换静音；滑块拖到 0 也算静音，但留着拖动前的音量（slideVolume），取消静音时回到原来的音量
+function MusicOptions({ locale, music, onMusicChange }: Pick<SettingsProps, 'locale' | 'music' | 'onMusicChange'>) {
+  const startVolume = useRef(music.volume);
+  const value = music.muted ? 0 : music.volume;
+  const begin = () => (startVolume.current = music.volume);
+  return (
+    <fieldset className="language-settings">
+      <legend>{translate(locale, 'music')}</legend>
+      <div className="music-options">
+        <button
+          type="button"
+          className="ghost music-mute"
+          aria-label={translate(locale, 'mute')}
+          aria-pressed={music.muted}
+          onClick={() => onMusicChange({ ...music, muted: !music.muted })}
+        >
+          <SpeakerIcon muted={music.muted} />
+        </button>
+        <input
+          type="range"
+          className="music-volume"
+          min={0}
+          max={100}
+          step={1}
+          value={value}
+          style={{ '--fill': `${value}%` } as CSSProperties}
+          aria-label={translate(locale, 'musicVolume')}
+          aria-valuetext={`${value}%`}
+          onPointerDown={begin}
+          onFocus={begin}
+          onChange={(event) => onMusicChange(slideVolume(startVolume.current, event.currentTarget.valueAsNumber))}
+        />
+      </div>
+    </fieldset>
   );
 }
 
@@ -127,6 +191,7 @@ function SettingsOptions(props: SettingsProps) {
           </div>
         </fieldset>
       )}
+      <MusicOptions locale={props.locale} music={props.music} onMusicChange={props.onMusicChange} />
     </>
   );
 }

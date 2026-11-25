@@ -5,6 +5,7 @@ import { estimateServerOffset } from './narration.ts';
 import { scheduleAutoDismiss } from './transient.ts';
 import { closeShowdown, dropMotion, initialSession, reduceSession, rejoinIntent, type Session } from './session.ts';
 import { loadCardStyle, persistCardStyle, preloadCardStyle, type CardStyle } from './cardStyle.ts';
+import { createMusic, loadMusicSettings, musicStateFor, persistMusicSettings, type MusicSettings } from './music.ts';
 import { loadLocale, localizeServerError, persistLocale, translate, type Locale, type NoticeDescriptor } from './localization.ts';
 import type { Clock } from './clock.tsx';
 import { DealShowcase } from './DealShowcase.tsx';
@@ -46,6 +47,8 @@ const LINK_ROOM = (() => {
 let pendingLinkRoom = LINK_ROOM;
 // 座位被其他标签页接管后，本标签页断线重连不再自动加入，直到用户在这里重新进房。
 let replaced = false;
+// 整个页面一份背景音乐；放在模块里，开发模式下 StrictMode 重复挂载也不会建出第二份
+const music = createMusic();
 
 function browserStorage(): Storage | null {
   try {
@@ -141,6 +144,15 @@ export function App() {
     setCardStyle(nextStyle);
     persistCardStyle(browserStorage(), nextStyle);
   }
+
+  const [musicSettings, setMusicSettings] = useState(() => loadMusicSettings(browserStorage()));
+  function changeMusic(next: MusicSettings) {
+    setMusicSettings(next);
+    persistMusicSettings(browserStorage(), next);
+  }
+  useEffect(() => music.setSettings(musicSettings), [musicSettings]);
+  const musicState = musicStateFor(session);
+  useEffect(() => music.setState(musicState), [musicState]);
 
   const showError = (error: TransientErrorState['error']) => {
     errorIdRef.current += 1;
@@ -371,6 +383,8 @@ export function App() {
           onLocaleChange={changeLocale}
           cardStyle={site.cardStyles ? cardStyle : undefined}
           onCardStyleChange={changeCardStyle}
+          music={musicSettings}
+          onMusicChange={changeMusic}
           onClose={closeSettings}
         />
       )}

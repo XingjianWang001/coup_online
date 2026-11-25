@@ -188,6 +188,21 @@ it('录下的消息序列与服务端当前的推送一致', async () => {
       ['a 以公爵阻挡', (t) => t.act('a', { type: 'block', role: 'duke' })],
       ['b 不质疑阻挡', (t) => t.act('b', { type: 'passChallenge' })],
     ]),
+    // 三人局里的暗杀：a 暗杀 b，c 是旁观者；没人质疑、b 不阻挡，b 失去一点影响力
+    bystander: record([['assassin', 'duke'], ['duke', 'captain'], ['contessa', 'ambassador']], [
+      ['a 建房', (t) => t.join('a')],
+      ['b 加入', (t) => t.join('b')],
+      ['c 加入', (t) => t.join('c')],
+      ['a 开局', (t) => t.start('a')],
+      ['a 收入', (t) => t.act('a', { type: 'chooseAction', action: 'income' })],
+      ['b 收入', (t) => t.act('b', { type: 'chooseAction', action: 'income' })],
+      ['c 收入', (t) => t.act('c', { type: 'chooseAction', action: 'income' })],
+      ['a 暗杀 b', (t) => t.act('a', { type: 'chooseAction', action: 'assassinate', targetId: t.id('b') })],
+      ['b 不质疑暗杀', (t) => t.act('b', { type: 'passChallenge' })],
+      ['c 不质疑暗杀', (t) => t.act('c', { type: 'passChallenge' })],
+      ['b 不阻挡暗杀', (t) => t.act('b', { type: 'passBlock' })],
+      ['b 失去公爵', (t) => t.act('b', { type: 'resolveLoss', cardId: t.card('b', 'duke') })],
+    ]),
   };
   const text = `{\n${Object.entries(flows)
     .map(([name, steps]) => `  ${JSON.stringify(name)}: [\n${steps.map((s) => `    ${JSON.stringify(s)}`).join(',\n')}\n  ]`)

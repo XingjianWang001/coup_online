@@ -167,3 +167,20 @@ export function CrownIcon() {
     </Glyph>
   );
 }
+
+// 喇叭：静音或音量为 0 时用一道斜线划断声波
+export function SpeakerIcon({ muted }: { muted: boolean }) {
+  return (
+    <Glyph size={22} className="inline-icon">
+      <path className="f" d="M3 9.5 H7 L12.5 5 V19 L7 14.5 H3 Z" />
+      {muted ? (
+        <line x1="2.5" y1="3.5" x2="21.5" y2="20.5" />
+      ) : (
+        <>
+          <path d="M15.5 9 a4.2 4.2 0 0 1 0 6" />
+          <path d="M18 6.5 a7.8 7.8 0 0 1 0 11" />
+        </>
+      )}
+    </Glyph>
+  );
+}

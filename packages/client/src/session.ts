@@ -22,6 +22,7 @@ export interface ShowdownView {
   focus: number | null; // 被质疑者当前对准的牌位（悬停同步）
   reveal: { slot: number; role: Role; truth: boolean } | null;
   newCard: Card | null; // 自己质疑失败后在原牌位换来的新牌
+  suddenDeath: boolean; // 生死对质（CONTEXT.md）：开场时双方都只剩 1 点影响力；开场定下，翻牌后有人掉牌也不变
 }
 
 // 座位动效：一次性的，只由实时事件产生（重连时服务器不重放事件，所以不会补播）。id 取事件的记录序号。
@@ -201,8 +202,10 @@ function showdownFor(s: Session, state: PublicState): ShowdownView | null {
   if (state.phase !== 'showdown' || !state.showdown) return null;
   if (s.showdown) return s.showdown;
   const mine = state.showdown.claimantId === s.playerId;
-  const slots = state.players.find((p) => p.id === state.showdown!.claimantId)?.handCount ?? 0;
-  return { ...state.showdown, id: s.nextLogId, slots, hand: mine ? s.hand : null, focus: null, reveal: null, newCard: null };
+  const handCount = (id: string) => state.players.find((p) => p.id === id)?.handCount ?? 0;
+  const slots = handCount(state.showdown.claimantId);
+  const suddenDeath = slots === 1 && handCount(state.showdown.challengerId) === 1;
+  return { ...state.showdown, id: s.nextLogId, slots, hand: mine ? s.hand : null, focus: null, reveal: null, newCard: null, suddenDeath };
 }
 
 // 一批事件 → 座位动效。金币差额对照变化前的公开状态（服务器先发 events 再发 publicState），同批同座位合并，0 不显示
