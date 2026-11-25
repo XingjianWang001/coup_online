@@ -44,7 +44,7 @@
 <script>
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const ROLE = { duke: '公爵', assassin: '刺客', captain: '队长', ambassador: '大使', contessa: '女伯爵' };
-const PHASE = { lobby: '大厅', gameOver: '已结束' };
+const PHASE = { lobby: '大厅', choosingAction: '选择行动', awaitingChallenge: '等待质疑', showdown: '对质', awaitingBlock: '等待阻挡', choosingLoss: '失去影响力', choosingExchange: '交换选牌', gameOver: '已结束' };
 const TIER = { busy: '有真人在打', waiting: '真人在大厅或赛后', idle: '没有真人在打' };
 const STRENGTH = { standard: '普通', strong: '强' };
 const roles = (cards) => cards?.length ? cards.map((c) => ROLE[c.role] ?? c.role).join('、') : '—';
@@ -68,7 +68,7 @@ function roomHtml(room) {
   const g = room.game;
   return `<details class="room" data-code="${esc(room.code)}"${open.has(room.code) ? ' open' : ''}>
     <summary><span class="code">${esc(room.code)}</span>
-      <span>${esc(PHASE[room.phase] ?? `进行中 · ${room.phase}`)}</span>
+      <span>${esc(PHASE[room.phase] ?? room.phase)}</span>
       <span class="tier-${esc(room.tier)}">${esc(TIER[room.tier] ?? room.tier)}</span>
       <span>第 ${esc(room.gameNumber)} 局</span><span>${roster || '—'}</span></summary>
     <div class="body">
@@ -117,9 +117,9 @@ async function loadStats(all) {
       <div class="grid">
         <div><h3>每日</h3><div class="daily">${s.daily.length ? table(['日期', '开局', '打完', '独立访客'], s.daily.map((d) => `<tr><td>${esc(d.day)}</td><td class="n">${d.started}</td><td class="n">${d.finished}</td><td class="n">${d.visitors}</td></tr>`)) : '<p class="muted">还没有记录。</p>'}</div></div>
         <div><h3>漏斗（访问次数）</h3>${table(['步骤', '次数', ''], steps.map(([l, n]) => barRow(l, n, Math.max(...steps.map((x) => x[1])))))}</div>
-        <div><h3>胜率（只算打完的 ${w.finished} 局，按入座人次）</h3>${table(['', '获胜局数', '入座人次', '胜率'], [
-          `<tr><td>真人</td><td class="n">${w.human.wins}</td><td class="n">${w.human.seats}</td><td class="n">${pct(w.human.wins, w.human.seats)}</td></tr>`,
-          `<tr><td>电脑</td><td class="n">${w.computer.wins}</td><td class="n">${w.computer.seats}</td><td class="n">${pct(w.computer.wins, w.computer.seats)}</td></tr>`])}</div>
+        <div><h3>胜率（只算打完的 ${w.finished} 局）</h3>${table(['', '获胜局数', '占打完的局'], [
+          `<tr><td>真人</td><td class="n">${w.human}</td><td class="n">${pct(w.human, w.finished)}</td></tr>`,
+          `<tr><td>电脑</td><td class="n">${w.computer}</td><td class="n">${pct(w.computer, w.finished)}</td></tr>`])}</div>
         <div><h3>每局真人数</h3>${dist(s.humans, '真人')}</div>
         <div><h3>每局电脑数</h3>${dist(s.computers, '电脑')}</div>
         <div><h3>地区（独立访客，按天计）</h3>${s.regions.length ? table(['地区', '访客', ''], s.regions.map(([r, n]) => barRow(r, n, regionMax))) : '<p class="muted">还没有访问。</p>'}</div>

@@ -117,6 +117,11 @@ try {
   Write-Host 'Building and starting the server app...'
   $archiveName = Split-Path -Leaf $archive
   & ssh @sshOptions -tt -i $keyCopy $target "cd && bash .coup-online/uploads/$commit/deploy-private-remote.sh $commit $archiveName $($config.Domain)"
+  # 3：房间检查处运营者答了不继续（deploy-private-remote.sh），不算部署失败
+  if ($LASTEXITCODE -eq 3) {
+    Write-Host 'Deployment cancelled; the running app was not replaced.'
+    exit 3
+  }
   Assert-ExitCode 'Deploying and checking the server'
   }
 

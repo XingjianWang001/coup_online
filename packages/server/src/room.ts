@@ -120,6 +120,9 @@ export interface RoomEvents {
   onGameSummary?(summary: GameSummary): void;
 }
 
+// 控制台快照的分档，部署检查据此决定要不要拦下更新（见 consoleSnapshot）
+export type Tier = 'busy' | 'waiting' | 'idle';
+
 // 牌局摘要：不记昵称、房间码和玩家 ID。中途结束的没有获胜者
 export interface GameSummary {
   startedAt: string;
@@ -396,7 +399,7 @@ export class Room {
     this.gameNumber += 1;
     const computers = entries.filter((p) => p.isComputer);
     this.summaryStart = { startedAt: new Date().toISOString(), humans: entries.length - computers.length, computers: computers.map((p) => p.strength!) };
-    this.temperaments = new Map(entries.filter((p) => p.isComputer).map((p) => [p.id, drawTemperament(this.computerRandom, TUNINGS[p.strength!])]));
+    this.temperaments = new Map(computers.map((p) => [p.id, drawTemperament(this.computerRandom, TUNINGS[p.strength!])]));
     this.gameEvents = [];
     this.heard = [];
     this.offTurnHeld.clear();
@@ -833,7 +836,7 @@ export class Room {
   // 分档供部署检查：busy 有真人在打（断线在宽限期内的仍算），waiting 大厅或赛后有真人在场，idle 只剩电脑在打或没人
   consoleSnapshot() {
     const humanPresent = [...this.players.values()].some((p) => !p.isComputer && this.isPresent(p));
-    const tier = this.humansStillPlaying() ? 'busy' : humanPresent && (!this.game || this.game.phase === 'gameOver') ? 'waiting' : 'idle';
+    const tier: Tier = this.humansStillPlaying() ? 'busy' : humanPresent && (!this.game || this.game.phase === 'gameOver') ? 'waiting' : 'idle';
     return {
       code: this.code,
       phase: this.game?.phase ?? 'lobby',

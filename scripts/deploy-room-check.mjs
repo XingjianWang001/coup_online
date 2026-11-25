@@ -8,11 +8,11 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 export function roomCheck({ rooms }) {
   const humans = (room) => room.players.filter((p) => !p.isComputer);
   const playing = (room) => humans(room).filter((p) => room.game?.players.find((gp) => gp.id === p.id)?.alive).length;
-  const waiting = (room) => humans(room).filter((p) => p.present).length;
+  const present = (room) => humans(room).filter((p) => p.present).length;
   const busy = rooms.filter((r) => r.tier === 'busy').map((r) => `  ${r.code}: ${plural(playing(r), 'human')} playing`);
-  const idle = rooms.filter((r) => r.tier === 'waiting').map((r) => `  ${r.code}: ${plural(waiting(r), 'human')} waiting`);
-  if (busy.length) return { confirm: true, lines: ['Games in progress; deploying now ends them:', ...busy, ...idle] };
-  if (idle.length) return { confirm: false, lines: ['Players waiting in a lobby or after a game will be disconnected:', ...idle] };
+  const waiting = rooms.filter((r) => r.tier === 'waiting').map((r) => `  ${r.code}: ${plural(present(r), 'human')} waiting`);
+  if (busy.length) return { confirm: true, lines: ['Games in progress; deploying now ends them:', ...busy, ...waiting] };
+  if (waiting.length) return { confirm: false, lines: ['Players waiting in a lobby or after a game will be disconnected:', ...waiting] };
   return { confirm: false, lines: [] };
 }
 

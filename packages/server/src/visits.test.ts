@@ -15,10 +15,11 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-it('resolves mainland IPs to the city, foreign IPs to the country, local addresses to 本机', () => {
+it('resolves mainland IPs to the city, foreign IPs to the country (in Chinese), local addresses to 本机', () => {
   expect(regionOf('120.24.78.68')).toBe('深圳市');
   expect(regionOf('::ffff:223.5.5.5')).toBe('杭州市');
-  expect(regionOf('8.8.8.8')).toBe('United States');
+  expect(regionOf('8.8.8.8')).toBe('美国');
+  expect(regionOf('1.1.1.1')).toBe('澳大利亚');
   for (const local of ['127.0.0.1', '::1', '::ffff:127.0.0.1', '172.18.0.1']) expect(regionOf(local)).toBe('本机');
   expect(regionOf('not an ip')).toBe('未知');
 });
