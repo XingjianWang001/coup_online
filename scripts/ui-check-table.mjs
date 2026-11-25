@@ -5,10 +5,10 @@ const NAMES = ['MoonlightFox', 'Van', 'Mia', '小林', 'EastWindWolf'];
 
 export default async function tableScenario(ui) {
   const failures = [];
-  const compact = await ui.evaluate("matchMedia('(width < 720px)').matches");
+  // 进了页面才量：空白页没有 viewport meta，手机模拟下会按 980px 宽算
+  let compact;
   for (let opponents = 1; opponents <= 5; opponents++) {
     const names = NAMES.slice(0, opponents);
-    const actionRow = compact && opponents >= 2;
     const bots = names.map(() => ui.bot());
     const [host, ...guests] = bots;
     host.intent({ type: 'createRoom', name: names[0] });
@@ -22,6 +22,8 @@ export default async function tableScenario(ui) {
     await ui.waitFor('.showcase');
     await ui.evaluate(`document.querySelector('.showcase-overlay').click()`);
     await ui.waitFor('.table');
+    compact ??= await ui.evaluate("matchMedia('(width < 720px)').matches");
+    const actionRow = compact && opponents >= 2;
 
     // 带目标的偷窃覆盖昵称、行动和目标同时出现的布局。
     const pub = host.state.pub ?? (await host.next('publicState')).state;
