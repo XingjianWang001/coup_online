@@ -10,7 +10,7 @@
 
 ## Constraints
 - 使用腾讯云，优先选择适合低负载个人项目的简单方案
-- 保持当前单端口 Node.js + Socket.IO 架构，不引入 Kubernetes 或数据库
+- 保持当前单端口 Node.js + Socket.IO 架构，不引入 Kubernetes 或数据库服务；控制台另占一个只绑定本机的端口，运营数据以本地文件保存（[ADR 0015](docs/adr/0015-loopback-console-and-file-backed-operator-data.md)）
 - 当前游戏状态只保存在内存中；重启会丢失正在进行的房间
 
 ## Out of scope
