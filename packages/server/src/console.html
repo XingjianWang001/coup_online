@@ -44,7 +44,7 @@
 <script>
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const ROLE = { duke: '公爵', assassin: '刺客', captain: '队长', ambassador: '大使', contessa: '女伯爵' };
-const PHASE = { lobby: '大厅', gameOver: '已结束' };
+const PHASE = { lobby: '大厅', choosingAction: '选择行动', awaitingChallenge: '等待质疑', showdown: '对质', awaitingBlock: '等待阻挡', choosingLoss: '失去影响力', choosingExchange: '交换选牌', gameOver: '已结束' };
 const TIER = { busy: '有真人在打', waiting: '真人在大厅或赛后', idle: '没有真人在打' };
 const STRENGTH = { standard: '普通', strong: '强' };
 const roles = (cards) => cards?.length ? cards.map((c) => ROLE[c.role] ?? c.role).join('、') : '—';
@@ -68,7 +68,7 @@ function roomHtml(room) {
   const g = room.game;
   return `<details class="room" data-code="${esc(room.code)}"${open.has(room.code) ? ' open' : ''}>
     <summary><span class="code">${esc(room.code)}</span>
-      <span>${esc(PHASE[room.phase] ?? `进行中 · ${room.phase}`)}</span>
+      <span>${esc(PHASE[room.phase] ?? room.phase)}</span>
       <span class="tier-${esc(room.tier)}">${esc(TIER[room.tier] ?? room.tier)}</span>
       <span>第 ${esc(room.gameNumber)} 局</span><span>${roster || '—'}</span></summary>
     <div class="body">
