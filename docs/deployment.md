@@ -1,6 +1,6 @@
 # 云服务器部署
 
-本配置适用于一台 Ubuntu 24.04 云服务器。Node 服务同时提供网页和 Socket.IO；Docker Compose 默认仅将端口绑定到服务器的 `127.0.0.1:8787`。不需要数据库，房间及牌局在服务重启后清空。
+本配置适用于一台 Ubuntu 24.04 云服务器。Node 服务同时提供网页和 Socket.IO；Docker Compose 默认仅将端口绑定到服务器的 `127.0.0.1:8787`。不需要数据库，房间及牌局在服务重启后清空。每局的牌局摘要追加到 Docker volume `coup-online_app_data` 里的 `games.jsonl`（容器内 `/app/data`），重新部署不丢；`sudo docker compose -p coup-online exec app cat /app/data/games.jsonl` 查看。
 
 ## 一键私有部署（Windows / Mac）
 
