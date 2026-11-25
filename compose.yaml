@@ -4,10 +4,14 @@ services:
     restart: unless-stopped
     environment:
       TRUST_PROXY: ${TRUST_PROXY:-0}
+      # 运营数据（ADR 0015）：放在命名 volume 里，重新部署换版本目录也不丢
+      DATA_DIR: /app/data
     ports:
       - "127.0.0.1:8787:8787"
+      - "127.0.0.1:8788:8788" # 控制台：只给经 SSH 转发来的运营者，Caddy 不代理
     volumes:
       - ./.private-credits:/app/.private-credits:ro
+      - app_data:/app/data
 
   caddy:
     profiles: [public]
@@ -28,5 +32,6 @@ services:
       - caddy_config:/config
 
 volumes:
+  app_data:
   caddy_data:
   caddy_config:

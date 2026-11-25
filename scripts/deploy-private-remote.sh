@@ -46,6 +46,21 @@ fi
 cd "$release"
 echo "Building $revision before replacing the running app..."
 sudo env BUILDKIT_PROGRESS=plain docker compose -p coup-online -f compose.yaml build app
+# 替换容器前读控制台（#114），用刚构建的镜像里的 node 判断；有真人在打就问运营者，默认不继续。
+# 读不到（首次部署、旧版本没有控制台端口）或检查本身出错都不阻断，只有运营者答不继续才停。检查之后到重启前的几秒里有人开局：接受
+if state=$(curl -fsS --max-time 5 http://127.0.0.1:8788/api/state 2>/dev/null); then
+  check=0
+  printf '%s' "$state" | sudo docker compose -p coup-online -f compose.yaml run --rm --no-deps -T app node scripts/deploy-room-check.mjs || check=$?
+  if ((check == 2)); then
+    read -r -p 'Deploy anyway and end these games? [y/N] ' answer
+    # 退出码 3 = 运营者取消，deploy-private.ps1 据此报取消而不是部署失败
+    [[ $answer =~ ^[Yy]([Ee][Ss])?$ ]] || exit 3
+  elif ((check != 0)); then
+    echo "Room check skipped: the check itself failed (exit code $check)."
+  fi
+else
+  echo 'Room check skipped: the console did not answer (first deploy or a release without it).'
+fi
 if [[ -n $domain ]]; then
   # 每个 release 目录都是新的：.env 每次重写，EDGE_DIR 用固定绝对路径；其他站点从 ~/.edge 接入同一个 Caddy（ADR-0010）
   mkdir -p "$HOME/.edge/sites" "$HOME/.edge/www"

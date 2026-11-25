@@ -121,6 +121,11 @@ try {
   }
   Write-Host 'Building and starting the server app...'
   & ssh @sshOptions -tt -i $keyCopy $target "cd && bash .coup-online/uploads/$commit/deploy-private-remote.sh $commit $archiveName $($config.Domain)"
+  # 3：房间检查处运营者答了不继续（deploy-private-remote.sh），不算部署失败
+  if ($LASTEXITCODE -eq 3) {
+    Write-Host 'Deployment cancelled; the running app was not replaced.'
+    exit 3
+  }
   Assert-ExitCode 'Deploying and checking the server'
   }
 
@@ -155,7 +160,8 @@ try {
     '-o', 'ConnectionAttempts=3',
     '-o', 'PasswordAuthentication=no', '-o', 'ServerAliveInterval=30',
     '-o', 'ServerAliveCountMax=3', '-o', 'ExitOnForwardFailure=yes',
-    '-L', '127.0.0.1:18887:127.0.0.1:8787', $target)
+    '-L', '127.0.0.1:18887:127.0.0.1:8787',
+    '-L', '127.0.0.1:18888:127.0.0.1:8788', $target)
   $tunnel = Start-Process -FilePath $sshPath -ArgumentList $tunnelArgs -NoNewWindow -PassThru
   $healthy = $false
   for ($attempt = 0; $attempt -lt 30; $attempt++) {
@@ -175,6 +181,7 @@ try {
   } else {
     Write-Host 'Deployment and local access verified: http://127.0.0.1:18887'
   }
+  Write-Host 'Console: http://127.0.0.1:18888/'
   Write-Host 'Leave this window open to use the private site. Press Ctrl+C to close the tunnel.'
   while (-not $tunnel.HasExited) { Start-Sleep -Seconds 1 }
   throw "SSH tunnel exited with code $($tunnel.ExitCode)."

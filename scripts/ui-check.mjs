@@ -2,7 +2,7 @@
 // 不占用 8787 / 5173，不按进程名杀进程，所以不会挡住手动开发服务器。
 //
 // 用法：node scripts/ui-check.mjs [场景.mjs] [截图目录]
-//   场景默认导出 async (ui) => {}，ui 见 main() 里的 context；不传场景时跑内置场景（真人玩家加入机器人房间并开局）。
+//   场景默认导出 async (ui) => {}，ui 见 main() 里的 context（ui.consoleUrl 是控制台地址）；不传场景时跑内置场景（真人玩家加入机器人房间并开局）。
 //   场景还可以导出 serverEnv（对象），合并进服务端的环境变量，例如 { SPEECH_RANDOM: '0' } 让电脑每个能开口的时刻都开口（见 server/src/index.ts）。
 //   环境变量：W/H 视口，MOBILE=1 手机触屏，REDUCED=1 减少动态效果，LOCALE=zh-CN|en，NO_BUILD=1 跳过构建，CHROME 浏览器路径（默认 macOS / Windows 的 Chrome 安装位置）。
 //   界面区域的规范名称、主选择器和覆盖它们的场景见 CONTEXT.md「界面」。
@@ -67,16 +67,17 @@ async function startServer(serverEnv = {}) {
     if (build.status !== 0) throw new Error('前端构建失败');
   }
   const port = await freePort();
+  const consolePort = await freePort(); // 控制台也换空闲端口，不和开着的开发服务器抢 8788
   const server = launch(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: join(ROOT, 'packages/server'),
-    env: { ...process.env, ...serverEnv, PORT: String(port) },
+    env: { ...process.env, ...serverEnv, PORT: String(port), CONSOLE_PORT: String(consolePort) },
   });
   let log = '';
   server.stdout.on('data', (d) => (log += d));
   server.stderr.on('data', (d) => (log += d));
   const url = `http://localhost:${port}`;
   await withTimeout((async () => { for (;;) { try { if ((await fetch(url)).ok) return; } catch {} await sleep(200); } })(), 20_000, `服务端启动\n${log}`);
-  return url;
+  return { url, consoleUrl: `http://127.0.0.1:${consolePort}/` };
 }
 
 async function startChrome() {
@@ -133,7 +134,7 @@ async function main() {
   mkdirSync(out, { recursive: true });
   const { default: scenario, serverEnv } = scenarioPath ? await import(pathToFileURL(resolve(scenarioPath))) : { default: defaultScenario };
 
-  const url = await startServer(serverEnv);
+  const { url, consoleUrl } = await startServer(serverEnv);
   const cdp = await startChrome();
   const [W, H] = [Number(process.env.W ?? 1280), Number(process.env.H ?? 800)];
   const mobile = !!process.env.MOBILE;
@@ -154,6 +155,7 @@ async function main() {
 
   const ui = {
     url,
+    consoleUrl,
     out,
     cdp,
     evaluate,

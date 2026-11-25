@@ -12,8 +12,14 @@ import { ClientError, toServerError } from './errors.ts';
 import { reserveRoomCreation } from './room-limits.ts';
 import { publish, pushJoined } from './push.ts';
 import { creditsFor, readRoster, readSites, siteFor } from './credits.ts';
+import { appendRecord } from './data-file.ts';
+import { pruneVisits, recordVisit } from './visits.ts';
+import { readStats } from './stats.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
+// 控制台单开一个端口、默认只听本机：能连上就是运营者，不做认证（ADR 0015）。容器里改听 0.0.0.0，由 compose 只映射到宿主的 127.0.0.1
+const CONSOLE_PORT = Number(process.env.CONSOLE_PORT ?? 8788);
+const CONSOLE_HOST = process.env.CONSOLE_HOST ?? '127.0.0.1';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 // 前端构建产物路径（相对 packages/server）
 const CLIENT_DIST = join(__dirname, '../../client/dist');
@@ -39,12 +45,13 @@ const roomOptions: RoomOptions = {
 const repo = new InMemoryGameRepository();
 const rooms = new Map<string, Room>();
 
-function clientAddress(socket: Socket): string {
+// socket 传 socket.handshake，HTTP 请求传 { headers, address: remoteAddress }
+function clientAddress({ headers, address }: { headers: IncomingMessage['headers']; address?: string }): string {
   if (process.env.TRUST_PROXY === '1') {
-    const forwarded = socket.handshake.headers['x-forwarded-for'];
+    const forwarded = headers['x-forwarded-for'];
     if (typeof forwarded === 'string' && forwarded.trim()) return forwarded.split(',')[0].trim();
   }
-  return socket.handshake.address;
+  return address ?? '';
 }
 
 function genCode(): string {
@@ -96,6 +103,8 @@ async function serveHttp(req: IncomingMessage, res: ServerResponse): Promise<voi
     res.end('bad request');
     return;
   }
+  // 打开首页记一次访问；静态资源、/healthz、/api/credits 都不记
+  const home = path === '/' && req.method === 'GET';
   if (path === '/') path = '/index.html';
   path = normalize(path);
 
@@ -122,7 +131,33 @@ async function serveHttp(req: IncomingMessage, res: ServerResponse): Promise<voi
   if (relativePath.startsWith(`assets${sep}`)) headers['Cache-Control'] = 'public, max-age=31536000, immutable';
   res.writeHead(200, headers);
   res.end(readFileSync(filePath));
+  if (home) recordVisit(clientAddress({ headers: req.headers, address: req.socket.remoteAddress }), { event: 'home' });
 }
+
+// 控制台：只读，页面、所有房间的完整状态和统计。游戏端口上没有这些路由
+const CONSOLE_PAGE = readFileSync(join(__dirname, 'console.html'));
+const consoleServer = createServer((req, res) => {
+  const [path, query = ''] = (req.url ?? '').split('?');
+  const json = (body: unknown) => {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(body));
+  };
+  if (req.method === 'GET' && path === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(CONSOLE_PAGE);
+  } else if (req.method === 'GET' && path === '/api/state') {
+    json({ rooms: [...rooms.values()].map((room) => room.consoleSnapshot()) });
+  } else if (req.method === 'GET' && path === '/api/stats') {
+    readStats(new URLSearchParams(query).get('games') === 'all').then(json, (error) => {
+      console.error('console stats error', error);
+      res.writeHead(500);
+      res.end();
+    });
+  } else {
+    res.writeHead(404);
+    res.end('not found');
+  }
+});
 
 const io = new Server(httpServer);
 
@@ -174,11 +209,14 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         // 发给整个房间（含发送者）：自己的座位也要亮起，且只在服务器接受后才亮
         onReaction: (r, reaction) => io.to(r.code).emit('reaction', reaction),
         onShowdownFocus: (r, focus) => io.to(r.code).emit('showdownFocus', focus),
+        // 写失败只打日志，不影响牌局
+        onGameSummary: (summary) => appendRecord('games.jsonl', summary).catch((error) => console.error('game summary write error', error)),
       }, roomOptions);
       const p = room.addPlayer(raw.name, socket.id);
-      reserveRoomCreation(clientAddress(socket), rooms.size);
+      reserveRoomCreation(clientAddress(socket.handshake), rooms.size);
       rooms.set(code, room);
       emitJoined(socket, room, p);
+      recordVisit(clientAddress(socket.handshake), { event: 'createRoom' });
       break;
     }
     case 'joinRoom': {
@@ -200,6 +238,8 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         }
       }
       emitJoined(socket, room, p);
+      // 回到自己原来的座位（断线重连、刷新）不算又进了一次房
+      if (p.id !== raw.playerId) recordVisit(clientAddress(socket.handshake), { event: 'joinRoom', via: raw.via ?? 'code' });
       break;
     }
     case 'startTunnel': {
@@ -217,6 +257,7 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
       const room = rooms.get(socket.data.roomCode);
       if (!room) throw new ClientError({ code: 'roomNotFound' });
       room.startGame(socket.data.playerId, socket.id);
+      recordVisit(clientAddress(socket.handshake), { event: 'startGame' });
       break;
     }
     case 'rematch': {
@@ -279,6 +320,14 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
 httpServer.listen(PORT, () => {
   console.log(`Coup server listening on http://localhost:${PORT}`);
   console.log('暴露到公网: cloudflared tunnel --url http://localhost:' + PORT);
+});
+// 超过 90 天的访问文件：启动时删一次，之后每天检查一次
+const prune = () => pruneVisits().catch((error) => console.error('visit prune error', error));
+prune();
+setInterval(prune, 86_400_000).unref();
+
+consoleServer.listen(CONSOLE_PORT, CONSOLE_HOST, () => {
+  console.log(`Console listening on http://${CONSOLE_HOST}:${CONSOLE_PORT}/`);
 });
 
 // 服务器退出时终止 cloudflared 子进程

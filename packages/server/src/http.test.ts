@@ -1,5 +1,8 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -7,6 +10,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 const SERVER_DIR = fileURLToPath(new URL('..', import.meta.url));
 let server: ChildProcess;
 let port: number;
+let consolePort: number;
+const dataDir = mkdtempSync(join(tmpdir(), 'coup-http-'));
 
 const freePort = () =>
   new Promise<number>((resolve) => {
@@ -28,15 +33,21 @@ const rawGet = (target: string) =>
 
 beforeAll(async () => {
   port = await freePort();
-  server = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], { cwd: SERVER_DIR, env: { ...process.env, PORT: String(port) } });
+  consolePort = await freePort();
+  server = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], { cwd: SERVER_DIR, env: { ...process.env, PORT: String(port), CONSOLE_PORT: String(consolePort), DATA_DIR: dataDir } });
   await new Promise<void>((resolve, reject) => {
-    server.stdout!.on('data', (chunk) => String(chunk).includes('listening') && resolve());
+    let out = '';
+    server.stdout!.on('data', (chunk) => {
+      out += chunk;
+      if (out.includes('Coup server listening') && out.includes('Console listening')) resolve();
+    });
     server.on('exit', (code) => reject(new Error(`server exited (${code}) before listening`)));
   });
 }, 20_000);
 
 afterAll(() => {
   server?.kill();
+  rmSync(dataDir, { recursive: true, force: true });
 });
 
 describe('http server', () => {
@@ -44,5 +55,22 @@ describe('http server', () => {
     expect(await rawGet('/\\[')).toBe('HTTP/1.1 400 Bad Request');
     expect(await rawGet('/healthz')).toBe('HTTP/1.1 200 OK');
     expect(server.exitCode).toBeNull();
+  });
+
+  it('serves the console state only on the console port', async () => {
+    const state = await fetch(`http://127.0.0.1:${consolePort}/api/state`);
+    expect(state.status).toBe(200);
+    expect(await state.json()).toEqual({ rooms: [] });
+    expect((await fetch(`http://127.0.0.1:${port}/api/state`)).status).toBe(404);
+  });
+
+  it('serves the console page and stats only on the console port', async () => {
+    const page = await fetch(`http://127.0.0.1:${consolePort}/`);
+    expect(page.headers.get('content-type')).toContain('text/html');
+    expect(await page.text()).toContain('/api/stats');
+    const stats = await fetch(`http://127.0.0.1:${consolePort}/api/stats?games=all`);
+    expect(((await stats.json()) as { since: unknown }).since).toBeNull();
+    expect((await fetch(`http://127.0.0.1:${port}/api/stats`)).status).toBe(404);
+    expect(await (await fetch(`http://127.0.0.1:${port}/`)).text()).not.toContain('/api/stats');
   });
 });

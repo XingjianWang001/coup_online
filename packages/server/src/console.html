@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>控制台</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1d1d1f; --muted: #6b6b70; --line: #d8d8dc; --bg: #fbfbfc; --card: #fff; --bar: #4a7bd0; --busy: #c2410c; --waiting: #a16207; --idle: #6b6b70; }
+  @media (prefers-color-scheme: dark) { :root { --fg: #e8e8ea; --muted: #9a9aa0; --line: #38383d; --bg: #161618; --card: #1f1f22; --bar: #6f9be6; --busy: #fb923c; --waiting: #facc15; --idle: #9a9aa0; } }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  main { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  h2 { font-size: 16px; margin: 24px 0 8px; display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+  h3 { font-size: 14px; margin: 16px 0 6px; }
+  .muted { color: var(--muted); font-weight: normal; font-size: 13px; }
+  .room { background: var(--card); border: 1px solid var(--line); border-radius: 8px; margin: 0 0 8px; }
+  .room > summary { padding: 10px 12px; cursor: pointer; display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; }
+  .room .body { padding: 0 12px 12px; overflow-x: auto; }
+  .code { font: 600 15px ui-monospace, monospace; }
+  .tier-busy { color: var(--busy); } .tier-waiting { color: var(--waiting); } .tier-idle { color: var(--idle); }
+  table { border-collapse: collapse; margin: 4px 0; }
+  th, td { text-align: left; padding: 3px 12px 3px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: normal; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; }
+  th, td:first-child, td.n { white-space: nowrap; }
+  .bar { display: inline-block; height: 10px; background: var(--bar); border-radius: 2px; vertical-align: middle; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0 24px; }
+  pre { font-size: 12px; overflow-x: auto; background: var(--bg); padding: 8px; border-radius: 4px; }
+  button { font: inherit; padding: 2px 10px; border: 1px solid var(--line); border-radius: 4px; background: var(--card); color: var(--fg); cursor: pointer; }
+  button[aria-pressed="true"] { border-color: var(--bar); color: var(--bar); }
+  .daily { max-height: 360px; overflow-y: auto; }
+</style>
+</head>
+<body>
+<main>
+<h1>控制台</h1>
+<h2>实时房间 <span class="muted" id="live-status">读取中…</span></h2>
+<div id="rooms"></div>
+<h2>统计 <span class="muted">访问为最近 90 天；牌局摘要</span>
+  <span><button id="range-90" aria-pressed="true">最近 90 天</button> <button id="range-all" aria-pressed="false">全部</button></span>
+</h2>
+<div id="stats"><p class="muted">读取中…</p></div>
+</main>
+<script>
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const ROLE = { duke: '公爵', assassin: '刺客', captain: '队长', ambassador: '大使', contessa: '女伯爵' };
+const PHASE = { lobby: '大厅', choosingAction: '选择行动', awaitingChallenge: '等待质疑', showdown: '对质', awaitingBlock: '等待阻挡', choosingLoss: '失去影响力', choosingExchange: '交换选牌', gameOver: '已结束' };
+const TIER = { busy: '有真人在打', waiting: '真人在大厅或赛后', idle: '没有真人在打' };
+const STRENGTH = { standard: '普通', strong: '强' };
+const roles = (cards) => cards?.length ? cards.map((c) => ROLE[c.role] ?? c.role).join('、') : '—';
+const pct = (a, b) => (b ? `${((a / b) * 100).toFixed(1)}%` : '—');
+
+const open = new Set(); // 轮询重画时保留展开的房间
+function roomHtml(room) {
+  const nameOf = (id) => room.players.find((p) => p.id === id)?.name ?? id;
+  const roster = room.players.map((p) => `${esc(p.name)}${p.isComputer ? '（电脑）' : p.present ? '' : '（离线）'}`).join('、');
+  const seats = new Map((room.game?.players ?? []).map((p) => [p.id, p]));
+  const rows = room.players.map((p) => {
+    const s = seats.get(p.id);
+    const t = p.temperament;
+    return `<tr><td>${esc(p.name)}${p.id === room.hostId ? '（房主）' : ''}</td>
+      <td>${p.isComputer ? `电脑 · ${STRENGTH[p.strength] ?? esc(p.strength)}` : '真人'}</td>
+      <td>${p.isComputer ? '—' : p.connected ? '在线' : p.present ? '断线宽限中' : '离线'}</td>
+      <td>${t ? `诈唬 ${t.bluff.toFixed(2)} · 多疑 ${t.suspicion.toFixed(2)} · 进攻 ${t.aggression.toFixed(2)}` : '—'}</td>
+      <td class="n">${s ? s.coins : '—'}</td><td>${s ? roles(s.hand) : '—'}</td><td>${s ? roles(s.revealed) : '—'}</td>
+      <td>${s ? (s.alive ? '在场' : '出局') : '未入局'}</td></tr>`;
+  }).join('');
+  const g = room.game;
+  return `<details class="room" data-code="${esc(room.code)}"${open.has(room.code) ? ' open' : ''}>
+    <summary><span class="code">${esc(room.code)}</span>
+      <span>${esc(PHASE[room.phase] ?? room.phase)}</span>
+      <span class="tier-${esc(room.tier)}">${esc(TIER[room.tier] ?? room.tier)}</span>
+      <span>第 ${esc(room.gameNumber)} 局</span><span>${roster || '—'}</span></summary>
+    <div class="body">
+      <table><tr><th>玩家</th><th>类型</th><th>连接</th><th>性格</th><th>金币</th><th>暗牌</th><th>明牌</th><th>状态</th></tr>${rows}</table>
+      ${g ? `<p>当前行动：${esc(nameOf(g.currentPlayerId))}　获胜者：${g.winnerId ? esc(nameOf(g.winnerId)) : '—'}</p>
+        <p>牌堆（${g.deck.length} 张，顶在前）：${roles(g.deck)}</p>` : ''}
+      <details data-code="${esc(room.code)} json"${open.has(`${room.code} json`) ? ' open' : ''}><summary class="muted">完整状态 JSON</summary><pre>${esc(JSON.stringify(room, null, 2))}</pre></details>
+    </div></details>`;
+}
+
+async function pollState() {
+  const status = document.getElementById('live-status');
+  try {
+    const { rooms } = await (await fetch('/api/state', { cache: 'no-store' })).json();
+    document.getElementById('rooms').innerHTML = rooms.length ? rooms.map(roomHtml).join('') : '<p class="muted">现在没有房间。</p>';
+    status.textContent = `${rooms.length} 个房间 · 更新于 ${new Date().toLocaleTimeString('zh-CN')} · 每 5 秒刷新`;
+  } catch (error) {
+    status.textContent = `读取失败（${error.message}），5 秒后重试`;
+  }
+}
+document.getElementById('rooms').addEventListener('toggle', (e) => {
+  const code = e.target.dataset?.code;
+  if (code) e.target.open ? open.add(code) : open.delete(code);
+}, true);
+
+const table = (head, rows) => `<table><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr>${rows.join('')}</table>`;
+const barRow = (label, n, max) => `<tr><td>${esc(label)}</td><td class="n">${n}</td><td><span class="bar" style="width:${max ? Math.round((n / max) * 120) : 0}px"></span></td></tr>`;
+const dist = (counts, unit) => {
+  const entries = Object.entries(counts).sort((a, b) => a[0] - b[0]);
+  const max = Math.max(0, ...entries.map((e) => e[1]));
+  return entries.length ? table([unit, '局数', ''], entries.map(([k, n]) => barRow(`${k} 位`, n, max))) : '<p class="muted">没有牌局。</p>';
+};
+
+async function loadStats(all) {
+  document.getElementById('range-90').setAttribute('aria-pressed', String(!all));
+  document.getElementById('range-all').setAttribute('aria-pressed', String(all));
+  const el = document.getElementById('stats');
+  try {
+    const s = await (await fetch(`/api/stats${all ? '?games=all' : ''}`, { cache: 'no-store' })).json();
+    const f = s.funnel;
+    const steps = [['打开首页', f.home], ['建房', f.createRoom], ['进房 · 加入链接', f.joinLink], ['进房 · 房间码', f.joinCode], ['开局', f.startGame]];
+    const w = s.winRate;
+    const regionMax = Math.max(0, ...s.regions.map((r) => r[1]));
+    el.innerHTML = `
+      <p class="muted">牌局摘要范围：${s.since ? `${esc(s.since)} 起（北京时间）` : '全部'}</p>
+      <div class="grid">
+        <div><h3>每日</h3><div class="daily">${s.daily.length ? table(['日期', '开局', '打完', '独立访客'], s.daily.map((d) => `<tr><td>${esc(d.day)}</td><td class="n">${d.started}</td><td class="n">${d.finished}</td><td class="n">${d.visitors}</td></tr>`)) : '<p class="muted">还没有记录。</p>'}</div></div>
+        <div><h3>漏斗（访问次数）</h3>${table(['步骤', '次数', ''], steps.map(([l, n]) => barRow(l, n, Math.max(...steps.map((x) => x[1])))))}</div>
+        <div><h3>胜率（只算打完的 ${w.finished} 局）</h3>${table(['', '获胜局数', '占打完的局'], [
+          `<tr><td>真人</td><td class="n">${w.human}</td><td class="n">${pct(w.human, w.finished)}</td></tr>`,
+          `<tr><td>电脑</td><td class="n">${w.computer}</td><td class="n">${pct(w.computer, w.finished)}</td></tr>`])}</div>
+        <div><h3>每局真人数</h3>${dist(s.humans, '真人')}</div>
+        <div><h3>每局电脑数</h3>${dist(s.computers, '电脑')}</div>
+        <div><h3>地区（独立访客，按天计）</h3>${s.regions.length ? table(['地区', '访客', ''], s.regions.map(([r, n]) => barRow(r, n, regionMax))) : '<p class="muted">还没有访问。</p>'}</div>
+      </div>`;
+  } catch (error) {
+    el.innerHTML = `<p class="muted">统计读取失败：${esc(error.message)}</p>`;
+  }
+}
+document.getElementById('range-90').addEventListener('click', () => loadStats(false));
+document.getElementById('range-all').addEventListener('click', () => loadStats(true));
+
+pollState();
+setInterval(pollState, 5000);
+loadStats(false);
+</script>
+</body>
+</html>
