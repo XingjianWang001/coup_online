@@ -8,7 +8,7 @@ import { loadCardStyle, persistCardStyle, preloadCardStyle, type CardStyle } fro
 import { loadLocale, localizeServerError, persistLocale, translate, type Locale, type NoticeDescriptor } from './localization.ts';
 import type { Clock } from './clock.tsx';
 import { DealShowcase } from './DealShowcase.tsx';
-import { EntryForm, FilingFooter, type Filing } from './Entry.tsx';
+import { EntryForm, FilingFooter, normalizeRoomCode, type Filing } from './Entry.tsx';
 import { LeaveConfirmation, RulesPanel, SettingsPanel } from './panels.tsx';
 import { RoomView, TransientMessage, type LatestReaction, type ReactionBubble, type TransientNoticeState } from './RoomView.tsx';
 import { ExchangeStage, LossStage, ShowdownStage } from './ShowdownStage.tsx';
@@ -32,7 +32,7 @@ function sessionReducer(s: Session, a: SessionAction): Session {
 // 加入链接的 ?room= 参数：仅首次加载读取一次，读后从 URL 清除，避免刷新时重复触发。
 const LINK_ROOM = (() => {
   const params = new URLSearchParams(window.location.search);
-  const room = params.get('room')?.toUpperCase() ?? null;
+  const room = normalizeRoomCode(params.get('room') ?? '') || null;
   if (room) {
     params.delete('room');
     const qs = params.toString();
@@ -424,6 +424,7 @@ export function App() {
             onCreate={createRoom}
             onJoin={joinRoom}
             locale={locale}
+            invite={pendingLinkRoom}
           />
           <FilingFooter filing={site.filing} />
         </>

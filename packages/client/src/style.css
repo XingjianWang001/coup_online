@@ -337,6 +337,34 @@ input:focus-visible {
   width: 100%;
 }
 
+/* 加入链接进来时的那一行：房间码只是被告知，不是要填的字段，所以不画框、不上金 */
+.entry-invite {
+  margin: 0 0 var(--sp-1);
+  color: var(--text-2);
+}
+
+.entry-invite b {
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「改为创建新房间」：退到文字按钮，不和金色的「加入」争 */
+.entry-form button.entry-switch,
+.entry-form button.entry-switch:hover:not(:disabled) {
+  background: none;
+  border-color: transparent;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.entry-form button.entry-switch:hover {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .filing {
   display: flex;
   flex-wrap: wrap;
