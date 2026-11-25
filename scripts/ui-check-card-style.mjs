@@ -12,6 +12,10 @@ export default async function cardStyleScenario(ui) {
   await ui.evaluate(`document.querySelector('input[name="cardStyle"][value="totem"]').click()`);
   await ui.click('^(关闭|Close)', '.settings-panel');
   if ((await ui.evaluate('document.documentElement.dataset.cardStyle')) !== 'totem') throw new Error('牌面风格没有切到图腾');
+  // 选中图腾后、发牌前，五张画就该预载完，第一次亮牌不用等下载
+  const loaded = `performance.getEntriesByType('resource').filter((e) => /\\/assets\\/\\w+-[\\w-]+\\.jpg$/.test(e.name) && e.responseEnd > 0).length`;
+  for (let i = 0; i < 50 && (await ui.evaluate(loaded)) < 5; i++) await new Promise((r) => setTimeout(r, 100));
+  if ((await ui.evaluate(loaded)) !== 5) throw new Error('发牌前没有预载完五张图腾画');
 
   const host = ui.bot();
   host.intent({ type: 'createRoom', name: 'Bot' });
