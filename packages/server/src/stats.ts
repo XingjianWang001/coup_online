@@ -6,13 +6,13 @@ import { beijingDay, oldestVisitDay, VISITS_FILE, type VisitRecord } from './vis
 type Summary = Pick<GameSummary, 'startedAt' | 'humans' | 'winner'> & { computers: unknown[] }; // 只看电脑几位
 
 // 控制台统计。日期都按北京时间；gamesSince 为 null 时算上所有牌局摘要。访问文件本身只留 90 天，不再筛。
-// 胜率按人次：打完的局里真人（电脑）赢的局数 / 真人（电脑）入座的人次。地区按独立访客计，同一访客隔天再来算两次
+// 胜率按局：打完的局里真人、电脑各赢几局，两者相加就是打完的局数。地区按独立访客计，同一访客隔天再来算两次
 export function summarizeStats(games: Summary[], visits: VisitRecord[], gamesSince: string | null) {
   const daily = new Map<string, { day: string; started: number; finished: number; visitors: Set<string> }>();
   const dayOf = (day: string) => daily.get(day) ?? daily.set(day, { day, started: 0, finished: 0, visitors: new Set() }).get(day)!;
   const humans: Record<number, number> = {};
   const computers: Record<number, number> = {};
-  const winRate = { finished: 0, human: { wins: 0, seats: 0 }, computer: { wins: 0, seats: 0 } };
+  const winRate = { finished: 0, human: 0, computer: 0 };
   for (const g of games) {
     const day = beijingDay(new Date(g.startedAt));
     if (gamesSince && day < gamesSince) continue;
@@ -23,9 +23,7 @@ export function summarizeStats(games: Summary[], visits: VisitRecord[], gamesSin
     if (!g.winner) continue; // 中途结束：只算开局
     d.finished += 1;
     winRate.finished += 1;
-    winRate.human.seats += g.humans;
-    winRate.computer.seats += g.computers.length;
-    winRate[g.winner].wins += 1;
+    winRate[g.winner] += 1;
   }
   const funnel = { home: 0, createRoom: 0, joinLink: 0, joinCode: 0, startGame: 0 };
   const regions = new Map<string, Set<string>>();
