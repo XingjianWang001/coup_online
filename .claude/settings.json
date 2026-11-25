@@ -1,0 +1,17 @@
+{
+  "description": "Lockfile guard before edits. Typecheck and tests run on Stop via .agents/hooks/verify.sh; design hooks come from the impeccable plugin.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-lockfile.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

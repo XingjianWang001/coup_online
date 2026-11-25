@@ -10,3 +10,5 @@
 - **回环信任边界。** `startTunnel` 仅接受回环来源（`127.0.0.1`/`::1`）的 socket。隧道是服务器级资源，若服务器已被隧道暴露到公网，前端「隐藏按钮」无法阻止恶意客户端直接 emit `startTunnel` 在主机上 spawn 进程，故在服务器侧校验 `socket.handshake.address`。经 cloudflared 或反向代理（Caddy）进来的访客在服务器看来同样来自回环地址，所以还要求握手不带 `Cf-Connecting-Ip`、`X-Forwarded-For` 转发头；纯 TCP 转发（如 `ssh -R`）不带转发头，其中的非浏览器客户端仍会被当作本机。WebSocket 不受 CORS 限制，主机浏览器里打开的任何网页都能连上 `ws://localhost:8787`，所以握手的 `Origin` 还必须缺省（非浏览器客户端）或是本机页面（`http(s)://localhost`、`127.0.0.1`、`[::1]`，任意端口）。
 
 **Considered Options**: 曾考虑「链接打开后自动加入（复用本地身份重连）」。弃用原因：需扩展加入流程、引入「何时算已就绪」的复杂度，与「零摩擦但保留昵称约束」的目标相比收益有限，属后续可选升级。
+
+云服务器部署改用固定域名，见 [ADR 0009](0009-private-cloud-staging-and-fixed-domain.md)；本机临时分享仍按本决策。
