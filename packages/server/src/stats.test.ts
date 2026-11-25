@@ -1,6 +1,7 @@
 // 控制台统计（#116、ADR 0015）：由 games.jsonl 与 visits-*.jsonl 的记录汇总
 import { expect, it } from 'vitest';
 import { summarizeStats } from './stats.ts';
+import type { VisitRecord } from './visits.ts';
 
 const game = (startedAt: string, humans: number, computers: string[], winner: 'human' | 'computer' | null) => ({
   startedAt,
@@ -16,7 +17,7 @@ const games = [
   game('2026-11-24T02:00:00.000Z', 1, [], null), // 中途结束
   game('2026-08-01T02:00:00.000Z', 3, [], 'human'), // 90 天以前
 ];
-const visits = [
+const visits: VisitRecord[] = [
   { at: '2026-11-23T23:00+08:00', event: 'home', region: '深圳市', visitor: 'a' },
   { at: '2026-11-23T23:00+08:00', event: 'createRoom', region: '深圳市', visitor: 'a' },
   { at: '2026-11-23T23:00+08:00', event: 'joinRoom', via: 'link', region: '杭州市', visitor: 'b' },

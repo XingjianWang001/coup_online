@@ -396,7 +396,7 @@ export class Room {
     this.gameNumber += 1;
     const computers = entries.filter((p) => p.isComputer);
     this.summaryStart = { startedAt: new Date().toISOString(), humans: entries.length - computers.length, computers: computers.map((p) => p.strength!) };
-    this.temperaments = new Map(entries.filter((p) => p.isComputer).map((p) => [p.id, drawTemperament(this.computerRandom, TUNINGS[p.strength!])]));
+    this.temperaments = new Map(computers.map((p) => [p.id, drawTemperament(this.computerRandom, TUNINGS[p.strength!])]));
     this.gameEvents = [];
     this.heard = [];
     this.offTurnHeld.clear();

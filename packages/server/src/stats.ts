@@ -1,10 +1,8 @@
 import { readdir } from 'node:fs/promises';
 import { dataPath, readRecords } from './data-file.ts';
 import type { GameSummary } from './room.ts';
-import { beijing } from './visits.ts';
+import { beijingDay, oldestVisitDay, VISITS_FILE, type VisitRecord } from './visits.ts';
 
-// 访问文件里的一行（见 visits.ts 的 recordVisit）
-type VisitRecord = { at: string; event: string; via?: string; region: string; visitor: string };
 type Summary = Pick<GameSummary, 'startedAt' | 'humans' | 'winner'> & { computers: unknown[] }; // 只看电脑几位
 
 // 控制台统计。日期都按北京时间；gamesSince 为 null 时算上所有牌局摘要。访问文件本身只留 90 天，不再筛。
@@ -16,7 +14,7 @@ export function summarizeStats(games: Summary[], visits: VisitRecord[], gamesSin
   const computers: Record<number, number> = {};
   const winRate = { finished: 0, human: { wins: 0, seats: 0 }, computer: { wins: 0, seats: 0 } };
   for (const g of games) {
-    const day = beijing(new Date(g.startedAt)).slice(0, 10);
+    const day = beijingDay(new Date(g.startedAt));
     if (gamesSince && day < gamesSince) continue;
     const d = dayOf(day);
     d.started += 1;
@@ -50,8 +48,8 @@ export function summarizeStats(games: Summary[], visits: VisitRecord[], gamesSin
 
 // ponytail: 每次请求都整读 games.jsonl 和 90 个访问文件；朋友圈规模的流量下几 MB 以内，不缓存
 export async function readStats(all: boolean, now = new Date()) {
-  const names = (await readdir(dataPath('')).catch(() => [] as string[])).filter((name) => /^visits-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name));
+  const names = (await readdir(dataPath('')).catch(() => [] as string[])).filter((name) => VISITS_FILE.test(name));
   const visits = (await Promise.all(names.map((name) => readRecords(name)))).flat() as VisitRecord[];
-  const since = beijing(new Date(now.getTime() - 89 * 86_400_000)).slice(0, 10);
+  const since = oldestVisitDay(now);
   return { since: all ? null : since, ...summarizeStats((await readRecords('games.jsonl')) as Summary[], visits, all ? null : since) };
 }
