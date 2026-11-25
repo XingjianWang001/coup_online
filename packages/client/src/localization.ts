@@ -1,4 +1,4 @@
-import { parseServerError } from '@coup/shared';
+import { MAX_NICKNAME_CHARACTERS, parseServerError } from '@coup/shared';
 
 export const LOCALES = ['zh-CN', 'en'] as const;
 
@@ -26,7 +26,15 @@ const english = {
   confirmLeave: 'Leave room',
   cancel: 'Cancel',
   settingsTitle: 'Settings',
+  credits: 'Credits',
+  backToSettings: 'Back to settings',
+  creditsLoading: 'Loading credits',
+  creditsEmpty: 'No contributors listed yet.',
+  creditsUnavailable: 'Credits could not be loaded. Please try again later.',
   language: 'Language',
+  cardStyle: 'Card style',
+  cardStyleDefault: 'Default',
+  cardStyleTotem: 'Totem',
   closeSettings: 'Close settings',
   rulesTitle: 'Rules',
   quickRules: 'Quick Rules',
@@ -38,51 +46,63 @@ const english = {
   createRoom: 'Create room',
   or: 'or',
   roomCode: 'Room code',
-  roomCodeHelp: ' — share this code or the invite link with friends',
   roomCodePlaceholder: '6-character room code',
   joinRoom: 'Join room',
+  createInstead: 'Create a new room instead',
   inviteLink: 'Invite link',
   copied: 'Copied',
   copyFailed: 'Copy failed',
   copy: 'Copy',
-  tunnelStarting: 'Starting tunnel…',
+  tunnelStarting: 'Starting tunnel',
   generateInviteLink: 'Generate invite link',
-  playersCount: 'Players ({count})',
-  hostSuffix: ' (host)',
-  offlineSuffix: ' (offline)',
+  playersCount: 'Players {count}/{maximum}',
+  previousWinner: 'Previous winner',
+  offline: 'Offline',
   startGame: 'Start game',
-  startGameRequirement: 'Requires at least 2 players',
+  notEnoughPlayers: 'Too few players',
+  waitingForStart: 'Host {name} has not started the game yet',
+  computerPlayer: 'Computer player',
+  strongComputerPlayer: 'Advanced computer player',
+  addComputer: 'Add computer player',
+  computerStrength: 'Strength of {name}',
+  standardStrength: 'Standard',
+  strongStrength: 'Advanced',
+  removeComputer: 'Remove {name}',
   leftRoomNotice: 'You left the room.',
   replacedRoomNotice: 'Your seat was taken over by another tab or device.',
-  errorRoomNotFound: 'Room not found.',
+  errorRoomNotFound: 'Room not found. Please check the room code.',
   errorGameAlreadyStarted: 'The game has already started.',
   errorHostOnly: 'Only the host can do that.',
   errorMinimumPlayers: 'At least {minimum} players are required to start.',
   errorTunnelUnauthorized: 'Only the host device can start the tunnel.',
   errorTunnelStartup: 'The tunnel could not be started. Check the host connection and try again.',
-  errorIllegalIntent: 'That request is not supported.',
-  errorInvalidGameAction: 'That action is not allowed right now.',
+  errorIllegalIntent: 'Invalid request. Please refresh the page and try again.',
+  errorInvalidGameAction: "You can't do that right now.",
   errorGameNotStarted: 'The game has not started yet.',
-  errorRoomFull: 'This room is full (maximum {maximum} players).',
-  errorInvalidName: 'Enter a nickname of 1–32 characters.',
+  errorRoomFull: 'This room is full.',
+  errorInvalidName: `Enter a nickname of 1–${MAX_NICKNAME_CHARACTERS} characters.`,
+  chooseAction: 'Choose an action',
   errorRateLimited: 'Too many rooms created recently. Try again in a minute.',
   errorServerBusy: 'The server is full. Please try again later.',
   errorUnexpected: 'Something went wrong. Please try again.',
-  gameStarted: 'Game started!',
-  gameEnded: 'Game over',
-  playerEliminated: 'A player was eliminated',
+  gameStarted: 'Game started',
+  playerEliminated: '{name} was eliminated',
+  youEliminated: 'You were eliminated',
   challengeFailed: 'Challenge failed',
   challengeSucceeded: 'Challenge succeeded',
-  influenceLostNotice: 'A player lost influence',
-  winner: '{name} wins!',
+  influenceLostNotice: '{name} lost influence',
+  youLostInfluence: 'You lost influence',
+  winner: '{name} wins',
+  youWin: 'You win',
+  winnerMarker: 'Winner',
   yourTurn: 'Your turn',
-  waitingForAction: 'Waiting for {name} to act…',
-  waitingForChallenge: 'Waiting for other players to decide whether to challenge…',
-  waitingForBlock: 'Waiting for {name} to decide whether to block…',
-  waitingForBlockAny: 'Waiting for other players to decide whether to block…',
-  waitingForShowdown: 'Waiting for {name} to choose a card to reveal…',
-  waitingForLoss: 'Waiting for {name} to choose an influence to lose…',
-  waitingForExchange: 'Waiting for {name} to exchange cards…',
+  waitingForAction: '{name} is choosing an action',
+  waitingForChallenge: 'Other players are deciding whether to challenge',
+  waitingForBlock: '{name} is deciding whether to block',
+  waitingForBlockAny: 'Other players are deciding whether to block',
+  waitingForShowdown: '{name} is choosing a card to reveal',
+  waitingForLoss: '{name} is choosing an influence to lose',
+  waitingForExchange: '{name} is exchanging cards',
   showdownTitle: '{challenger} challenges {claimant}’s',
   showdownTitleYou: '{challenger} challenges your',
   showdownTitleByYou: 'You challenge {claimant}’s',
@@ -92,27 +112,58 @@ const english = {
   back: 'Back',
   lossTitle: 'Choose an influence to lose',
   rematch: 'Rematch',
-  waitingForRematch: 'Waiting for host {name} to start a rematch…',
+  waitingForRematch: 'Host {name} has not started a rematch yet',
   selfMarker: ' (you)',
+  eliminatedMarker: 'Out',
+  targetedMarker: ', targeted',
   coinCount: '{count} coins',
   coinCountOne: '{count} coin',
   influenceCount: '{count} influence',
-  chooseCoupTarget: 'Choose who to Coup:',
-  chooseAssassinateTarget: 'Choose who to Assassinate:',
-  chooseStealTarget: 'Choose who to Steal from:',
-  mandatoryCoup: 'You have 10 or more coins and must Coup.',
-  challenge: 'Challenge!',
+  chooseCoupTarget: 'Choose who to Coup',
+  chooseAssassinateTarget: 'Choose who to Assassinate',
+  chooseStealTarget: 'Choose who to Steal from',
+  mandatoryCoup: 'With 10 or more coins, you must Coup.',
+  challenge: 'Challenge',
   passChallenge: 'Do not challenge',
   blockWith: 'Block with {role}',
   passBlock: 'Do not block',
-  exchangePrompt: 'Exchange: choose {count} cards to keep',
+  challengePrompt: 'Challenge this claim?',
+  blockPrompt: 'Block this action?',
+  reactionToggle: 'React',
+  reactionTabPhrase: 'Phrases',
+  reactionTabAnnouncement: 'Announce',
+  reactionTabVerbalClaim: 'Verbal claim',
+  reactionHasLabel: "I'm the",
+  reactionHasNotLabel: "I'm not the",
+  reactionPickTarget: 'Choose a target for {action}',
+  reactionGameOverHint: 'The game is over. Phrases only.',
+  reactionEliminatedHint: "You've been eliminated. Phrases only.",
+  reactionDismiss: 'Hide',
+  reactionLive: '{name}: {text}',
+  phraseDoubt: 'Yeah, right.',
+  phraseSure: 'You sure?',
+  phraseDare: 'Go on, challenge me.',
+  phraseHonest: "I'm an honest player.",
+  phraseMercy: 'Have mercy.',
+  phraseClose: 'That was close.',
+  phraseRespect: 'Well played.',
+  announcementTake: "I'll take {action}.",
+  announcementPlain: "I'll {action}.",
+  announcementTargeted: "I'll {action} {target}.",
+  announcementSteal: "I'll {action} from {target}.",
+  verbalClaimHas: "I'm the {role}.",
+  verbalClaimHasNot: "I'm not the {role}.",
+  exchangePrompt: 'Choose {count} to keep', // 只剩一点影响力时 count 为 1，不写 cards 免得出现「1 cards」
   confirmKeep: 'Keep selected cards',
   cardBack: 'Hidden card',
   cardFace: '{role} card',
   cardRevealed: '{role} card (revealed)',
+  cardPostGameHidden: '{role} card, not unveiled. Select it to unveil it to everyone',
+  cardPostGameRevealed: '{role} card, unveiled',
+  postGameRevealHint: 'Choose a hidden card to unveil to everyone',
   showcaseDeal: 'Your hand',
   confirm: 'Confirm',
-  timeToAct: '{time} left to act',
+  timeToAct: '{time} remaining',
   expandLog: 'Expand details for {action}',
   collapseLog: 'Collapse details for {action}',
   narrationAction: '{actor} uses {action}',
@@ -120,17 +171,19 @@ const english = {
   narrationTarget: ', targeting {target}',
   narrationBlock: '; {blocker} blocks with {role}',
   logChallenge: '{challenger} challenges {target}',
-  logChallengeFailed: 'Challenge failed: {loser} loses influence',
-  logChallengeSucceeded: 'Challenge succeeded: {loser} loses influence',
+  logChallengeFailed: '{claimant} shows {role}; the challenge fails and {loser} loses influence',
+  logChallengeSucceeded: 'The challenge succeeds and {loser} loses influence',
   logBlock: '{blocker} blocks with {role}',
   logInfluenceLost: '{player} reveals {role}',
   logEliminated: '{player} is eliminated',
   logGameOver: '{winner} wins',
-  logCoinsChanged: '{player} coins → {coins}',
+  logPostGameRevealed: '{player} unveils {role}',
+  logCoinsChanged: '{player} now has {coins} coins',
+  logCoinsChangedOne: '{player} now has {coins} coin',
   logExchangeDrew: '{player} draws {count} cards',
 } as const;
 
-type MessageKey = keyof typeof english;
+export type MessageKey = keyof typeof english;
 
 const simplifiedChinese = {
   appTitle: '政变 Coup',
@@ -142,7 +195,15 @@ const simplifiedChinese = {
   confirmLeave: '确认离开',
   cancel: '取消',
   settingsTitle: '设置',
+  credits: '制作人员',
+  backToSettings: '返回设置',
+  creditsLoading: '正在加载制作人员名单',
+  creditsEmpty: '暂无制作人员署名。',
+  creditsUnavailable: '制作人员名单加载失败，请稍后重试。',
   language: '语言',
+  cardStyle: '牌面风格',
+  cardStyleDefault: '默认',
+  cardStyleTotem: '图腾',
   closeSettings: '关闭设置',
   rulesTitle: '规则说明',
   quickRules: '简要规则',
@@ -154,51 +215,63 @@ const simplifiedChinese = {
   createRoom: '创建房间',
   or: '或',
   roomCode: '房间码',
-  roomCodeHelp: '（把此码或链接发给朋友）',
   roomCodePlaceholder: '6 位房间码',
   joinRoom: '加入房间',
+  createInstead: '改为创建新房间',
   inviteLink: '加入链接',
   copied: '已复制',
   copyFailed: '复制失败',
   copy: '复制',
-  tunnelStarting: '正在启动隧道…',
+  tunnelStarting: '正在启动隧道',
   generateInviteLink: '生成加入链接',
-  playersCount: '玩家（{count}）',
-  hostSuffix: ' (房主)',
-  offlineSuffix: ' (离线)',
+  playersCount: '玩家 {count}/{maximum}',
+  previousWinner: '上局获胜者',
+  offline: '离线',
   startGame: '开始游戏',
-  startGameRequirement: '需 ≥2 人',
+  notEnoughPlayers: '人数不足',
+  waitingForStart: '房主 {name} 尚未开始游戏',
+  computerPlayer: '电脑玩家',
+  strongComputerPlayer: '进阶电脑玩家',
+  addComputer: '添加电脑玩家',
+  computerStrength: '{name} 的强度',
+  standardStrength: '普通',
+  strongStrength: '进阶',
+  removeComputer: '移除 {name}',
   leftRoomNotice: '你已离开房间。',
-  replacedRoomNotice: '你的座位已在其他标签页或设备上接管。',
-  errorRoomNotFound: '房间不存在。',
+  replacedRoomNotice: '你的座位已由其他标签页或设备接管。',
+  errorRoomNotFound: '找不到这个房间，请检查房间码。',
   errorGameAlreadyStarted: '牌局已经开始。',
-  errorHostOnly: '只有房主可以执行此操作。',
+  errorHostOnly: '只有房主可以这样做。',
   errorMinimumPlayers: '至少需要 {minimum} 名玩家才能开始。',
   errorTunnelUnauthorized: '只有主机设备可以启动隧道。',
   errorTunnelStartup: '隧道启动失败，请检查主机网络后重试。',
-  errorIllegalIntent: '不支持此请求。',
-  errorInvalidGameAction: '当前不能执行此行动。',
+  errorIllegalIntent: '请求无效，请刷新页面后重试。',
+  errorInvalidGameAction: '当前不能这样做。',
   errorGameNotStarted: '牌局尚未开始。',
-  errorRoomFull: '房间已满（最多 {maximum} 名玩家）。',
-  errorInvalidName: '请输入 1～32 个字符的昵称。',
+  errorRoomFull: '房间已满。',
+  errorInvalidName: `请输入 1～${MAX_NICKNAME_CHARACTERS} 个字符的昵称。`,
+  chooseAction: '选择行动',
   errorRateLimited: '最近创建的房间过多，请一分钟后再试。',
   errorServerBusy: '服务器房间已满，请稍后再试。',
-  errorUnexpected: '出现意外错误，请重试。',
-  gameStarted: '牌局开始！',
-  gameEnded: '牌局结束',
-  playerEliminated: '有玩家被淘汰',
+  errorUnexpected: '发生错误，请重试。',
+  gameStarted: '牌局开始',
+  playerEliminated: '{name} 被淘汰',
+  youEliminated: '你被淘汰',
   challengeFailed: '质疑失败',
   challengeSucceeded: '质疑成功',
-  influenceLostNotice: '有玩家失去影响力',
-  winner: '{name} 获胜！',
+  influenceLostNotice: '{name} 失去影响力',
+  youLostInfluence: '你失去影响力',
+  winner: '{name} 获胜',
+  youWin: '你获胜',
+  winnerMarker: '获胜者',
   yourTurn: '轮到你了',
-  waitingForAction: '等待 {name} 行动…',
-  waitingForChallenge: '等待其他玩家决定是否质疑…',
-  waitingForBlock: '等待 {name} 决定是否阻挡…',
-  waitingForBlockAny: '等待其他玩家决定是否阻挡…',
-  waitingForShowdown: '等待 {name} 选择要翻开的牌…',
-  waitingForLoss: '等待 {name} 选择要失去的影响力…',
-  waitingForExchange: '等待 {name} 交换手牌…',
+  waitingForAction: '{name} 正在选择行动',
+  waitingForChallenge: '其他玩家正在考虑是否质疑',
+  waitingForBlock: '{name} 正在考虑是否阻挡',
+  waitingForBlockAny: '其他玩家正在考虑是否阻挡',
+  waitingForShowdown: '{name} 正在选择翻开哪张牌',
+  waitingForLoss: '{name} 正在选择要失去的影响力',
+  waitingForExchange: '{name} 正在交换手牌',
   showdownTitle: '{challenger} 质疑 {claimant} 的',
   showdownTitleYou: '{challenger} 质疑你的',
   showdownTitleByYou: '你质疑 {claimant} 的',
@@ -208,41 +281,74 @@ const simplifiedChinese = {
   back: '返回',
   lossTitle: '选择要失去的影响力',
   rematch: '再来一局',
-  waitingForRematch: '等待房主 {name} 发起再来一局…',
-  selfMarker: ' (你)',
+  waitingForRematch: '房主 {name} 尚未发起再来一局',
+  selfMarker: '（你）',
+  eliminatedMarker: '出局',
+  targetedMarker: '，被针对',
   coinCount: '{count} 金币',
   coinCountOne: '{count} 金币',
   influenceCount: '{count} 影响力',
-  chooseCoupTarget: '选择政变目标：',
-  chooseAssassinateTarget: '选择暗杀目标：',
-  chooseStealTarget: '选择偷窃目标：',
-  mandatoryCoup: '你已有 10 枚或更多金币，必须发动政变。',
-  challenge: '质疑！',
+  chooseCoupTarget: '选择政变目标',
+  chooseAssassinateTarget: '选择暗杀目标',
+  chooseStealTarget: '选择偷窃目标',
+  mandatoryCoup: '金币达到 10 枚，必须政变。',
+  challenge: '质疑',
   passChallenge: '不质疑',
   blockWith: '用{role}阻挡',
   passBlock: '不阻挡',
-  exchangePrompt: '交换：请选择保留的 {count} 张牌',
+  challengePrompt: '质疑此声称？',
+  blockPrompt: '阻挡此行动？',
+  reactionToggle: '表态',
+  reactionTabPhrase: '短语',
+  reactionTabAnnouncement: '行动预告',
+  reactionTabVerbalClaim: '口头声称',
+  reactionHasLabel: '我有',
+  reactionHasNotLabel: '我没有',
+  reactionPickTarget: '预告{action}，选择目标',
+  reactionGameOverHint: '牌局已结束，只能用短语',
+  reactionEliminatedHint: '你已被淘汰，只能用短语',
+  reactionDismiss: '收起',
+  reactionLive: '{name}：{text}',
+  phraseDoubt: '我信你个鬼',
+  phraseSure: '你确定？',
+  phraseDare: '来质疑我啊',
+  phraseHonest: '我是老实人',
+  phraseMercy: '手下留情',
+  phraseClose: '好险',
+  phraseRespect: '佩服',
+  announcementTake: '我要拿{action}',
+  announcementPlain: '我要{action}',
+  announcementTargeted: '我要{action} {target}',
+  announcementSteal: '我要{action} {target}',
+  verbalClaimHas: '我有{role}',
+  verbalClaimHasNot: '我没有{role}',
+  exchangePrompt: '选择保留 {count} 张牌',
   confirmKeep: '确认保留',
   cardBack: '暗牌',
   cardFace: '{role}牌',
   cardRevealed: '{role}牌（已翻开）',
+  cardPostGameHidden: '{role}牌，未揭晓，选中即向所有人揭晓',
+  cardPostGameRevealed: '{role}牌，已揭晓',
+  postGameRevealHint: '选一张暗牌，向所有人揭晓',
   showcaseDeal: '你的手牌',
   confirm: '确认',
-  timeToAct: '行动剩余 {time}',
+  timeToAct: '剩余 {time}',
   expandLog: '展开{action}的详情',
   collapseLog: '收起{action}的详情',
   narrationAction: '{actor} 发动{action}',
-  narrationClaim: '{actor} 声称【{role}】发动{action}',
+  narrationClaim: '{actor} 声称{role}发动{action}',
   narrationTarget: '，目标 {target}',
-  narrationBlock: '；{blocker} 用【{role}】阻挡',
+  narrationBlock: '；{blocker} 用{role}阻挡',
   logChallenge: '{challenger} 质疑 {target}',
-  logChallengeFailed: '质疑失败：{loser} 失去影响力',
-  logChallengeSucceeded: '质疑成功：{loser} 失去影响力',
-  logBlock: '{blocker} 用【{role}】阻挡',
-  logInfluenceLost: '{player} 翻开【{role}】',
+  logChallengeFailed: '{claimant} 出示{role}，质疑失败，{loser} 失去影响力',
+  logChallengeSucceeded: '质疑成功，{loser} 失去影响力',
+  logBlock: '{blocker} 用{role}阻挡',
+  logInfluenceLost: '{player} 翻开{role}',
   logEliminated: '{player} 被淘汰',
   logGameOver: '{winner} 获胜',
-  logCoinsChanged: '{player} 金币 → {coins}',
+  logPostGameRevealed: '{player} 揭晓{role}',
+  logCoinsChanged: '{player} 现有 {coins} 金币',
+  logCoinsChangedOne: '{player} 现有 {coins} 金币',
   logExchangeDrew: '{player} 抽取 {count} 张牌',
 } as const satisfies Record<MessageKey, string>;
 
@@ -252,10 +358,14 @@ const dictionaries: Record<Locale, Record<MessageKey, string>> = {
 };
 
 interface MessageValues {
-  playersCount: { count: number };
+  playersCount: { count: number; maximum: number };
+  waitingForStart: { name: string };
   errorMinimumPlayers: { minimum: number };
-  errorRoomFull: { maximum: number };
+  removeComputer: { name: string };
+  computerStrength: { name: string };
   winner: { name: string };
+  playerEliminated: { name: string };
+  influenceLostNotice: { name: string };
   waitingForAction: { name: string };
   waitingForBlock: { name: string };
   waitingForShowdown: { name: string };
@@ -270,9 +380,13 @@ interface MessageValues {
   coinCountOne: { count: number };
   influenceCount: { count: number };
   blockWith: { role: string };
+  reactionPickTarget: { action: string };
+  reactionLive: { name: string; text: string };
   exchangePrompt: { count: number };
   cardFace: { role: string };
   cardRevealed: { role: string };
+  cardPostGameHidden: { role: string };
+  cardPostGameRevealed: { role: string };
   timeToAct: { time: string };
   expandLog: { action: string };
   collapseLog: { action: string };
@@ -281,12 +395,13 @@ interface MessageValues {
   narrationTarget: { target: string };
   narrationBlock: { blocker: string; role: string };
   logChallenge: { challenger: string; target: string };
-  logChallengeFailed: { loser: string };
+  logChallengeFailed: { claimant: string; role: string; loser: string };
   logChallengeSucceeded: { loser: string };
   logBlock: { blocker: string; role: string };
   logInfluenceLost: { player: string; role: string };
   logEliminated: { player: string };
   logGameOver: { winner: string };
+  logPostGameRevealed: { player: string; role: string };
   logCoinsChanged: { player: string; coins: number };
   logExchangeDrew: { player: string; count: number };
 }
@@ -340,6 +455,17 @@ export function translate<Key extends MessageKey>(
   });
 }
 
+/** 与 translate 相同，但占位符换成调用方给的片段（不转成字符串），让界面能单独给某个词上色 */
+export function translateParts<Part>(locale: Locale, key: MessageKey, parts: Record<string, Part>): Array<string | Part> {
+  return dictionaries[locale][key]
+    .split(/(\{\w+\})/)
+    .filter(Boolean)
+    .map((chunk) => {
+      const name = /^\{(\w+)\}$/.exec(chunk)?.[1];
+      return name !== undefined && Object.hasOwn(parts, name) ? parts[name] : chunk;
+    });
+}
+
 export function localizeServerError(locale: Locale, value: unknown): string {
   const error = parseServerError(value);
   switch (error.code) {
@@ -352,7 +478,7 @@ export function localizeServerError(locale: Locale, value: unknown): string {
     case 'illegalIntent': return translate(locale, 'errorIllegalIntent');
     case 'invalidGameAction': return translate(locale, 'errorInvalidGameAction');
     case 'gameNotStarted': return translate(locale, 'errorGameNotStarted');
-    case 'roomFull': return translate(locale, 'errorRoomFull', error.params);
+    case 'roomFull': return translate(locale, 'errorRoomFull');
     case 'invalidName': return translate(locale, 'errorInvalidName');
     case 'rateLimited': return translate(locale, 'errorRateLimited');
     case 'serverBusy': return translate(locale, 'errorServerBusy');
@@ -360,12 +486,15 @@ export function localizeServerError(locale: Locale, value: unknown): string {
   }
 }
 
-export type NoticeDescriptor = {
-  key: 'gameStarted' | 'gameEnded' | 'playerEliminated' | 'challengeFailed' | 'challengeSucceeded' | 'influenceLostNotice';
-};
+// 失去影响力 / 被淘汰点名到人；丢的是哪个角色，座位上翻开的牌已经看得到
+export type NoticeDescriptor =
+  | { key: 'gameStarted' | 'challengeFailed' | 'challengeSucceeded' }
+  | { key: 'playerEliminated' | 'influenceLostNotice'; playerId: string };
 
-export function localizeNotice(locale: Locale, notice: NoticeDescriptor): string {
-  return translate(locale, notice.key);
+export function localizeNotice(locale: Locale, notice: NoticeDescriptor, me: string | undefined, nameOf: (id: string) => string): string {
+  if (!('playerId' in notice)) return translate(locale, notice.key);
+  if (notice.playerId === me) return translate(locale, notice.key === 'playerEliminated' ? 'youEliminated' : 'youLostInfluence');
+  return translate(locale, notice.key, { name: nameOf(notice.playerId) });
 }
 
 export function localizeCoinCount(locale: Locale, count: number): string {

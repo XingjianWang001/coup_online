@@ -1,0 +1,38 @@
+name: PR screenshots
+
+# 改了客户端外观或界面文案（组件、样式、静态资源、localization.ts、rules.ts）的 PR 正文里要有截图（pnpm pr-shots 生成链接）。不影响画面的客户端改动加 no-screenshot 标签跳过。
+# 单独一个 workflow：编辑正文、加减标签只重跑这一项，不重跑整套 CI。
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require screenshots for visual client changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BODY: ${{ github.event.pull_request.body }}
+          SKIP: ${{ contains(github.event.pull_request.labels.*.name, 'no-screenshot') }}
+        run: |
+          visual=$(gh pr diff "$PR" -R "$REPO" --name-only | grep -E '^packages/client/(src/(.*\.(tsx|css)|localization\.ts|rules\.ts)$|public/)' || true)
+          if [ -z "$visual" ] || [ "$SKIP" = true ]; then
+            echo "No screenshot needed."
+            exit 0
+          fi
+          if printf '%s' "$BODY" | grep -Eq '!\[[^]]*\]\([^)]+\)|<img[[:space:]]'; then
+            echo "Screenshot found."
+            exit 0
+          fi
+          echo "::error::This PR changes how the client looks:"
+          echo "$visual"
+          echo "::error::Add before/after screenshots to the PR body (pnpm pr-shots <PR> <png>...), or add the no-screenshot label if nothing visible changed."
+          exit 1

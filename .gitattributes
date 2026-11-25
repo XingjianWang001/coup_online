@@ -1,1 +1,3 @@
 scripts/*.sh text eol=lf
+.githooks/* text eol=lf
+packages/shared/fixtures/*.json text eol=lf

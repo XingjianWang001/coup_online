@@ -1,19 +1,22 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   block,
   challenge,
   chooseAction,
   createGame,
   forfeit,
+  GameRuleError,
   passBlock,
   passChallenge,
   publicState,
   resolveBlockTimeout,
   resolveChallengeTimeout,
   resolveExchange,
+  resolveExchangeTimeout,
   resolveLoss,
   resolveLossTimeout,
   resolveShowdownTimeout,
+  revealPostGameCard,
   revealShowdownCard,
 } from './index.ts';
 import type { GameState, Role } from './types.ts';
@@ -441,6 +444,23 @@ describe('forfeit', () => {
     expect(b.hand).toHaveLength(0);
     expect(b.revealed).toHaveLength(2);
   });
+
+  it('交换选牌中弃权：摸到的牌放回牌堆，只翻开原有手牌', () => {
+    const s = setup({ a: ['ambassador', 'captain'], b: ['duke', 'duke'], c: ['contessa', 'contessa'] });
+    const deckCount = s.deck.length;
+    chooseAction(s, 'a', 'exchange');
+    resolveChallengeTimeout(s);
+    expect(s.phase).toBe('choosingExchange');
+    expect(s.deck).toHaveLength(deckCount - 2);
+
+    const events = forfeit(s, 'a');
+    const a = s.players.find((p) => p.id === 'a')!;
+    expect(a.revealed.map((c) => c.role).sort()).toEqual(['ambassador', 'captain']);
+    expect(events.filter((e) => e.type === 'influenceLost')).toHaveLength(2);
+    expect(s.deck).toHaveLength(deckCount);
+    expect(s.exchangeKeepCount).toBeNull();
+    expect(s.currentPlayerId).toBe('b');
+  });
 });
 
 describe('对质中弃权', () => {
@@ -487,3 +507,308 @@ describe('publicState 不泄露暗牌', () => {
   });
 });
 
+
+describe('目标已被淘汰', () => {
+  // a 暗杀只剩 1 张牌的 b（3 人局，b 淘汰后游戏仍继续）
+  function assassinateOneCardTarget() {
+    const s = setup({ a: ['assassin', 'captain'], b: ['captain', 'ambassador'], c: ['duke', 'duke'] });
+    s.players.find((p) => p.id === 'a')!.coins = 5;
+    s.players.find((p) => p.id === 'b')!.hand.pop();
+    chooseAction(s, 'a', 'assassinate', 'b');
+    return s;
+  }
+
+  it('目标的女伯爵阻挡被质疑成立而淘汰：暗杀不再要求其失去影响力，轮到下一位', () => {
+    const s = assassinateOneCardTarget();
+    resolveChallengeTimeout(s);
+    block(s, 'b', 'contessa');
+    challenge(s, 'a');
+    revealShowdownCard(s, 'b', s.players.find((p) => p.id === 'b')!.hand[0].id);
+    expect(s.players.find((p) => p.id === 'b')!.alive).toBe(false);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.lossToResolve).toBeNull();
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('目标质疑暗杀失败而淘汰：跳过阻挡窗口，轮到下一位', () => {
+    const s = assassinateOneCardTarget();
+    challenge(s, 'b');
+    revealShowdownCard(s, 'a', s.players.find((p) => p.id === 'a')!.hand[0].id);
+    resolveLoss(s, 'b', s.players.find((p) => p.id === 'b')!.hand[0].id);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('已淘汰的目标不能阻挡', () => {
+    const s = assassinateOneCardTarget();
+    resolveChallengeTimeout(s);
+    s.players.find((p) => p.id === 'b')!.alive = false;
+    expect(() => block(s, 'b', 'contessa')).toThrow(GameRuleError);
+  });
+});
+
+describe('失去影响力时弃权', () => {
+  it('质疑失败者在选牌前弃权：被质疑者的行动照常结算', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'assassin'] });
+    chooseAction(s, 'a', 'tax');
+    challenge(s, 'c');
+    revealShowdownCard(s, 'a', s.players.find((p) => p.id === 'a')!.hand[0].id);
+    expect(s.lossToResolve?.playerId).toBe('c');
+    forfeit(s, 'c');
+    expect(coins(s, 'a')).toBe(5);
+    expect(s.lossToResolve).toBeNull();
+    expect(s.currentPlayerId).toBe('b');
+  });
+});
+
+describe('弃权只作废弃权者自己的声称与行动', () => {
+  const hand = (s: GameState, id: string) => s.players.find((p) => p.id === id)!.hand;
+
+  it('征税者在质疑失败者选牌前弃权：质疑者照常失去影响力，征税作废，回合结束', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'assassin'] });
+    chooseAction(s, 'a', 'tax');
+    challenge(s, 'b');
+    revealShowdownCard(s, 'a', hand(s, 'a')[0].id);
+    forfeit(s, 'a');
+    expect(s.lossToResolve?.playerId).toBe('b');
+    resolveLoss(s, 'b', hand(s, 'b')[0].id);
+    expect(hand(s, 'b')).toHaveLength(1);
+    expect(coins(s, 'a')).toBe(2);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.currentPlayerId).toBe('b');
+  });
+
+  it.each(['coup', 'assassinate'] as const)('%s 的发动者在目标选牌前弃权：目标照常失去影响力', (action) => {
+    const s = setup({ a: ['assassin', 'captain'], b: ['duke', 'duke'], c: ['contessa', 'contessa'] });
+    s.players.find((p) => p.id === 'a')!.coins = 7;
+    chooseAction(s, 'a', action, 'b');
+    if (action === 'assassinate') {
+      resolveChallengeTimeout(s);
+      resolveBlockTimeout(s);
+    }
+    forfeit(s, 'a');
+    expect(s.lossToResolve?.playerId).toBe('b');
+    resolveLoss(s, 'b', hand(s, 'b')[0].id);
+    expect(hand(s, 'b')).toHaveLength(1);
+    expect(s.currentPlayerId).toBe('b');
+  });
+
+  it('阻挡外援者在对质中弃权：阻挡作废，外援照常结算', () => {
+    const s = setup({ a: ['captain', 'captain'], b: ['duke', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'foreignAid');
+    block(s, 'b', 'duke');
+    challenge(s, 'a');
+    forfeit(s, 'b');
+    expect(coins(s, 'a')).toBe(4);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('阻挡外援者在无人质疑前弃权：阻挡作废，外援照常结算', () => {
+    const s = setup({ a: ['captain', 'captain'], b: ['duke', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'foreignAid');
+    block(s, 'b', 'duke');
+    forfeit(s, 'b');
+    expect(coins(s, 'a')).toBe(4);
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('阻挡外援者对质胜出后弃权：质疑者照常失去影响力，外援照常结算', () => {
+    const s = setup({ a: ['captain', 'captain'], b: ['duke', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'foreignAid');
+    block(s, 'b', 'duke');
+    challenge(s, 'c');
+    revealShowdownCard(s, 'b', hand(s, 'b')[0].id);
+    forfeit(s, 'b');
+    expect(s.lossToResolve?.playerId).toBe('c');
+    resolveLoss(s, 'c', hand(s, 'c')[0].id);
+    expect(hand(s, 'c')).toHaveLength(1);
+    expect(coins(s, 'a')).toBe(4);
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('质疑阻挡失败的外援者因此失去最后一张牌：外援不再结算', () => {
+    const s = setup({ a: ['captain'], b: ['duke', 'ambassador'], c: ['contessa', 'contessa'], d: ['assassin', 'assassin'] });
+    chooseAction(s, 'a', 'foreignAid');
+    block(s, 'b', 'duke');
+    challenge(s, 'a');
+    revealShowdownCard(s, 'b', hand(s, 'b')[0].id);
+    forfeit(s, 'b');
+    resolveLoss(s, 'a', hand(s, 'a')[0].id);
+    expect(coins(s, 'a')).toBe(2);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.currentPlayerId).toBe('c');
+  });
+
+  it('行动目标弃权：行动作废，轮到下一位', () => {
+    const s = setup({ a: ['assassin', 'captain'], b: ['contessa', 'duke'], c: ['duke', 'duke'] });
+    s.players.find((p) => p.id === 'a')!.coins = 3;
+    chooseAction(s, 'a', 'assassinate', 'b');
+    resolveChallengeTimeout(s);
+    expect(s.phase).toBe('awaitingBlock');
+    forfeit(s, 'b');
+    expect(s.phase).toBe('choosingAction');
+    expect(s.lossToResolve).toBeNull();
+    expect(s.currentPlayerId).toBe('c');
+  });
+});
+
+describe('问询窗口中弃权', () => {
+  it('其余玩家都已放弃质疑后有人弃权：窗口关闭，行动照常结算', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'tax');
+    passChallenge(s, 'b');
+    forfeit(s, 'c');
+    expect(coins(s, 'a')).toBe(5);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.currentPlayerId).toBe('b');
+  });
+
+  it('其余玩家都已放弃阻挡后有人弃权：窗口关闭，外援照常结算', () => {
+    const s = setup({ a: ['captain', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'] });
+    chooseAction(s, 'a', 'foreignAid');
+    passBlock(s, 'b');
+    forfeit(s, 'c');
+    expect(coins(s, 'a')).toBe(4);
+    expect(s.phase).toBe('choosingAction');
+    expect(s.currentPlayerId).toBe('b');
+  });
+
+  it('还有人未表态时弃权：窗口保持', () => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'], c: ['contessa', 'contessa'], d: ['assassin', 'assassin'] });
+    chooseAction(s, 'a', 'tax');
+    passChallenge(s, 'b');
+    forfeit(s, 'c');
+    expect(s.phase).toBe('awaitingChallenge');
+    expect(coins(s, 'a')).toBe(2);
+  });
+});
+
+describe('非法行动', () => {
+  it.each(['bogus', '__proto__', 'toString'])('拒绝未知行动 %s', (action) => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'] });
+    expect(() => chooseAction(s, 'a', action as never)).toThrow(GameRuleError);
+    expect(s.phase).toBe('choosingAction');
+  });
+
+  it.each(['income', 'foreignAid', 'tax', 'exchange'] as const)('拒绝给无目标行动 %s 指定目标', (action) => {
+    const s = setup({ a: ['duke', 'captain'], b: ['ambassador', 'ambassador'] });
+    expect(() => chooseAction(s, 'a', action, 'b')).toThrow(GameRuleError);
+    expect(s.phase).toBe('choosingAction');
+    expect(coins(s, 'a')).toBe(1);
+  });
+});
+
+describe('Forfeit during an Exchange', () => {
+  it('returns the drawn cards when another player forfeits and the exchanger wins', () => {
+    const s = setup({ a: ['ambassador', 'duke'], b: ['captain', 'contessa'] });
+    chooseAction(s, 'a', 'exchange');
+    resolveChallengeTimeout(s);
+    expect(s.phase).toBe('choosingExchange');
+
+    forfeit(s, 'b');
+
+    expect(s.phase).toBe('gameOver');
+    expect(s.players.find((p) => p.id === 'a')!.hand).toHaveLength(2);
+    expect(publicState(s).players.find((p) => p.id === 'a')!.handCount).toBe(2);
+  });
+});
+
+describe('Post-game Reveal', () => {
+  // b coups a's last card: b wins holding [captain, duke]
+  function finished() {
+    const s = setup({ a: ['duke', 'contessa'], b: ['captain', 'duke'] });
+    const a = s.players.find((p) => p.id === 'a')!;
+    a.revealed.push(a.hand.pop()!);
+    s.currentPlayerId = 'b';
+    s.players.find((p) => p.id === 'b')!.coins = 7;
+    chooseAction(s, 'b', 'coup', 'a');
+    resolveLoss(s, 'a', a.hand[0].id);
+    expect(s.phase).toBe('gameOver');
+    return s;
+  }
+  const hand = (s: GameState, id: string) => s.players.find((p) => p.id === id)!.hand;
+  const view = (s: GameState, id: string) => publicState(s).players.find((p) => p.id === id)!;
+
+  it('lets the winner reveal hidden cards one at a time, exposing slot and role publicly', () => {
+    const s = finished();
+    expect(view(s, 'b').postGameRevealed).toEqual([]);
+
+    expect(revealPostGameCard(s, 'b', hand(s, 'b')[1].id)).toEqual([{ type: 'postGameRevealed', playerId: 'b', role: 'duke', slot: 1 }]);
+    expect(view(s, 'b').postGameRevealed).toEqual([{ slot: 1, role: 'duke' }]);
+
+    revealPostGameCard(s, 'b', hand(s, 'b')[0].id);
+    expect(view(s, 'b').postGameRevealed).toEqual([{ slot: 1, role: 'duke' }, { slot: 0, role: 'captain' }]);
+    expect(view(s, 'b')).toMatchObject({ handCount: 2, revealed: [] });
+  });
+
+  it('rejects a non-winner, an unfinished game, a card not in hand, and a repeat reveal', () => {
+    const s = finished();
+    expect(() => revealPostGameCard(s, 'a', hand(s, 'b')[0].id)).toThrow(GameRuleError);
+    expect(() => revealPostGameCard(s, 'b', 'nope')).toThrow(GameRuleError);
+    revealPostGameCard(s, 'b', hand(s, 'b')[0].id);
+    expect(() => revealPostGameCard(s, 'b', hand(s, 'b')[0].id)).toThrow(GameRuleError);
+
+    const live = setup({ a: ['duke', 'contessa'], b: ['captain', 'duke'] });
+    expect(() => revealPostGameCard(live, 'a', hand(live, 'a')[0].id)).toThrow(GameRuleError);
+    expect(view(live, 'a').postGameRevealed).toEqual([]);
+  });
+});
+
+describe('card invariants over random play', () => {
+  // Forfeit during an Exchange broke card counts twice (#32, then a winner keeping 4 cards), so check every step.
+  it('keeps 15 cards, and 2 per player except the exchanger’s 2 drawn cards', () => {
+    let seed = 42;
+    const random = vi.spyOn(Math, 'random').mockImplementation(() => (seed = (seed * 16807) % 2147483647) / 2147483647);
+    const pick = <T,>(items: readonly T[]) => items[Math.floor(Math.random() * items.length)];
+    const actions = ['income', 'foreignAid', 'coup', 'tax', 'assassinate', 'steal', 'exchange'] as const;
+    const roles = ['duke', 'assassin', 'captain', 'ambassador', 'contessa'] as const;
+    const timeouts: Partial<Record<GameState['phase'], (g: GameState) => unknown>> = {
+      awaitingChallenge: resolveChallengeTimeout,
+      awaitingBlock: resolveBlockTimeout,
+      showdown: resolveShowdownTimeout,
+      choosingLoss: resolveLossTimeout,
+      choosingExchange: resolveExchangeTimeout,
+    };
+    try {
+      for (let game = 0; game < 300; game++) {
+        const ids = Array.from({ length: 2 + (game % 5) }, (_, i) => `p${i}`);
+        const s = createGame(ids.map((id) => P(id)), { startingPlayerId: pick(ids) });
+        for (let step = 0; step < 300 && s.phase !== 'gameOver'; step++) {
+          const who = pick(ids);
+          const me = s.players.find((p) => p.id === who)!;
+          const r = Math.random();
+          try {
+            if (r < 0.03) forfeit(s, who);
+            else if (r < 0.12 && timeouts[s.phase]) timeouts[s.phase]!(s);
+            else {
+              const move = pick(['act', 'challenge', 'passChallenge', 'block', 'passBlock', 'reveal', 'loss', 'exchange'] as const);
+              if (move === 'act') {
+                const action = pick(actions);
+                chooseAction(s, who, action, ['coup', 'assassinate', 'steal'].includes(action) ? pick(ids) : undefined);
+              }
+              if (move === 'challenge') challenge(s, who);
+              if (move === 'passChallenge') passChallenge(s, who);
+              if (move === 'block') block(s, who, pick(roles));
+              if (move === 'passBlock') passBlock(s, who);
+              if (move === 'reveal' && me.hand.length) revealShowdownCard(s, who, pick(me.hand).id);
+              if (move === 'loss' && me.hand.length) resolveLoss(s, who, pick(me.hand).id);
+              if (move === 'exchange') resolveExchange(s, who, me.hand.slice(0, s.exchangeKeepCount ?? 0).map((c) => c.id));
+            }
+          } catch (error) {
+            if (error instanceof GameRuleError) continue;
+            throw error;
+          }
+          const where = `game ${game} step ${step} (${s.phase})`;
+          expect(s.deck.length + s.players.reduce((n, p) => n + p.hand.length + p.revealed.length, 0), where).toBe(15);
+          for (const p of s.players) {
+            const drawn = s.phase === 'choosingExchange' && s.pending?.actorId === p.id ? 2 : 0;
+            expect(p.hand.length + p.revealed.length, `${where} ${p.id}`).toBe(2 + drawn);
+          }
+        }
+      }
+    } finally {
+      random.mockRestore();
+    }
+  });
+});

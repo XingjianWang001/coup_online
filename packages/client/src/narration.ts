@@ -1,43 +1,51 @@
-import type { GameEvent, PublicState } from '@coup/shared';
-import { translate, type Locale } from './localization.ts';
-import { actionName, roleName } from './rules.ts';
+import type { ActionType, GameEvent, Phrase, PublicState, Reaction, Role } from '@coup/shared';
+import { translate, translateParts, type Locale, type MessageKey } from './localization.ts';
+import { ACTIONS, actionName, roleName } from './rules.ts';
 
 export function nameOf(state: PublicState, id: string | null | undefined): string {
   if (!id) return '？';
   return state.players.find((p) => p.id === id)?.name ?? '？';
 }
 
+/** 一段界面文字：role 表示这段是角色名或该角色的行动名（界面按角色上色），target 表示这段是目标昵称 */
+export type Segment = string | { text: string; role?: Role; target?: true };
+
+export const segmentsText = (segments: Segment[]): string =>
+  segments.map((s) => (typeof s === 'string' ? s : s.text)).join('');
+
+const roleSegment = (locale: Locale, role: Role): Segment => ({ text: roleName(locale, role), role });
+
 function describeChosenAction(
   action: Pick<ActionChosen, 'actorId' | 'action' | 'targetId' | 'claimedRole'>,
   state: PublicState,
   locale: Locale,
-): string {
+): Segment[] {
   const actor = nameOf(state, action.actorId);
-  let text = action.claimedRole
-    ? translate(locale, 'narrationClaim', {
+  const segments = action.claimedRole
+    ? translateParts<Segment>(locale, 'narrationClaim', {
         actor,
-        role: roleName(locale, action.claimedRole),
+        role: roleSegment(locale, action.claimedRole),
         action: actionName(locale, action.action),
       })
-    : translate(locale, 'narrationAction', { actor, action: actionName(locale, action.action) });
-  if (action.targetId) text += translate(locale, 'narrationTarget', { target: nameOf(state, action.targetId) });
-  return text;
+    : [translate(locale, 'narrationAction', { actor, action: actionName(locale, action.action) })];
+  if (action.targetId) segments.push(translate(locale, 'narrationTarget', { target: nameOf(state, action.targetId) }));
+  return segments;
 }
 
 /** 描述当前待处理的声称/行动/阻挡；无待处理时返回 null。 */
-export function describePending(state: PublicState, locale: Locale = 'zh-CN'): string | null {
+export function describePending(state: PublicState, locale: Locale = 'zh-CN'): Segment[] | null {
   const p = state.pending;
   if (!p) return null;
 
-  let text = describeChosenAction(p, state, locale);
+  const segments = describeChosenAction(p, state, locale);
   if (p.blockById && p.blockRole) {
-    text += translate(locale, 'narrationBlock', {
+    segments.push(...translateParts<Segment>(locale, 'narrationBlock', {
       blocker: nameOf(state, p.blockById),
-      role: roleName(locale, p.blockRole),
-    });
+      role: roleSegment(locale, p.blockRole),
+    }));
   }
 
-  return text;
+  return segments;
 }
 
 /** 别人在表态时的等待提示：说出在等谁、等什么；轮到自己表态（或牌局结束）时返回 null。 */
@@ -46,16 +54,18 @@ export function describeWaiting(state: PublicState, me: string, locale: Locale =
   const name = (id: string | null | undefined) => ({ name: nameOf(state, id) });
   const alive = state.players.find((x) => x.id === me)?.alive ?? false;
   const passed = state.passed.includes(me);
+  // 出局的玩家不再等谁：控制区没有等待提示，也就没有倒计时
+  if (!alive) return null;
   switch (state.phase) {
     case 'choosingAction':
       return state.currentPlayerId === me ? null : translate(locale, 'waitingForAction', name(state.currentPlayerId));
     case 'awaitingChallenge': {
       const claimant = state.challengeSubject === 'block' ? p?.blockById : p?.actorId;
-      return alive && claimant !== me && !passed ? null : translate(locale, 'waitingForChallenge');
+      return claimant !== me && !passed ? null : translate(locale, 'waitingForChallenge');
     }
     case 'awaitingBlock': {
-      if (p?.action === 'foreignAid') return alive && p.actorId !== me && !passed ? null : translate(locale, 'waitingForBlockAny');
-      return p?.targetId === me && alive && !passed ? null : translate(locale, 'waitingForBlock', name(p?.targetId));
+      if (p?.action === 'foreignAid') return p.actorId !== me && !passed ? null : translate(locale, 'waitingForBlockAny');
+      return p?.targetId === me && !passed ? null : translate(locale, 'waitingForBlock', name(p?.targetId));
     }
     case 'showdown':
       return state.showdown?.claimantId === me ? null : translate(locale, 'waitingForShowdown', name(state.showdown?.claimantId));
@@ -102,30 +112,37 @@ export function describeCountdown(
   return `${sec}s`;
 }
 
-/** 事件 → 日志文案；不重要的（回合流转/金币变化等）返回 null 跳过。 */
-export function describeEvent(e: GameEvent, state: PublicState, locale: Locale = 'zh-CN'): string | null {
+/** 事件 → 记录文案；不重要的（回合流转/金币变化等）返回 null 跳过。 */
+export function describeEvent(e: GameEvent, state: PublicState, locale: Locale = 'zh-CN'): Segment[] | null {
   switch (e.type) {
     case 'challenged':
-      return translate(locale, 'logChallenge', {
+      return [translate(locale, 'logChallenge', {
         challenger: nameOf(state, e.challengerId),
         target: nameOf(state, e.targetId),
-      });
+      })];
     case 'challengeResolved':
-      return translate(locale, e.truth ? 'logChallengeFailed' : 'logChallengeSucceeded', {
-        loser: nameOf(state, e.loserId),
-      });
+      if (e.truth) {
+        return translateParts<Segment>(locale, 'logChallengeFailed', {
+          claimant: nameOf(state, e.claimantId),
+          role: roleSegment(locale, e.role),
+          loser: nameOf(state, e.loserId),
+        });
+      }
+      return [translate(locale, 'logChallengeSucceeded', { loser: nameOf(state, e.loserId) })];
     case 'blocked':
-      return translate(locale, 'logBlock', { blocker: nameOf(state, e.blockerId), role: roleName(locale, e.role) });
+      return translateParts<Segment>(locale, 'logBlock', { blocker: nameOf(state, e.blockerId), role: roleSegment(locale, e.role) });
     case 'influenceLost':
-      return translate(locale, 'logInfluenceLost', { player: nameOf(state, e.playerId), role: roleName(locale, e.role) });
+      return translateParts<Segment>(locale, 'logInfluenceLost', { player: nameOf(state, e.playerId), role: roleSegment(locale, e.role) });
     case 'eliminated':
-      return translate(locale, 'logEliminated', { player: nameOf(state, e.playerId) });
+      return [translate(locale, 'logEliminated', { player: nameOf(state, e.playerId) })];
     case 'gameOver':
-      return translate(locale, 'logGameOver', { winner: nameOf(state, e.winnerId) });
+      return [translate(locale, 'logGameOver', { winner: nameOf(state, e.winnerId) })];
+    case 'postGameRevealed':
+      return translateParts<Segment>(locale, 'logPostGameRevealed', { player: nameOf(state, e.playerId), role: roleSegment(locale, e.role) });
     case 'coinsChanged':
-      return translate(locale, 'logCoinsChanged', { player: nameOf(state, e.playerId), coins: e.coins });
+      return [translate(locale, e.coins === 1 ? 'logCoinsChangedOne' : 'logCoinsChanged', { player: nameOf(state, e.playerId), coins: e.coins })];
     case 'exchangeDrew':
-      return translate(locale, 'logExchangeDrew', { player: nameOf(state, e.playerId), count: e.count });
+      return [translate(locale, 'logExchangeDrew', { player: nameOf(state, e.playerId), count: e.count })];
     default:
       return null;
   }
@@ -134,7 +151,7 @@ export function describeEvent(e: GameEvent, state: PublicState, locale: Locale =
 export type ActionChosen = Extract<GameEvent, { type: 'actionChosen' }>;
 
 /** 行动头部文案（actionChosen 事件）。 */
-export function describeAction(e: ActionChosen, state: PublicState, locale: Locale = 'zh-CN'): string {
+export function describeAction(e: ActionChosen, state: PublicState, locale: Locale = 'zh-CN'): Segment[] {
   return describeChosenAction(e, state, locale);
 }
 
@@ -145,8 +162,8 @@ export interface LogEntry {
 
 export interface LogGroup {
   id: number;
-  action: string;
-  entries: { id: number; text: string }[];
+  action: Segment[];
+  entries: { id: number; text: Segment[] }[];
 }
 
 /** 把扁平事件按行动分组：actionChosen 开组、turnChanged 收组、gameOver 独立成组。 */
@@ -176,4 +193,30 @@ export function groupLog(entries: LogEntry[], state: PublicState, locale: Locale
     }
   }
   return groups;
+}
+
+const PHRASE_MESSAGES: Record<Phrase, MessageKey> = {
+  doubt: 'phraseDoubt', sure: 'phraseSure', dare: 'phraseDare', honest: 'phraseHonest',
+  mercy: 'phraseMercy', close: 'phraseClose', respect: 'phraseRespect',
+};
+const ANNOUNCEMENT_MESSAGES: Record<ActionType, MessageKey> = {
+  income: 'announcementTake', foreignAid: 'announcementTake', tax: 'announcementPlain', exchange: 'announcementPlain',
+  coup: 'announcementTargeted', assassinate: 'announcementTargeted', steal: 'announcementSteal',
+};
+
+export function describeReaction(locale: Locale, reaction: Reaction, nameOf: (id: string) => string): Segment[] {
+  switch (reaction.kind) {
+    case 'phrase':
+      return [translate(locale, PHRASE_MESSAGES[reaction.phrase])];
+    case 'verbalClaim':
+      return translateParts<Segment>(locale, reaction.has ? 'verbalClaimHas' : 'verbalClaimHasNot', {
+        role: roleSegment(locale, reaction.role),
+      });
+    case 'announcement':
+      return translateParts<Segment>(locale, ANNOUNCEMENT_MESSAGES[reaction.action], {
+        // 行动名按该行动要声称的角色上色；收入、外援、政变没有角色
+        action: { text: actionName(locale, reaction.action), role: ACTIONS.find((a) => a.type === reaction.action)?.claim },
+        target: { text: reaction.targetId ? nameOf(reaction.targetId) : '', target: true },
+      });
+  }
 }

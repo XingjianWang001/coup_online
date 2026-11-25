@@ -1,7 +1,6 @@
 import type {
   ActionType,
   Card,
-  ChallengeSubject,
   GameEvent,
   GameState,
   LossContinuation,
@@ -15,19 +14,25 @@ export class GameRuleError extends Error {
   override name = 'GameRuleError';
 }
 
-const ROLE_ORDER: Role[] = ['duke', 'assassin', 'captain', 'ambassador', 'contessa'];
+export const ROLE_ORDER: readonly Role[] = ['duke', 'assassin', 'captain', 'ambassador', 'contessa'];
 
-const DECK: Role[] = ROLE_ORDER.flatMap((r) => [r, r, r]); // 5 角色 × 3 = 15 张
+export const ROLE_COPIES = 3;
+const DECK: Role[] = ROLE_ORDER.flatMap((r) => Array<Role>(ROLE_COPIES).fill(r)); // 5 角色 × 3 = 15 张
 
 const START_COINS = 2;
 const START_CARDS = 2;
-const COUP_COST = 7;
-const ASSASSINATE_COST = 3;
-const STEAL_AMOUNT = 2;
+export const COUP_COST = 7;
+export const FORCED_COUP_COINS = 10; // 金币到这个数，该回合只能政变
+export const ASSASSINATE_COST = 3;
+export const MAX_PLAYERS = 6;
+export const STEAL_AMOUNT = 2;
 const EXCHANGE_DRAW = 2;
 
+/** 政变、暗杀、偷窃要指定目标；其余行动不能指定 */
+export const needsTarget = (action: ActionType): boolean => action === 'coup' || action === 'assassinate' || action === 'steal';
+
 // 行动声称的角色（null = 不声称角色）
-const ACTION_CLAIM: Record<ActionType, Role | null> = {
+export const ACTION_CLAIM: Readonly<Record<ActionType, Role | null>> = {
   income: null,
   foreignAid: null,
   coup: null,
@@ -38,7 +43,7 @@ const ACTION_CLAIM: Record<ActionType, Role | null> = {
 };
 
 // 各行动可被哪些角色阻挡（空数组 = 不可阻挡）
-const BLOCK_ROLES: Record<ActionType, Role[]> = {
+export const BLOCK_ROLES: Readonly<Record<ActionType, readonly Role[]>> = {
   income: [],
   foreignAid: ['duke'],
   coup: [],
@@ -75,10 +80,19 @@ function nextAliveAfter(state: GameState, id: string | null): Player {
   throw new Error('no alive player');
 }
 
+// 交换选牌中途结束（弃权、牌局结束）：摸到的牌放回牌堆，交换者只留原有手牌
+function returnExchangeDraw(state: GameState): void {
+  if (state.phase !== 'choosingExchange' || !state.pending || state.exchangeKeepCount === null) return;
+  state.deck.push(...getPlayer(state, state.pending.actorId).hand.splice(state.exchangeKeepCount));
+  shuffle(state.deck);
+  state.exchangeKeepCount = null;
+}
+
 // 检查是否只剩一个存活者 → 结束游戏
 function checkWin(state: GameState): GameEvent[] {
   const al = alive(state);
   if (al.length === 1) {
+    returnExchangeDraw(state);
     state.phase = 'gameOver';
     state.winnerId = al[0].id;
     state.currentPlayerId = null;
@@ -93,18 +107,10 @@ function checkWin(state: GameState): GameEvent[] {
   return [];
 }
 
-// 从牌堆抽 n 张；牌堆不足时用明牌（弃牌）回填再抽。
+// 从牌堆抽 n 张。15 张牌、牌堆外最多 14 张（6 人 12 张 + 交换时多摸的 2 张），牌堆不会被抽空。
 function draw(state: GameState, n: number): Card[] {
   const out: Card[] = [];
-  for (let i = 0; i < n; i++) {
-    if (state.deck.length === 0) {
-      const revealed = state.players.flatMap((p) => p.revealed);
-      state.players.forEach((p) => (p.revealed = []));
-      state.deck = shuffle(revealed);
-      if (state.deck.length === 0) break;
-    }
-    out.push(state.deck.pop()!);
-  }
+  for (let i = 0; i < n; i++) out.push(state.deck.pop()!);
   return out;
 }
 
@@ -149,7 +155,7 @@ function applyContinuation(state: GameState, cont: LossContinuation): GameEvent[
 // 行动声称通过（或外援）后继续：可阻挡则进阻挡窗口，否则结算效果
 function proceedAction(state: GameState): GameEvent[] {
   const pending = state.pending!;
-  if (BLOCK_ROLES[pending.type].length > 0) {
+  if (BLOCK_ROLES[pending.type].length > 0 && eligibleBlockers(state).length > 0) {
     state.phase = 'awaitingBlock';
     return [];
   }
@@ -160,6 +166,8 @@ function proceedAction(state: GameState): GameEvent[] {
 function resolveEffect(state: GameState): GameEvent[] {
   const pending = state.pending!;
   const actor = getPlayer(state, pending.actorId);
+  // 行动者或目标已在本回合的质疑中被淘汰：行动不再生效
+  if (!actor.alive || (pending.targetId && !getPlayer(state, pending.targetId).alive)) return advanceTurn(state);
   const events: GameEvent[] = [];
   switch (pending.type) {
     case 'foreignAid':
@@ -202,12 +210,12 @@ export function createGame(
   players: { id: string; name: string }[],
   options: { startingPlayerId: string; hands?: Record<string, Role[]> },
 ): GameState {
-  if (players.length < 2 || players.length > 6) {
-    throw new GameRuleError('players must be 2-6');
+  if (players.length < 2 || players.length > MAX_PLAYERS) {
+    throw new GameRuleError(`players must be 2-${MAX_PLAYERS}`);
   }
   const startingPlayerIndex = players.findIndex((player) => player.id === options.startingPlayerId);
   if (startingPlayerIndex < 0) throw new GameRuleError('starting player not found');
-  let deck = DECK.map((role, i) => ({ id: `${role}-${i}`, role }));
+  const deck = DECK.map((role, i) => ({ id: `${role}-${i}`, role }));
   shuffle(deck);
 
   const playerStates: Player[] = players.map((p, index) => ({
@@ -247,6 +255,7 @@ export function createGame(
     exchangeKeepCount: null,
     passed: [],
     winnerId: null,
+    postGameRevealedSlots: [],
   };
 }
 
@@ -261,12 +270,14 @@ export function chooseAction(
   const actor = getPlayer(state, actorId);
   if (!actor.alive) throw new GameRuleError('actor eliminated');
 
-  if (actor.coins >= 10 && action !== 'coup') {
-    throw new GameRuleError('持有 10 枚以上金币必须发动政变');
+  if (!Object.hasOwn(ACTION_CLAIM, action)) throw new GameRuleError(`unknown action ${String(action)}`);
+
+  if (actor.coins >= FORCED_COUP_COINS && action !== 'coup') {
+    throw new GameRuleError(`持有 ${FORCED_COUP_COINS} 枚以上金币必须发动政变`);
   }
 
-  const needsTarget = action === 'coup' || action === 'assassinate' || action === 'steal';
-  if (needsTarget && !targetId) throw new GameRuleError(`${action} 需要目标`);
+  if (needsTarget(action) && !targetId) throw new GameRuleError(`${action} 需要目标`);
+  if (!needsTarget(action) && targetId) throw new GameRuleError(`${action} 不能指定目标`);
   if (targetId) {
     const target = getPlayer(state, targetId);
     if (!target.alive) throw new GameRuleError('target eliminated');
@@ -416,9 +427,9 @@ export function block(state: GameState, blockerId: string, role: Role): GameEven
   const pending = state.pending!;
   if (!BLOCK_ROLES[pending.type].includes(role)) throw new GameRuleError(`无法用 ${role} 阻挡 ${pending.type}`);
 
+  if (!getPlayer(state, blockerId).alive) throw new GameRuleError('blocker eliminated');
   if (pending.type === 'foreignAid') {
     if (blockerId === pending.actorId) throw new GameRuleError('不能阻挡自己的外援');
-    if (!getPlayer(state, blockerId).alive) throw new GameRuleError('blocker eliminated');
   } else {
     if (blockerId !== pending.targetId) throw new GameRuleError('只有目标可以阻挡');
   }
@@ -493,10 +504,20 @@ export function resolveExchange(state: GameState, playerId: string, keepIds: str
   return advanceTurn(state);
 }
 
-// 断线弃权：翻开全部暗牌、淘汰，并清理所有指向该玩家的待处理状态，避免死锁。
+// 交换选牌超时的默认选择：保留原手牌（在前面），摸到的牌全部放回牌堆
+export function resolveExchangeTimeout(state: GameState): GameEvent[] {
+  if (state.phase !== 'choosingExchange') throw new GameRuleError('not in choosingExchange phase');
+  const { actorId } = state.pending!;
+  const original = getPlayer(state, actorId).hand.slice(0, state.exchangeKeepCount!);
+  return resolveExchange(state, actorId, original.map((c) => c.id));
+}
+
+// 弃权（断线超时或牌局中离开）：翻开全部暗牌、淘汰；只作废该玩家自己的声称与行动，他人欠下的失去影响力照常结算。
 export function forfeit(state: GameState, playerId: string): GameEvent[] {
   const p = getPlayer(state, playerId);
   if (!p.alive) return [];
+  // 交换选牌中弃权：摸到的牌先放回牌堆，只翻开原有手牌
+  if (state.pending?.actorId === playerId) returnExchangeDraw(state);
   const events: GameEvent[] = [];
   while (p.hand.length > 0) {
     const c = p.hand.pop()!;
@@ -509,25 +530,51 @@ export function forfeit(state: GameState, playerId: string): GameEvent[] {
   const win = checkWin(state);
   if (state.phase === 'gameOver') return events.concat(win);
 
-  // 该玩家若正处于待处理状态（当前回合 / 待失去影响力 / 待交换 / 行动相关），
-  // 作废当前行动并推进回合，避免游戏卡在无人可解的状态。
-  const involved =
-    state.currentPlayerId === playerId ||
-    state.lossToResolve?.playerId === playerId ||
-    (state.phase === 'choosingExchange' && state.pending?.actorId === playerId) ||
-    (state.pending &&
-      (state.pending.actorId === playerId ||
-        state.pending.targetId === playerId ||
-        state.pending.blockById === playerId));
+  // 该玩家正待失去影响力：弃权已翻开全部暗牌，按原定后续继续（如质疑失败者离开，被质疑者的行动照常结算）
+  if (state.lossToResolve?.playerId === playerId) {
+    const { continuation } = state.lossToResolve;
+    state.lossToResolve = null;
+    return events.concat(applyContinuation(state, continuation));
+  }
 
-  if (involved) return events.concat(advanceTurn(state));
+  // 弃权只作废弃权者自己的声称与行动；其他玩家已欠下的失去影响力照常结算，结算后再按下面的规则继续。
+  // 行动者（即当前玩家）或行动目标弃权：行动作废，回合结束。
+  // 阻挡者弃权（只会是外援的阻挡者，其余行动只有目标能阻挡）：阻挡作废，行动照常结算。
+  const voidsAction = state.currentPlayerId === playerId || state.pending?.targetId === playerId;
+  if (voidsAction || state.pending?.blockById === playerId) {
+    if (state.lossToResolve) {
+      state.lossToResolve.continuation = { kind: voidsAction ? 'cancelAction' : 'resolveEffect' };
+      return events;
+    }
+    return events.concat(voidsAction ? advanceTurn(state) : resolveEffect(state));
+  }
   // 质疑者在对质中弃权：质疑作废，等同无人质疑
   if (state.showdown?.challengerId === playerId) {
     const { subject } = state.showdown;
     state.showdown = null;
     return events.concat(subject === 'action' ? proceedAction(state) : advanceTurn(state));
   }
+  // 弃权者是问询窗口里最后一个未表态的人：窗口照 passChallenge / passBlock 关闭
+  if (state.phase === 'awaitingChallenge' && eligibleChallengers(state).every((id) => state.passed.includes(id))) {
+    return events.concat(closeChallenge(state));
+  }
+  if (state.phase === 'awaitingBlock' && eligibleBlockers(state).every((id) => state.passed.includes(id))) {
+    state.passed = [];
+    return events.concat(resolveEffect(state));
+  }
   return events;
+}
+
+// 赛后揭晓：获胜者自愿公开一张暗牌，不算失去影响力，牌仍留在手中
+export function revealPostGameCard(state: GameState, playerId: string, cardId: string): GameEvent[] {
+  if (state.phase !== 'gameOver') throw new GameRuleError('not in gameOver phase');
+  if (playerId !== state.winnerId) throw new GameRuleError('only the winner can reveal');
+  const p = getPlayer(state, playerId);
+  const slot = p.hand.findIndex((c) => c.id === cardId);
+  if (slot < 0) throw new GameRuleError('card not in hand');
+  if (state.postGameRevealedSlots.includes(slot)) throw new GameRuleError('card already revealed');
+  state.postGameRevealedSlots.push(slot);
+  return [{ type: 'postGameRevealed', playerId, role: p.hand[slot].role, slot }];
 }
 
 export function publicState(state: GameState): PublicState {
@@ -540,6 +587,7 @@ export function publicState(state: GameState): PublicState {
       handCount: p.hand.length,
       revealed: p.revealed.map((c) => c.role),
       alive: p.alive,
+      postGameRevealed: p.id === state.winnerId ? state.postGameRevealedSlots.map((slot) => ({ slot, role: p.hand[slot].role })) : [],
     })),
     currentPlayerId: state.currentPlayerId,
     pending: state.pending

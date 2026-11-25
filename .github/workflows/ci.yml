@@ -41,6 +41,19 @@ jobs:
       - name: Build client
         run: pnpm build:client
 
+      # 默认场景：真人加入电脑房间并开局，覆盖构建产物、服务端和浏览器之间的整条链路
+      - name: Run browser UI check
+        env:
+          CHROME: /usr/bin/google-chrome
+          NO_BUILD: '1'
+        run: |
+          # Ubuntu 24.04 的 AppArmor 默认禁止 Chrome 沙箱需要的非特权用户命名空间
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          pnpm ui-check
+
+      - name: Check deployment package without Windows
+        run: ./deploy.sh -Check -Revision "$GITHUB_SHA"
+
   deploy-scripts:
     runs-on: windows-latest
     timeout-minutes: 5

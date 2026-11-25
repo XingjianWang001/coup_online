@@ -14,7 +14,17 @@ export type {
 } from './types.ts';
 
 export {
+  ACTION_CLAIM,
+  ASSASSINATE_COST,
+  BLOCK_ROLES,
+  COUP_COST,
+  FORCED_COUP_COINS,
+  MAX_PLAYERS,
   GameRuleError,
+  ROLE_COPIES,
+  STEAL_AMOUNT,
+  ROLE_ORDER,
+  needsTarget,
   block,
   challenge,
   chooseAction,
@@ -27,8 +37,10 @@ export {
   resolveBlockTimeout,
   resolveChallengeTimeout,
   resolveExchange,
+  resolveExchangeTimeout,
   resolveLoss,
   resolveLossTimeout,
   resolveShowdownTimeout,
+  revealPostGameCard,
   revealShowdownCard,
 } from './game.ts';

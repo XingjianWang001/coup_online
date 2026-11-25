@@ -11,3 +11,5 @@ assets
 lessons
 reference
 .edge
+**/data
+.private-credits

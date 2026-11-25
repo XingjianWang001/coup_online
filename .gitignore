@@ -455,6 +455,9 @@ dist/
 skills-lock.json
 PRODUCT.md
 .deploy-private.local.json
+/.private-credits/
+# 本地运行时的运营数据（DATA_DIR 默认 ./data，相对服务进程的工作目录）
+data/
 .edge/
 
 

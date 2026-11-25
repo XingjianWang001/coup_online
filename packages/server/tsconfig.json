@@ -1,4 +1,6 @@
 {
   "extends": "../../tsconfig.base.json",
+  // allowJs：测试直接引入 scripts/ 里的 .mjs（部署检查）
+  "compilerOptions": { "allowJs": true },
   "include": ["src"]
 }

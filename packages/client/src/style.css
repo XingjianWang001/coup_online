@@ -34,6 +34,7 @@
   --gold:       oklch(0.83 0.140 90);
   --gold-soft:  oklch(0.72 0.120 90);
   --gold-dim:   oklch(0.52 0.070 90);
+  --gold-pale:  oklch(0.86 0.110 90);  /* 进阶电脑玩家的徽标 */
 
   /* 角色色（领域约定，语义固定） */
   --duke:       oklch(0.74 0.090 70);
@@ -99,18 +100,24 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
 }
-*::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-*::-webkit-scrollbar-thumb {
-  background: var(--line);
-  border-radius: 999px;
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
+/* 不支持 scrollbar-color 的旧 Safari 才用 webkit 伪元素；scrollbar-width: thin 会让它们失效，先复位 */
+@supports not (scrollbar-color: auto) {
+  * {
+    scrollbar-width: auto;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--line);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
 }
 
 /* ---------- 布局骨架 ---------- */
@@ -204,6 +211,13 @@ button.primary:hover:not(:disabled) {
   border-color: var(--gold-soft);
 }
 
+/* 金色只给「现在能点」：不可点的主按钮退回普通按钮的禁用样子，免得半透明金块成了页面上最醒目的东西 */
+button.primary:disabled {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--text);
+}
+
 button.ghost {
   background: transparent;
   border-color: var(--line);
@@ -213,11 +227,6 @@ button.ghost {
 button.ghost:hover:not(:disabled) {
   background: var(--panel-2);
   color: var(--text);
-}
-
-button.active {
-  outline: 2px solid var(--gold);
-  outline-offset: 2px;
 }
 
 /* 角色动作按钮：颜色即语义（用 X 阻挡 / 翻开 X / 交换） */
@@ -254,6 +263,7 @@ input {
   color: var(--text);
   font-size: 16px;
   font-family: inherit;
+  caret-color: var(--gold);
 }
 
 input::placeholder {
@@ -294,6 +304,7 @@ input:focus-visible {
 }
 
 .notice {
+  overflow-wrap: anywhere;
   --surface: color-mix(in srgb, var(--gold) 13%, var(--panel));
   background: var(--surface);
   color: var(--gold);
@@ -304,11 +315,6 @@ input:focus-visible {
   font-size: 15px;
 }
 
-.notice.big {
-  font-size: 20px;
-  font-weight: 700;
-  font-family: 'Noto Serif SC', 'Noto Serif', Georgia, serif;
-}
 
 /* ---------- 大厅 / 房间 ---------- */
 .entry-form {
@@ -325,6 +331,34 @@ input:focus-visible {
 
 .entry-form button {
   width: 100%;
+}
+
+/* 加入链接进来时的那一行：房间码只是被告知，不是要填的字段，所以不画框、不上金 */
+.entry-invite {
+  margin: 0 0 var(--sp-1);
+  color: var(--text-2);
+}
+
+.entry-invite b {
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 「改为创建新房间」：退到文字按钮，不和金色的「加入」争 */
+.entry-form button.entry-switch,
+.entry-form button.entry-switch:hover:not(:disabled) {
+  background: none;
+  border-color: transparent;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.entry-form button.entry-switch:hover {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .filing {
@@ -404,22 +438,108 @@ input:focus-visible {
   border-bottom: none;
 }
 
-.playerlist li.host {
-  color: var(--gold);
-  font-weight: 600;
+/* 离线：名字退到三级文字色，后面的断线图标不靠颜色也能认出 */
+.playerlist .offline {
+  color: var(--text-3);
 }
+
+/* 两段文字叠在同一格，按钮宽度取较宽的一段；藏起的那段只占位 */
+.start-game {
+  display: inline-grid;
+}
+
+.start-game > span {
+  grid-area: 1 / 1;
+}
+
+.start-game > [aria-hidden='true'] {
+  visibility: hidden;
+}
+
+/* 带移除按钮的行：按钮保留 44px 触控高度，行内边距收紧，免得名单被撑高 */
+.playerlist li:has(button) {
+  padding-block: var(--sp-1);
+}
+
+/* 电脑玩家徽标：细线条；进阶电脑只变成淡金色，图形不变 */
+.computer-badge .glyph,
+.robot-glyph {
+  stroke-width: 1.5;
+}
+
+.computer-badge.advanced {
+  color: var(--gold-pale);
+}
+
+/* 名单标题行：添加电脑玩家的图标按钮钉在右侧 */
+.roster-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.roster-head h3 {
+  margin: 0;
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+}
+
+.computer-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-shrink: 0;
+}
+
 
 /* ---------- 牌局 ---------- */
 .board {
-  --notice-exit-duration: 180ms;
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
-  transition: gap var(--notice-exit-duration) cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.board:has(> .notice-region.exiting) {
-  gap: 0;
+/* 提示条浮在页头那一行上，不占牌桌的位置：出现、收起都不推动座位和控制区，
+   决策倒计时里按钮不会在手指下挪动。点击穿透到下面的页头按钮 */
+.board > .notice-region {
+  position: fixed;
+  top: var(--sp-4);
+  left: 50%;
+  translate: -50% 0;
+  z-index: 20;
+  width: max-content;
+  max-width: calc(100vw - 2 * var(--sp-4));
+  pointer-events: none;
+}
+.board > .notice-region .notice { box-shadow: 0 8px 24px oklch(0.08 0.01 155 / 0.55); }
+/* 抽屉：从屏幕上沿滑下，到点原路滑回；滑出期间不淡、不收高度（收高度会把条剪掉），滑完再收。
+   滑出时长与 App.tsx 的 NOTICE_GAP_MS 对齐：下一条等这一条滑完才进来 */
+.board > .notice-region {
+  --notice-exit-duration: 240ms;
+  --drawer-off: translateY(calc(-100% - var(--sp-4) - 24px)); /* 连同阴影一起出屏 */
+  transition: grid-template-rows 1ms linear var(--notice-exit-duration);
+}
+.board > .notice-region .notice-region-inner { overflow: visible; }
+.board > .notice-region .notice { animation: drawer-in 320ms cubic-bezier(0.16, 1, 0.3, 1); }
+.board > .notice-region .transient-message { transition: transform var(--notice-exit-duration) cubic-bezier(0.4, 0, 1, 1); }
+.board > .notice-region.exiting .transient-message { opacity: 1; transform: var(--drawer-off); }
+@keyframes drawer-in {
+  from { transform: var(--drawer-off); }
+}
+/* 窄屏页头两端都占满：整条盖住页头，而不是压住半个按钮 */
+@media (width <= 768px) {
+  .board > .notice-region {
+    left: var(--sp-4);
+    right: var(--sp-4);
+    translate: none;
+    width: auto;
+  }
 }
 
 .board-content {
@@ -470,20 +590,42 @@ input:focus-visible {
    桌面端用 cos()/sin() 把角度投影到椭圆弧上；手机端改为左右两侧 + 正对面的网格。 */
 .table {
   --rx: calc(50% - 90px);
-  --cy: calc(100% - 80px);
-  --ry: calc(100% - 170px);
+  --cy: calc(100% - 100px);
+  --ry: calc(100% - 200px);
   position: relative;
-  height: 440px;
+  height: 500px;
 }
 
+/* 叙述落在桌心：各人数用 --narr-y 指明桌心高度，未指明的（两个对手）沿用椭圆弧上的默认位置。 */
+
+/* 只有一个对手时座位落在正上方，中心固定在 100px，带铭牌约 186px 高（下沿约 193px）；
+   自己的座位在牌桌下方约 16px，叙述放在两者正中间：(193 + 100% + 16) / 2 */
 .table[data-seats='1'] {
-  height: 320px;
+  height: 360px;
+  --narr-y: calc(50% + 104px);
 }
 
 .table[data-seats='2'] {
-  height: 240px;
+  height: 290px;
 }
 
+/* 三个对手：左右两座落在 --cy 上，叙述与它们同高，就是十字的中心 */
+.table[data-seats='3'] {
+  --narr-y: var(--cy);
+}
+
+/* 四个对手：叙述放在五个座位中心的平均位置（五边形中心）。
+   对手两座在 --cy、两座在 --cy − sin60°·--ry；自己的座位中心约在牌桌下沿以下 105px（16px 间距 + 半个座位高） */
+.table[data-seats='4'] {
+  --narr-y: calc((4 * var(--cy) - 1.732 * var(--ry) + 100% + 105px) / 5);
+}
+
+/* 三个对手没有斜角座位，不需要五人弧那么高；平板、手机断点在后面另设高度 */
+.table[data-seats='3'] {
+  height: 400px;
+}
+
+.opponent-seats,
 .rail {
   display: contents;
 }
@@ -505,23 +647,42 @@ input:focus-visible {
   transform: translate(-50%, -50%);
   flex-direction: column;
   gap: var(--sp-2);
-  max-width: 168px;
+  /* 定宽：铭牌里的文字长短不会撑宽座位 */
+  width: 168px;
+  --pad-x: var(--sp-3);
+  --pad-b: var(--sp-3);
   padding: var(--sp-3);
 }
 
+/* 自己的座位：网格（留白 | 名字 | 间距 | 牌 | 留白），铭牌跨满整行。
+   两侧 1fr 留白在桌面端（max-content）收为 0，在手机端（width: 100%）把名字和牌居中 */
 .seat.self {
-  justify-content: center;
-  gap: var(--sp-5);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto var(--sp-5) auto minmax(0, 1fr);
+  align-items: center;
   width: max-content;
   max-width: 100%;
   margin: 0 auto;
-  padding: var(--sp-4) var(--sp-6);
+  --pad-x: var(--sp-6);
+  --pad-b: var(--sp-4);
+  padding: var(--sp-4) var(--pad-x) var(--pad-b);
 }
 
-.seat.current {
+.seat.self > .seat-head { grid-column: 2; }
+.seat.self > .cards-row { grid-column: 4; }
+
+/* 终局时金环交给胜者，名字前戴冠 */
+.seat.current,
+.seat.winner {
   border-color: var(--gold);
   box-shadow: 0 0 0 1px var(--gold-dim);
 }
+
+.seat-crown {
+  color: var(--gold);
+  margin-inline-end: var(--sp-1);
+}
+.seat-crown svg { width: 18px; height: 18px; }
 
 /* 正在私下选牌失去影响力：与当前玩家同样醒目，但用虚线区分「在等他」与「轮到他」 */
 .seat.losing {
@@ -529,9 +690,103 @@ input:focus-visible {
   border-style: dashed;
 }
 
+/* 出局座位只压暗座位内容，铭牌保持清晰：出局的人仍可以表态 */
 .seat.dead {
+  border-color: var(--line-2);
+}
+
+.seat > :not(.nameplate) {
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.seat.dead > :not(.nameplate) {
   opacity: 0.4;
   filter: saturate(0.4);
+}
+
+/* ---------- 铭牌（表态） ----------
+   贴在座位下沿的一条底带，常驻占位：有人表态时亮起，表态出现、消失都不推动任何东西。
+   底带不染色；角色名、该角色的行动名用角色色。 */
+.nameplate {
+  --lines: 2;
+  --lh: 1.3;
+  font-size: 13px;
+  line-height: var(--lh);
+  height: calc(1em * var(--lh) * var(--lines) + var(--sp-3));
+  width: calc(100% + 2 * var(--pad-x));
+  margin: var(--sp-1) calc(-1 * var(--pad-x)) calc(-1 * var(--pad-b));
+  padding: 0 var(--sp-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text);
+  background: color-mix(in srgb, var(--canvas) 55%, var(--felt));
+  border-top: 1px solid var(--line-2);
+  border-radius: 0 0 calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px);
+  transition: background-color 0.3s ease;
+}
+
+.nameplate.speaking {
+  background: var(--panel-2);
+  cursor: pointer;
+}
+
+/* 自己的铭牌跨满网格；contain: inline-size 让文字不参与座位宽度计算（否则说话时座位被撑宽） */
+.seat.self > .nameplate {
+  grid-column: 1 / -1;
+  width: auto;
+  margin-top: var(--sp-3);
+  contain: inline-size;
+}
+
+.nameplate-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--lines);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  /* 唯一的动效：说出口——从轻微失焦处浮起，最后自己淡出；淡出结束时刻与 App.tsx 的 REACTION_MS（3s）对齐 */
+  animation:
+    speak-in 280ms cubic-bezier(0.16, 1, 0.3, 1),
+    speak-out 320ms ease-in 2680ms forwards;
+}
+
+@keyframes speak-in {
+  from { opacity: 0; translate: 0 5px; filter: blur(3px); }
+}
+
+@keyframes speak-out {
+  to { opacity: 0; }
+}
+
+/* 超长昵称只截昵称本身，动作不被吃掉 */
+.nameplate-target {
+  font-weight: 600;
+  display: inline-block;
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* 铭牌、叙述和记录里的角色名。亮起的底带（panel-2）上刺客红、女伯爵紫只有约 4:1：五色明度统一向象牙色提 20%（L×0.8+0.19，彩度×0.8），都过 4.5:1；记录沿用。
+   色相不动：和象牙色 color-mix 会把色相拉向 92°，队长变青、女伯爵变粉。不支持相对颜色的浏览器退回 .role--* 的原色。叙述另见下方，用原色 */
+.role-name { font-weight: 600; }
+.role-name.role--duke       { color: oklch(from var(--duke) calc(l * 0.8 + 0.19) calc(c * 0.8) h); }
+.role-name.role--assassin   { color: oklch(from var(--assassin) calc(l * 0.8 + 0.19) calc(c * 0.8) h); }
+.role-name.role--captain    { color: oklch(from var(--captain) calc(l * 0.8 + 0.19) calc(c * 0.8) h); }
+.role-name.role--ambassador { color: oklch(from var(--ambassador) calc(l * 0.8 + 0.19) calc(c * 0.8) h); }
+.role-name.role--contessa   { color: oklch(from var(--contessa) calc(l * 0.8 + 0.19) calc(c * 0.8) h); }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .seat-head {
@@ -589,6 +844,22 @@ input:focus-visible {
 .seat.opponent .card-back {
   width: 58px;
   height: 82px;
+}
+
+/* 大使交换时手里暂有 4 张：超过 2 张就叠成扇形，不撑破座位框。
+   ponytail: 负边距按一行最多 4 张（2 影响力 + 2 抽牌）调好，牌宽或座位宽变了要跟着改 */
+.cards-row:has(> :nth-child(3)) > * + * {
+  margin-left: -24px;
+}
+
+/* 叠放时明牌压在牌背上：半透明会透出底下的斜纹，改为不透明的压暗 */
+.cards-row:has(> :nth-child(3)) .card.unavailable {
+  opacity: 1;
+  filter: saturate(0.4) brightness(0.45);
+}
+
+.seat.opponent .cards-row:has(> :nth-child(3)) > * + * {
+  margin-left: -40px;
 }
 
 .card {
@@ -692,17 +963,30 @@ input:focus-visible {
   }
 }
 
+/* 触屏：点牌看名字、长按行动看气泡（RoomView 的 peek / open） */
+.card.peek:has(.card-name) .glyph { opacity: 0; }
+.card.peek .card-name { opacity: 1; }
+.card-tip-anchor.open .card-tip,
+.action-tip-anchor.open .action-tip {
+  opacity: 1;
+  translate: 0 0;
+}
+
 .card--duke       { border-color: var(--duke);       color: var(--duke); }
 .card--assassin   { border-color: var(--assassin);   color: var(--assassin); }
 .card--captain    { border-color: var(--captain);    color: var(--captain); }
 .card--ambassador { border-color: var(--ambassador); color: var(--ambassador); }
 .card--contessa   { border-color: var(--contessa);   color: var(--contessa); }
 
+/* 牌背：斜纹外留一圈毡边，再压一道黄铜细框，座位上的小牌才读作一张牌而不是一块底纹。
+   内框用零模糊的 inset 阴影画，不加元素。舞台、发牌的大牌背各自换掉 box-shadow：大牌本身够像牌，
+   选中时外面还有一圈金框，再加内框就是三道线 */
 .card-back {
   display: block;
   border-radius: var(--r-md);
   border: 1px solid var(--gold-dim);
   background: repeating-linear-gradient(45deg, oklch(0.34 0.03 152) 0 5px, oklch(0.28 0.03 152) 5px 10px);
+  box-shadow: inset 0 0 0 3px var(--felt), inset 0 0 0 4px color-mix(in srgb, var(--gold) 35%, transparent);
 }
 
 .inline-icon {
@@ -717,6 +1001,9 @@ input:focus-visible {
   border-radius: var(--r-lg);
   padding: var(--sp-4);
 }
+
+/* 没有要作的决定也没有消息（例如出局后旁观）时不显示空框 */
+.controls:has(> .controls-body:empty) { display: none; }
 
 .actions {
   display: grid;
@@ -736,7 +1023,12 @@ input:focus-visible {
 .action-tip-anchor {
   position: relative;
   display: grid;
+  -webkit-touch-callout: none;
+  user-select: none;
 }
+
+/* 置灰的行动也能长按看费用：禁用按钮不派发指针事件，交给外层接住 */
+.action-tip-anchor > button:disabled { pointer-events: none; }
 
 .action-tip {
   --surface: oklch(0.12 0.01 155);
@@ -792,12 +1084,12 @@ input:focus-visible {
   font-size: 15px;
 }
 
-/* ---------- 叙述条 ---------- */
-/* 桌面端：牌桌中央的一行金字，无底板（座位稀疏，底板会显得错位） */
+/* ---------- 叙述 ---------- */
+/* 桌面端：牌桌中央的一行象牙色字，无底板（座位稀疏，底板会显得错位）。金色只留给 One Flame，公爵铜色在金字里看不出 */
 .narration {
   position: absolute;
   left: 50%;
-  top: calc(var(--cy) - var(--ry) * 0.35);
+  top: var(--narr-y, calc(var(--cy) - var(--ry) * 0.35));
   transform: translate(-50%, -50%);
   width: min(320px, 60%);
   display: flex;
@@ -808,22 +1100,184 @@ input:focus-visible {
 }
 
 .narration-text {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   font-weight: 600;
   font-size: 17px;
   line-height: 1.4;
-  color: var(--gold);
+  color: var(--text);
 }
+
+/* 叙述在最暗的桌面上，角色名用原色就够对比度，不提亮，和象牙色正文拉开距离 */
+.narration-text .role-name.role--duke       { color: var(--duke); }
+.narration-text .role-name.role--assassin   { color: var(--assassin); }
+.narration-text .role-name.role--captain    { color: var(--captain); }
+.narration-text .role-name.role--ambassador { color: var(--ambassador); }
+.narration-text .role-name.role--contessa   { color: var(--contessa); }
 
 .narration-line {
   display: block;
   animation: fade-in 240ms ease;
 }
 
-.narration-timer {
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  color: var(--gold);
+/* 控制区每个阶段的第一行：提示在左、倒计时钉在右端，换阶段时倒计时不挪位置。
+   不换行：提示过长时在自身内折行，倒计时不会被挤到下一行开头 */
+.decision-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+/* 与其他阶段的标题同字号、无额外内边距，倒计时才落在同一点 */
+.waiting.decision-heading {
+  text-align: start;
+  padding: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.controls-body > .row { margin-top: 0; }
+.actions button { overflow-wrap: anywhere; }
+/* ---------- 表态面板：记录上方，收起时只有一行 ---------- */
+.reaction {
+  display: flex;
+  flex-direction: column;
+}
+
+button.reaction-toggle {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: none;
+  border: none;
+  padding: var(--sp-1) var(--sp-2);
+  margin-left: calc(-1 * var(--sp-2));
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+button.reaction-toggle:hover:not(:disabled) {
+  background: none;
+  color: var(--text);
+}
+
+/* 高度过渡来自 .collapse，这里再叠一层淡入淡出 */
+.reaction-collapse {
+  opacity: 0;
+  transition:
+    grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 200ms ease;
+}
+
+.reaction-collapse.open {
+  opacity: 1;
+}
+
+/* 与切换按钮的间距放在会被裁掉的内层里，收起时不留缝 */
+.reaction-collapse-inner > .reaction-tray {
+  margin-top: var(--sp-2);
+}
+
+.reaction-tray {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+
+.reaction-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 3px;
+  background: var(--canvas);
+  border-radius: var(--r-md);
+}
+
+.reaction-tabs button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: calc(var(--r-md) - 3px);
+  color: var(--text-2);
+  font-size: 14px;
+  padding: 8px 10px;
+}
+
+.reaction-tabs button:hover:not(:disabled) {
+  background: var(--felt);
+  border-color: transparent;
+  color: var(--text);
+}
+
+.reaction-tabs button[aria-selected='true'] {
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.reaction-grid > .reaction-hint {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.reaction-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: var(--sp-2);
+}
+
+.reaction-grid button {
+  font-size: 14px;
+  padding: 8px 12px;
+}
+
+.reaction-grid > p {
+  grid-column: 1 / -1;
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+/* 短语共 7 句，等宽网格的末行总会剩空格：改成可伸展的折行，每行都撑到右边缘（桌面 4+3，手机 2+2+2+1） */
+.reaction-grid--phrase {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.reaction-grid--phrase > button {
+  flex: 1 1 22%;
+}
+
+.reaction-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reaction-grid--verbalClaim {
+  grid-template-columns: 1fr;
+}
+
+.reaction-verbal-row {
+  display: grid;
+  grid-template-columns: 5.5em repeat(5, minmax(0, 1fr));
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.reaction-verbal-label {
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
 }
 
 /* ---------- 记录 ---------- */
@@ -864,19 +1318,35 @@ input:focus-visible {
   min-height: 44px;
 }
 
-.log-header:hover {
-  color: var(--gold);
+.log-header:hover .log-chevron {
+  color: var(--text);
 }
 
 .log-chevron {
   display: inline-block;
   width: 14px;
-  color: var(--gold);
+  color: var(--text-3);
   transition: transform 0.15s ease;
 }
 
 .log-chevron.open {
   transform: rotate(90deg);
+}
+
+/* 展开收起（记录分组、表态面板）：高度 0fr ↔ 1fr 过渡，同 .notice-region 的做法 */
+.collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.collapse.open {
+  grid-template-rows: 1fr;
+}
+
+.collapse > * {
+  min-height: 0;
+  overflow: hidden;
 }
 
 .log-entries {
@@ -891,16 +1361,39 @@ input:focus-visible {
 }
 
 /* ---------- 浮层 ---------- */
+/* 浮层是原生模态 <dialog>，自身铺满视口充当遮罩（点它而不是里面的面板就算点外面），::backdrop 透明；
+   叠放顺序由 top layer 按打开先后决定，不用 z-index。复位 UA 给 dialog 的边框、外边距、尺寸上限和底色 */
 .overlay {
   position: fixed;
   inset: 0;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  color: inherit;
   background: oklch(0.1 0.012 155 / 0.72);
   backdrop-filter: blur(4px);
-  display: flex;
   align-items: center;
   justify-content: center;
   padding: var(--sp-4);
-  z-index: 10;
+  /* 面板自己滚动；对质换牌飞回座位时不能撑出滚动条 */
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+/* display 只能在打开时设，否则会盖掉关闭态的 display: none */
+.overlay[open] {
+  display: flex;
+}
+.overlay::backdrop {
+  background: transparent;
+  overflow: hidden;
+  overscroll-behavior: contain;
+}
+/* 背后页面不随滚动：overscroll-behavior 对不可滚动容器的约束 Safari 还不支持，所以仍锁住根滚动（叠开多个对话框也只看有没有 :modal） */
+:root:has(dialog:modal) {
+  overflow: hidden;
 }
 
 .panel {
@@ -910,7 +1403,7 @@ input:focus-visible {
   border-radius: var(--r-xl);
   padding: var(--sp-6);
   max-width: min(600px, 100%);
-  max-height: 85vh;
+  max-height: 85dvh;
   overflow-y: auto;
 }
 
@@ -935,6 +1428,20 @@ input:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-4);
+}
+
+.credits-list {
+  display: grid;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
+.credits-list strong {
+  color: var(--text);
 }
 
 .panel-heading h2 {
@@ -1025,7 +1532,8 @@ input:focus-visible {
   margin-left: var(--sp-2);
 }
 
-.rules-level-switch {
+.rules-level-switch,
+.segmented {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-1);
@@ -1035,7 +1543,8 @@ input:focus-visible {
   background: var(--panel);
 }
 
-.rules-level-switch button {
+.rules-level-switch button,
+.segmented button {
   min-height: 44px;
   margin: 0;
   border-color: transparent;
@@ -1043,20 +1552,34 @@ input:focus-visible {
   color: var(--text-2);
 }
 
-.rules-level-switch button + button {
+.rules-level-switch button + button,
+.segmented button + button {
   margin-left: 0;
 }
 
-.rules-level-switch button:hover {
+.rules-level-switch button:hover,
+.segmented button:hover {
   border-color: var(--line);
   background: var(--panel-2);
   color: var(--text);
 }
 
-.rules-level-switch button.selected {
+.rules-level-switch button.selected,
+.segmented button.selected {
   border-color: var(--text-2);
   background: var(--panel-2);
   color: var(--text);
+}
+
+/* 名单行里的强度切换：比规则中心的紧凑，免得把行撑高 */
+.segmented {
+  display: inline-grid;
+  gap: 2px;
+  padding: 2px;
+}
+
+.segmented button {
+  padding-inline: var(--sp-3);
 }
 
 .rules-body {
@@ -1175,7 +1698,105 @@ input:focus-visible {
   filter: saturate(0.4);
 }
 
-/* 提示条 / 叙述条 / 控制区 / 记录 入场 */
+/* 赛后揭晓：牌背翻成全彩牌面，落定不置灰（与明牌区分） */
+.cards-row .card.post-game-revealed { animation: card-post-game-reveal 400ms cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+@keyframes card-post-game-reveal {
+  0%   { opacity: 0; transform: rotateY(90deg); }
+  55%  { opacity: 1; box-shadow: 0 0 18px color-mix(in srgb, currentColor 55%, transparent); }
+  100% { transform: rotateY(0deg); box-shadow: 0 0 0 transparent; }
+}
+
+/* 获胜者自己的座位：未揭晓的牌浮起带微光，可点击；揭晓后落回一行 */
+button.post-game-reveal {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: inherit;
+  translate: 0 0;
+  transition: translate 180ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+button.post-game-reveal:hover { background: none; }
+button.post-game-reveal:not([aria-disabled]) { translate: 0 -8px; }
+button.post-game-reveal:not([aria-disabled]):hover { translate: 0 -12px; }
+button.post-game-reveal[aria-disabled] { cursor: default; transform: none; }
+button.post-game-reveal .card { transition: box-shadow 180ms ease; }
+button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-mix(in srgb, currentColor 40%, transparent); }
+
+/* ---------- 牌局事件（#90）：金币变动、针对性行动的目标、新声称、淘汰 ---------- */
+
+/* 座位是背后灵、牌光的定位容器（对手座位在桌面上本就是 absolute） */
+.seat.self { position: relative; }
+
+/* 金币差额：在数字上方浮起后淡出，数字轻跳一下。增加用金色，减少用 sage */
+.seat .coins { position: relative; }
+.coin-count { display: inline-block; }
+.coin-count.bump { animation: coin-bump 300ms ease-out; }
+@keyframes coin-bump {
+  40% { transform: scale(1.2); }
+}
+.coin-delta {
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: coin-rise 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.coin-delta.gain { color: var(--gold); }
+.coin-delta.loss { color: var(--text-2); }
+@keyframes coin-rise {
+  0%   { opacity: 0; transform: translate(-50%, 6px); }
+  25%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -10px); }
+}
+@keyframes coin-fade {
+  0%, 100% { opacity: 0; transform: translateX(-50%); }
+  30%      { opacity: 1; transform: translateX(-50%); }
+}
+
+/* 针对性行动的目标：ivory 边框加一圈细环（金色留给「轮到他」） */
+.seat.targeted {
+  border-color: color-mix(in oklch, var(--text) 80%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--text) 35%, transparent);
+}
+
+/* 淘汰：最后一张牌先翻开（card-flip 400ms），翻完座位再慢慢暗下去 */
+.seat.dead > :not(.nameplate) {
+  transition-duration: 0.5s;
+  transition-delay: 0.4s;
+}
+.seat-out {
+  color: var(--text-2);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+/* 新声称的背后灵与真声称的牌光：位置、尺寸和动画由 SeatGhost 设置，这里只管外观 */
+.seat-ghost {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  opacity: 0;
+  pointer-events: none;
+}
+.seat-ghost .glyph { width: 100%; height: 100%; --surface: var(--felt); }
+.seat-glow {
+  position: absolute;
+  z-index: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--glow) 65%, transparent), transparent 62%);
+  mix-blend-mode: screen;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 提示条 / 叙述 / 控制区 / 记录 入场 */
 @keyframes rise-in {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -1186,7 +1807,7 @@ input:focus-visible {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.controls { animation: slide-in 220ms cubic-bezier(0.16, 1, 0.3, 1); }
+.controls-body { animation: slide-in 220ms cubic-bezier(0.16, 1, 0.3, 1); }
 .log { animation: slide-in 200ms cubic-bezier(0.16, 1, 0.3, 1); }
 
 /* 倒计时紧迫：金 → 琥珀呼吸 */
@@ -1194,7 +1815,7 @@ input:focus-visible {
   0%, 100% { color: var(--gold); }
   50%      { color: var(--warn); }
 }
-.narration-timer.urgent { animation: urgent-pulse 1s ease-in-out infinite; }
+.decision-timer.urgent { animation: urgent-pulse 1s ease-in-out infinite; }
 
 /* 浮层 / 模态 */
 @keyframes fade-in {
@@ -1209,21 +1830,10 @@ input:focus-visible {
 }
 .panel { animation: panel-in 260ms cubic-bezier(0.16, 1, 0.3, 1); }
 
-/* 换牌：选中上浮 + 角色色高亮（不打勾）；未保留牌滑回淡出 */
 .role-btn {
   transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease,
     background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
-.role-btn.active {
-  outline: none;
-  transform: translateY(-3px);
-  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 60%, transparent),
-    0 6px 16px color-mix(in srgb, currentColor 30%, transparent);
-}
-@keyframes discard-out {
-  to { opacity: 0; transform: translateY(12px); }
-}
-.role-btn.discard { animation: discard-out 200ms ease forwards; }
 
 /* ---------- 减少动态效果：保留透明度/颜色反馈，去掉位移与翻转 ---------- */
 @media (prefers-reduced-motion: reduce) {
@@ -1233,33 +1843,37 @@ input:focus-visible {
   .cards-row .card,
   .card-back,
   .notice,
-  .controls,
+  .controls-body,
   .log,
   .overlay,
-  .panel,
-  .role-btn.discard {
+  .panel {
     animation: none;
   }
   .notice,
-  .controls,
+  .controls-body,
   .log,
   .overlay,
   .panel {
     animation: fade-in 120ms linear;
   }
   .cards-row .card.unavailable { animation: reveal-fade 200ms linear; }
+  .cards-row .card.post-game-revealed { animation: fade-in 200ms linear; }
+  button.post-game-reveal,
+  button.post-game-reveal .card { transition: none; }
   /* 不呼吸，但保留「快到时」的状态：静态琥珀 */
-  .narration-timer.urgent { animation: none; color: var(--warn); }
+  .decision-timer.urgent { animation: none; color: var(--warn); }
   .role-btn { transition: none; }
-  .role-btn.active {
-    transform: none;
-    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 60%, transparent);
+  .coin-delta { animation: coin-fade 600ms linear both; }
+  .coin-count.bump { animation: none; }
+  /* 几乎瞬时，但仍触发 transitionend（表态面板复位选目标、滚进视口靠它） */
+  .collapse { transition-duration: 1ms; }
+  .nameplate-text {
+    animation:
+      fade-in 160ms ease,
+      speak-out 200ms ease 2800ms forwards;
   }
   .notice-region {
     transition: grid-template-rows 1ms linear 119ms;
-  }
-  .board {
-    transition: gap 1ms linear 119ms;
   }
   .notice-region .transient-message {
     transition: opacity 120ms linear;
@@ -1267,11 +1881,14 @@ input:focus-visible {
   .notice-region.exiting .transient-message {
     transform: none;
   }
+  /* 抽屉不滑：淡入淡出 */
+  .board > .notice-region .notice { animation: fade-in 120ms linear; }
+  .board > .notice-region .transient-message { transition: opacity 120ms linear; }
+  .board > .notice-region.exiting .transient-message { opacity: 0; transform: none; }
 }
 
 /* ---------- 发牌展示：从屏幕上方的牌堆依次发牌、落定、翻开 ---------- */
 .showcase-overlay {
-  z-index: 20;
   background: oklch(0.1 0.012 155 / 0.84);
 }
 
@@ -1314,6 +1931,7 @@ input:focus-visible {
 }
 .showcase-flipper .card-back {
   width: auto;
+  box-shadow: none;
   height: auto;
   border-radius: var(--r-lg);
   transform: rotateY(180deg);
@@ -1419,6 +2037,25 @@ input:focus-visible {
   white-space: nowrap;
 }
 
+/* 牌面风格「图腾」：5:7 插画自带边框和英文角色名，整幅铺满；角标、圆章不显示，角色名只留给读屏。
+   插画只在命中规则时才下载。五个角色都有画，所以统一隐藏默认样式；以后新风格缺画时，要把隐藏规则限定到有画的角色上。 */
+:root[data-card-style='totem'] .big-card { border: 0; background: var(--canvas) center / cover; }
+:root[data-card-style='totem'] .big-card.card--duke       { background-image: url('./card-styles/totem/duke.webp'); }
+:root[data-card-style='totem'] .big-card.card--assassin   { background-image: url('./card-styles/totem/assassin.webp'); }
+:root[data-card-style='totem'] .big-card.card--captain    { background-image: url('./card-styles/totem/captain.webp'); }
+:root[data-card-style='totem'] .big-card.card--ambassador { background-image: url('./card-styles/totem/ambassador.webp'); }
+:root[data-card-style='totem'] .big-card.card--contessa   { background-image: url('./card-styles/totem/contessa.webp'); }
+:root[data-card-style='totem'] .big-card::before,
+:root[data-card-style='totem'] .big-card > .glyph,
+:root[data-card-style='totem'] .big-card > .medallion { display: none; }
+:root[data-card-style='totem'] .big-card > .big-card-name {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
 /* 功能说明：悬浮 / 键盘聚焦 / 点按显示，角色同色气泡 */
 .showcase-tip {
   --surface: var(--tip);
@@ -1470,17 +2107,21 @@ input:focus-visible {
   gap: var(--sp-4);
 }
 .showcase-actions button { min-width: 140px; }
-.showcase-timer {
+.decision-timer {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   font-weight: 700;
   color: var(--gold);
 }
 
-@keyframes fade-out {
-  to { opacity: 0; }
+/* 等别人的决定（控制区的等待行、对质舞台上的旁观）：倒计时只是状态，不占金色，也不催 */
+.waiting .decision-timer,
+.stage-status:has(> p) .decision-timer {
+  color: var(--text-2);
+  animation: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1490,7 +2131,6 @@ input:focus-visible {
 
 /* ---------- 对质舞台 / 私下选牌：放大展示的手牌（方案 A：暗场 + 牌框升温 + 快翻） ---------- */
 .stage-overlay {
-  z-index: 20;
   background: none;
   backdrop-filter: none;
 }
@@ -1529,6 +2169,11 @@ input:focus-visible {
   text-align: center;
   text-wrap: balance;
 }
+/* 昵称不用衬线（DESIGN.md「衬线只给名字」：玩家昵称留在无衬线） */
+.stage-name {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
+  font-weight: 700;
+}
 .stage-claim {
   display: inline-flex;
   align-items: center;
@@ -1539,7 +2184,13 @@ input:focus-visible {
 .stage-cards {
   --w: min(168px, 38vw);
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: var(--sp-6);
+}
+/* 交换的 4 张放不下一行时排成 2×2，不出现 3+1 */
+@media (max-width: 775px) {
+  .stage-cards:has(> :nth-child(4)) { max-width: calc(2 * var(--w) + var(--sp-6)); }
 }
 .stage-cell {
   position: relative;
@@ -1729,19 +2380,20 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     font-size: 24px;
   }
 
+  /* 页头的规则、设置、离开是很少用的页面功能：无边框文字按钮跟标题同一行，不和控制区的行动按钮长得一样。
+     放不下时整组折到下一行靠右 */
   .header {
-    align-items: flex-start;
     flex-wrap: wrap;
   }
 
   .header-actions {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-    width: 100%;
+    gap: 0;
+    margin-inline: auto calc(-1 * var(--sp-2));
   }
 
   .header-actions button {
-    padding-inline: var(--sp-3);
+    border-color: transparent;
+    padding-inline: var(--sp-2);
   }
 
   .settings-overlay {
@@ -1789,7 +2441,7 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
   .settings-panel {
     width: 100%;
     max-width: none;
-    max-height: min(85vh, 640px);
+    max-height: min(85dvh, 640px);
     padding: var(--sp-5) var(--sp-4) calc(var(--sp-5) + env(safe-area-inset-bottom));
     border-right: 0;
     border-bottom: 0;
@@ -1797,12 +2449,15 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     border-radius: var(--r-xl) var(--r-xl) 0 0;
   }
 
-  /* 手机：对手沿左右两侧 + 正对面落座，牌桌中央放叙述 */
+}
+
+@media (width < 720px) {
+  /* 窄桌：沿左右两侧和正对面落座。 */
   .table,
   .table[data-seats='1'],
   .table[data-seats='2'] {
     display: grid;
-    grid-template-columns: minmax(0, 100px) minmax(0, 1fr) minmax(0, 100px);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 100px) minmax(0, 1fr);
     grid-template-areas:
       'left top right'
       'left center right';
@@ -1825,12 +2480,18 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
   .rail--right { grid-area: right; }
 
   .seat.opponent {
-    position: static;
+    position: relative; /* 背后灵、牌光的定位容器；桌面用的 left/top 在这里不生效 */
+    inset: auto;
     transform: none;
     width: 100%;
     max-width: 100px;
-    padding: var(--sp-2) var(--sp-1);
+    --pad-x: var(--sp-1);
+    --pad-b: var(--sp-2);
+    padding: var(--sp-2) var(--pad-x) var(--pad-b);
     gap: var(--sp-1);
+  }
+  .nameplate {
+    font-size: 12px;
   }
 
   .seat.opponent .seat-head {
@@ -1848,6 +2509,10 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
 
   .seat.opponent .cards-row {
     gap: var(--sp-1);
+  }
+
+  .seat.opponent .cards-row:has(> :nth-child(3)) > * + * {
+    margin-left: -28px;
   }
 
   .seat.opponent .card,
@@ -1873,10 +2538,39 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
 
   .seat.self {
     width: 100%;
-    padding: var(--sp-3) var(--sp-4);
+    --pad-x: var(--sp-4);
+    --pad-b: var(--sp-3);
+    padding: var(--sp-3) var(--pad-x) var(--pad-b);
   }
+}
 
-  /* 手机：座位紧凑，叙述带底板才读得清 */
+@media (max-width: 768px) {
+  .reaction-tray {
+    scroll-margin-bottom: 120px; /* 展开后滚进视口时让出底部吸附的操作栏 */
+  }
+  .reaction-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .reaction-grid--phrase > button {
+    flex-basis: 40%;
+  }
+  .reaction-grid--verbalClaim {
+    grid-template-columns: 1fr;
+  }
+  .reaction-verbal-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .reaction-verbal-label {
+    grid-column: 1 / -1;
+  }
+  .reaction-tabs button {
+    padding-inline: 4px;
+    font-size: 13px;
+  }
+}
+
+@media (width < 720px) {
+  /* 行动文字沿用桌心的排版，窄屏留出独立空间。 */
   .narration {
     grid-area: center;
     position: static;
@@ -1884,9 +2578,6 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     width: auto;
     align-self: center;
     padding: var(--sp-3);
-    background: color-mix(in srgb, var(--gold) 8%, var(--felt));
-    border: 1px solid var(--gold-dim);
-    border-radius: var(--r-md);
     transition: opacity 0.2s ease;
   }
 
@@ -1898,19 +2589,202 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     font-size: 14px;
   }
 
+  /* 内容不满一屏时页面撑满视口，控制区被 margin-top: auto 推到底边，不悬在半空 */
+  .app:has(.controls) {
+    display: flex;
+    flex-direction: column;
+    min-height: 100dvh;
+  }
+
+  .app:has(.controls) > .board,
+  .board-content {
+    flex: 1;
+  }
+
   .controls {
-    /* sticky 而非 fixed：滚到底时回到记录区之后，不遮挡最后几行 */
+    /* sticky 而非 fixed：滚到底时回到记录之后，不遮挡最后几行 */
     position: sticky;
     bottom: 0;
     order: 1;
-    margin: 0 calc(-1 * var(--sp-4));
+    margin: auto calc(-1 * var(--sp-4)) 0;
     border-radius: var(--r-lg) var(--r-lg) 0 0;
     border-bottom: none;
     padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom));
     z-index: 5;
     /* 不设 overflow：滚动容器会裁掉第一排行动按钮的气泡。
-       ponytail: 视口矮于行动栏（约 260px）时栏顶看不全；真遇到再加 max-height + 气泡朝下。 */
+       ponytail: 视口矮于控制区（约 260px）时栏顶看不全；真遇到再加 max-height + 气泡朝下。 */
     box-shadow: 0 -8px 24px oklch(0.08 0.01 155 / 0.55);
   }
+}
+
+/* 窄桌的行动叙述可换行，计时跟随控制区。 */
+@media (width < 720px) {
+  .table:not([data-seats='1']) {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+    height: auto;
+  }
+
+  .table:not([data-seats='1']) .narration {
+    position: static;
+    transform: none;
+    align-self: stretch;
+    width: auto;
+    padding: var(--sp-2) var(--sp-3);
+  }
+
+  .table:not([data-seats='1']) .narration.is-empty {
+    padding: 0;
+    height: 0;
+  }
+}
+
+@media (720px <= width <= 1024px) {
+  .table:not([data-seats='1']) {
+    height: 380px;
+    --cy: 300px;
+    --ry: 222px;
+    --rx: calc(50% - 78px);
+  }
+
+  .table[data-seats='2'] {
+    height: 180px;
+    --cy: 160px;
+    --ry: 140px;
+  }
+
+  .table[data-seats='2'] .narration {
+    width: min(320px, 40%);
+  }
+
+  .table:not([data-seats='1']) .seat.opponent {
+    width: 148px;
+    --pad-x: var(--sp-2);
+    --pad-b: var(--sp-2);
+    padding: var(--sp-2);
+    gap: var(--sp-1);
+  }
+
+  .table:not([data-seats='1']) .seat-head {
+    flex-wrap: nowrap;
+  }
+
+  .table:not([data-seats='1']) .seat .coins {
+    flex-shrink: 0;
+  }
+
+  .table:not([data-seats='1']) .seat.opponent :is(.card, .card-back) {
+    width: 44px;
+    height: 62px;
+  }
+}
+
+@media (width < 720px) {
+  .table:not([data-seats='1']) .opponent-seats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas: 'left top right';
+    gap: var(--sp-1);
+    align-items: start;
+  }
+
+  .opponent-seats .rail--right { align-items: flex-end; }
+
+  .table:not([data-seats='1']) .seat.opponent {
+    --pad-b: var(--sp-1);
+    padding-block: var(--sp-1);
+    gap: var(--sp-1);
+  }
+
+  .table:not([data-seats='1']) .seat.opponent :is(.card, .card-back) {
+    width: 34px;
+    height: 48px;
+  }
+
+  .table:not([data-seats='1']) .seat-head { row-gap: 0; }
+
+  .table:not([data-seats='1']) .nameplate {
+    height: calc(2lh + var(--sp-1));
+    margin-top: 0;
+  }
+
+  .controls .actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--sp-1);
+  }
+  .controls .actions button { padding-inline: var(--sp-1); }
+}
+
+@media (max-width: 360px) {
+  /* 窄屏满桌时，给限时行动留出首屏空间。 */
+  .app:has(.table) .header {
+    gap: var(--sp-1);
+    padding-bottom: var(--sp-2);
+    margin-bottom: var(--sp-2);
+  }
+
+  .app:has(.table) .header-actions button { padding-inline: var(--sp-1); }
+}
+
+@media (max-width: 360px) and (max-height: 720px) {
+  .table[data-seats='5'] .seat-head {
+    flex-flow: row nowrap;
+    column-gap: var(--sp-1);
+  }
+  .table[data-seats='5'] .coins { flex-shrink: 0; }
+  .controls:has(.actions) { padding-block-start: var(--sp-2); }
+}
+
+/* 满桌的五个对手各占一列；桌心与两侧近端座位共享最后一行。
+   文字换行时这一行自然增高，不会盖住牌或挤进上方的铭牌。 */
+@media (width >= 720px) {
+  .table[data-seats='5'] {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-rows: var(--sp-8) auto minmax(64px, auto);
+    gap: 0 var(--sp-2);
+    height: auto;
+    align-items: start;
+  }
+  .table[data-seats='5'] .opponent-seats { display: contents; }
+  .table[data-seats='5'] .seat.opponent {
+    position: relative;
+    inset: auto;
+    transform: none;
+    justify-self: center;
+    width: min(100%, 154px);
+    --pad-x: var(--sp-2);
+    --pad-b: var(--sp-1);
+    padding: var(--sp-2) var(--pad-x) var(--pad-b);
+    gap: var(--sp-1);
+  }
+  .table[data-seats='5'] .seat-head { flex-wrap: nowrap; }
+  .table[data-seats='5'] .coins { flex-shrink: 0; }
+  .table[data-seats='5'] .seat.opponent :is(.card, .card-back) { width: 44px; height: 62px; }
+  .table[data-seats='5'] .rail--left > :first-child { grid-area: 2 / 1 / 4 / 2; align-self: end; }
+  .table[data-seats='5'] .rail--left > :last-child { grid-area: 2 / 2; }
+  .table[data-seats='5'] .rail--top > .seat { grid-area: 1 / 3 / 3 / 4; }
+  .table[data-seats='5'] .rail--right > :first-child { grid-area: 2 / 4; }
+  .table[data-seats='5'] .rail--right > :last-child { grid-area: 2 / 5 / 4 / 6; align-self: end; }
+  .table[data-seats='5'] .narration {
+    grid-area: 3 / 2 / 4 / 5;
+    position: static;
+    transform: none;
+    align-self: center;
+    justify-self: center;
+    width: 100%;
+    padding: var(--sp-2);
+    border: 0;
+    text-align: center;
+    justify-content: center;
+  }
+  .board-content:has(.table[data-seats='5']) { gap: var(--sp-3); }
+}
+
+@media (width >= 720px) and (max-height: 840px) {
+  .table[data-seats='5'] + .seat.self { padding-top: var(--sp-2); }
+  .table[data-seats='5'] + .seat.self .card { width: 58px; height: 82px; }
+  .table[data-seats='5'] + .seat.self .nameplate { margin-top: var(--sp-1); }
 }
 

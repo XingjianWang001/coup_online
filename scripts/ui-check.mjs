@@ -2,8 +2,10 @@
 // 不占用 8787 / 5173，不按进程名杀进程，所以不会挡住手动开发服务器。
 //
 // 用法：node scripts/ui-check.mjs [场景.mjs] [截图目录]
-//   场景默认导出 async (ui) => {}，ui 见 main() 里的 context；不传场景时跑内置场景（真人玩家加入机器人房间并开局）。
-//   环境变量：W/H 视口，MOBILE=1 手机触屏，REDUCED=1 减少动态效果，LOCALE=zh-CN|en，NO_BUILD=1 跳过构建，CHROME 浏览器路径。
+//   场景默认导出 async (ui) => {}，ui 见 main() 里的 context（ui.consoleUrl 是控制台地址）；不传场景时跑内置场景（真人玩家加入机器人房间并开局）。
+//   场景还可以导出 serverEnv（对象），合并进服务端的环境变量，例如 { SPEECH_RANDOM: '0' } 让电脑每个能开口的时刻都开口（见 server/src/index.ts）。
+//   环境变量：W/H 视口，MOBILE=1 手机触屏，REDUCED=1 减少动态效果，LOCALE=zh-CN|en，NO_BUILD=1 跳过构建，CHROME 浏览器路径（默认 macOS / Windows 的 Chrome 安装位置）。
+//   界面区域的规范名称、主选择器和覆盖它们的场景见 CONTEXT.md「界面」。
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -14,7 +16,9 @@ import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const { io } = createRequire(join(ROOT, 'packages/client/package.json'))('socket.io-client');
-const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const WIN = process.platform === 'win32';
+const CHROME = process.env.CHROME
+  ?? (WIN ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
 const TOTAL_TIMEOUT_MS = 100_000; // 低于代理工具 120s 的命令上限，超时也能走到清理
 const STEP_TIMEOUT_MS = 10_000;
 
@@ -26,54 +30,77 @@ const children = [];
 const sockets = [];
 let profileDir = null;
 
-// 子进程以独立进程组启动，结束时整组 kill，连同 tsx/Chrome 派生的孙进程
+// 子进程以独立进程组启动，结束时整组 kill，连同 tsx/Chrome 派生的孙进程（Windows 没有进程组，用 taskkill /T 结束整棵进程树）
 function launch(cmd, args, opts) {
-  const child = spawn(cmd, args, { ...opts, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(cmd, args, { ...opts, detached: !WIN, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   children.push(child);
   return child;
 }
 
 async function cleanup() {
   for (const s of sockets) s.close();
-  for (const child of children) {
-    try { process.kill(-child.pid, 'SIGTERM'); } catch {}
+  if (WIN) {
+    for (const child of children) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+  } else {
+    for (const child of children) {
+      try { process.kill(-child.pid, 'SIGTERM'); } catch {}
+    }
+    await sleep(500);
+    for (const child of children) {
+      try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+    }
   }
-  await sleep(500);
-  for (const child of children) {
-    try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+  // Chrome 退出后文件锁还要一会儿才释放（Windows 上会 EPERM），重试几次
+  if (profileDir) {
+    try { rmSync(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+    catch (error) { console.warn('⚠️ 未能删除 Chrome 配置目录', profileDir, error.code); }
   }
-  if (profileDir) rmSync(profileDir, { recursive: true, force: true });
 }
 
 const freePort = () => new Promise((r) => {
   const srv = createServer().listen(0, () => { const { port } = srv.address(); srv.close(() => r(port)); });
 });
 
-async function startServer() {
+async function startServer(serverEnv = {}) {
   if (!process.env.NO_BUILD) {
-    const build = spawnSync('pnpm', ['build:client'], { cwd: ROOT, stdio: 'inherit' });
+    const build = spawnSync('pnpm build:client', { cwd: ROOT, stdio: 'inherit', shell: true }); // Windows 上 pnpm 是 .cmd，只能经 shell 启动
     if (build.status !== 0) throw new Error('前端构建失败');
   }
   const port = await freePort();
+  const consolePort = await freePort(); // 控制台也换空闲端口，不和开着的开发服务器抢 8788
   const server = launch(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: join(ROOT, 'packages/server'),
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, ...serverEnv, PORT: String(port), CONSOLE_PORT: String(consolePort) },
   });
   let log = '';
   server.stdout.on('data', (d) => (log += d));
   server.stderr.on('data', (d) => (log += d));
   const url = `http://localhost:${port}`;
   await withTimeout((async () => { for (;;) { try { if ((await fetch(url)).ok) return; } catch {} await sleep(200); } })(), 20_000, `服务端启动\n${log}`);
-  return url;
+  return { url, consoleUrl: `http://127.0.0.1:${consolePort}/` };
 }
 
 async function startChrome() {
   profileDir = mkdtempSync(join(tmpdir(), 'coup-ui-check-'));
-  launch(CHROME, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profileDir}`, '--no-first-run', 'about:blank'], {});
+  const chrome = launch(CHROME, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profileDir}`, '--no-first-run', 'about:blank'], {});
+  let startupLog = '';
+  chrome.stderr.on('data', chunk => { startupLog = (startupLog + chunk).slice(-4096); });
   // 端口 0 让 Chrome 自选端口，写在配置目录的 DevToolsActivePort 里
-  const port = await withTimeout((async () => {
-    for (;;) { try { return readFileSync(join(profileDir, 'DevToolsActivePort'), 'utf8').split('\n')[0]; } catch {} await sleep(100); }
-  })(), STEP_TIMEOUT_MS, 'Chrome 启动');
+  let port;
+  const deadline = Date.now() + 30_000;
+  while (!port) {
+    if (chrome.exitCode !== null || chrome.signalCode !== null) {
+      throw new Error(`Chrome 启动时退出（${chrome.signalCode ?? chrome.exitCode}）\n${startupLog}`);
+    }
+    if (Date.now() >= deadline) throw new Error(`超时：Chrome 启动\n${startupLog}`);
+    try {
+      const firstLine = readFileSync(join(profileDir, 'DevToolsActivePort'), 'utf8').split('\n')[0].trim();
+      if (/^\d+$/.test(firstLine)) port = firstLine;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    if (!port) await sleep(100);
+  }
   const targets = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
   const ws = new WebSocket(targets.find((t) => t.type === 'page').webSocketDebuggerUrl);
   await withTimeout(new Promise((r) => ws.addEventListener('open', r)), STEP_TIMEOUT_MS, 'CDP 连接');
@@ -96,7 +123,6 @@ async function defaultScenario(ui) {
   host.intent({ type: 'createRoom', name: 'Bot' });
   const { roomCode } = await host.next('joined');
   await ui.joinAs('Me', roomCode);
-  await host.next('lobby');
   host.intent({ type: 'startGame' });
   await ui.waitFor('.showcase');
   await ui.frames('deal', [0, 300, 700, 1400]);
@@ -106,16 +132,18 @@ async function main() {
   const [scenarioPath, outArg] = process.argv.slice(2);
   const out = resolve(outArg ?? join(tmpdir(), 'coup-ui-check-shots'));
   mkdirSync(out, { recursive: true });
-  const scenario = scenarioPath ? (await import(pathToFileURL(resolve(scenarioPath)))).default : defaultScenario;
+  const { default: scenario, serverEnv } = scenarioPath ? await import(pathToFileURL(resolve(scenarioPath))) : { default: defaultScenario };
 
-  const url = await startServer();
+  const { url, consoleUrl } = await startServer(serverEnv);
   const cdp = await startChrome();
   const [W, H] = [Number(process.env.W ?? 1280), Number(process.env.H ?? 800)];
   const mobile = !!process.env.MOBILE;
   await cdp('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: mobile ? 2 : 1, mobile });
   if (mobile) await cdp('Emulation.setTouchEmulationEnabled', { enabled: true });
   if (process.env.REDUCED) await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
-  // headless Chrome 不认 --lang：语言只能经界面自己的持久化键注入
+  // headless Chrome 不认 --lang：语言只能经界面自己的持久化键注入。
+  // 没开 Page 域时 addScriptToEvaluateOnNewDocument 只是登记、不会在新文档里执行，所以先 Page.enable
+  if (process.env.LOCALE) await cdp('Page.enable');
   if (process.env.LOCALE) await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `localStorage.setItem('coup.locale', ${JSON.stringify(process.env.LOCALE)})` });
 
   // CDP 的 Runtime.evaluate 不支持顶层 await：表达式统一包进 async 函数
@@ -127,6 +155,7 @@ async function main() {
 
   const ui = {
     url,
+    consoleUrl,
     out,
     cdp,
     evaluate,
@@ -165,12 +194,14 @@ async function main() {
       }
       await evaluate(`document.getAnimations().forEach((a) => a.finish())`);
     },
-    // 真人玩家凭加入链接进房
+    // 真人玩家凭加入链接进房；等到页面进了房间（服务器已把这位玩家加进房间）才返回，之后机器人可以直接开局。
+    // 不要改成之后再等机器人的 next('lobby')：那条 lobby 可能在监听挂上之前就到了，CI 上会偶发超时
     joinAs: async (name, roomCode) => {
       await ui.goto(`/?room=${roomCode}`);
       await ui.waitFor('input');
       await ui.type('input', name);
       await ui.click('Join|加入');
+      await ui.waitFor('.roomcode');
     },
     // socket.io 机器人：intent 发意图，next 等下一条某类消息，state 存最新公开状态与手牌
     bot: () => {

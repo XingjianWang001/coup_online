@@ -1,5 +1,6 @@
-import type { ActionType, Card, LobbyPlayer, PublicState, Role, ServerMessage } from '@coup/shared';
+import type { ActionType, Card, ClientIntent, LobbyPlayer, PublicState, Role, ServerMessage } from '@coup/shared';
 import type { LogEntry } from './narration.ts';
+import type { Identity } from './socket.ts';
 
 export interface CountdownSnapshot {
   remainingMs: number | null;
@@ -12,7 +13,7 @@ export type Showcase = { kind: 'deal'; cards: Card[] };
 
 // 对质舞台：进入对质时打开，揭晓后留到动画播完由舞台自己关闭（ShowdownStage 的 onDone）。
 export interface ShowdownView {
-  id: number; // 每场对质唯一（取开场时的日志序号），舞台以它为 key，连续两场对质也会重新挂载
+  id: number; // 每场对质唯一（取开场时的记录序号），舞台以它为 key，连续两场对质也会重新挂载
   challengerId: string;
   claimantId: string;
   role: Role;
@@ -22,6 +23,12 @@ export interface ShowdownView {
   reveal: { slot: number; role: Role; truth: boolean } | null;
   newCard: Card | null; // 自己质疑失败后在原牌位换来的新牌
 }
+
+// 座位动效：一次性的，只由实时事件产生（重连时服务器不重放事件，所以不会补播）。id 取事件的记录序号。
+export type SeatMotion =
+  | { id: number; playerId: string; kind: 'coins'; delta: number }
+  // honest：自己声称、手里正好有这个角色（只有本机知道，别人的屏幕上永远是普通背后灵）
+  | { id: number; playerId: string; kind: 'ghost'; role: Role; honest: boolean };
 
 // 房间会话：服务器下发的「这个房间」的状态，加上随牌局一起重置的本地选择。
 export interface Session {
@@ -37,12 +44,17 @@ export interface Session {
   tunnelUrl: string | null;
   canStartTunnel: boolean;
   tunnelLoading: boolean;
+  gameNumber: number; // 记录属于房间里的第几局
   selectedAction: ActionType | null;
-  selectedKeep: string[];
   // 下一份手牌到达时要展示的发牌类型
   awaitingShowcase: Showcase['kind'] | null;
   showcase: Showcase | null;
   showdown: ShowdownView | null;
+  motions: SeatMotion[]; // 每个座位每种至多一条，新的替换旧的
+  heldMotions: SeatMotion[]; // 对质那一批的动效：舞台挡着座位，收起后再放
+  // 每位玩家的故事（CONTEXT.md）：最近一次实际交换以来声称过的角色，只有不在故事里的才是新声称、才放背后灵。
+  // 从本局实时事件累积；刷新页面后从空开始，每人第一次再声称会重放一次（有意的简化：服务器不补发事件历史）
+  stories: Record<string, Role[]>;
 }
 
 export const initialSession: Session = {
@@ -58,23 +70,34 @@ export const initialSession: Session = {
   tunnelUrl: null,
   canStartTunnel: false,
   tunnelLoading: false,
+  gameNumber: 0,
   selectedAction: null,
-  selectedKeep: [],
   awaitingShowcase: null,
   showcase: null,
   showdown: null,
+  motions: [],
+  heldMotions: [],
+  stories: {},
 };
 
 // now 为收到消息时的 performance.now()，用于倒计时按实际经过时间递减。
-// 一次状态变化的消息顺序见 server/src/index.ts 的 publish()：gameStarted 或 events → publicState → 各人的 privateState。
+// 一次状态变化的消息顺序见 server/src/push.ts 的 publish()：gameStarted 或 events → publicState → 各人的 privateState。
 export function reduceSession(s: Session, msg: ServerMessage, now: number): Session {
   switch (msg.type) {
     case 'joined':
+      // 重连时离线期间牌局可能已推进：只沿用紧接着会被 publicState / privateState 刷新的牌桌与记录，其余（对质舞台、目标选择等）一律重置
       return {
-        ...s,
+        ...initialSession,
+        publicState: s.publicState,
+        hand: s.hand,
+        // 离线期间再来一局并已开局（错过了 lobby 与 gameStarted）：上一局的记录不能带进这一局
+        log: msg.gameNumber === s.gameNumber ? s.log : [],
+        stories: msg.gameNumber === s.gameNumber ? s.stories : {},
+        nextLogId: s.nextLogId,
+        gameNumber: msg.gameNumber,
+        countdown: s.countdown,
         roomCode: msg.roomCode,
         playerId: msg.playerId,
-        awaitingShowcase: null,
         hostId: msg.hostId,
         players: msg.players,
         tunnelUrl: msg.tunnelUrl ?? null,
@@ -91,13 +114,15 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
         hand: [],
         log: [],
         selectedAction: null,
-        selectedKeep: [],
         awaitingShowcase: null,
         showcase: null,
         showdown: null,
+        motions: [],
+        heldMotions: [],
+        stories: {},
       };
     case 'gameStarted':
-      return { ...s, log: [], nextLogId: 0, awaitingShowcase: 'deal' };
+      return { ...s, log: [], nextLogId: 0, gameNumber: msg.gameNumber, awaitingShowcase: 'deal', motions: [], heldMotions: [], stories: {} };
     case 'publicState': {
       // 牌局结束或自己被淘汰：手里已没有可看的牌，收起发牌展示
       const out = msg.state.phase === 'gameOver' || msg.state.players?.find((p) => p.id === s.playerId)?.alive === false;
@@ -107,6 +132,8 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
         publicState: msg.state,
         showcase: out ? null : s.showcase,
         showdown: showdownFor(s, msg.state),
+        // 默认行动等情况换了回合：收起没提交的目标选择，免得下回合还停在旧的选择上
+        selectedAction: msg.state.phase === 'choosingAction' && msg.state.currentPlayerId === s.publicState?.currentPlayerId ? s.selectedAction : null,
         countdown: { remainingMs: msg.remainingMs, deadlineAt: msg.deadlineAt, receivedAt: now },
       };
     }
@@ -122,23 +149,37 @@ export function reduceSession(s: Session, msg: ServerMessage, now: number): Sess
     case 'events': {
       const entries = msg.events.map((event, i) => ({ id: s.nextLogId + i, event }));
       const resolved = msg.events.find((e) => e.type === 'challengeResolved');
+      const { motions, stories } = seatMotions(s, entries);
       return {
         ...s,
+        stories,
+        ...(resolved ? { heldMotions: withMotions(s.heldMotions, motions) } : { motions: withMotions(s.motions, motions) }),
         log: [...s.log, ...entries].slice(-500),
         nextLogId: s.nextLogId + entries.length,
-        showdown: s.showdown && resolved ? { ...s.showdown, reveal: { slot: resolved.slot, role: resolved.role, truth: resolved.truth } } : s.showdown,
+        // 已揭晓的舞台不再换揭晓结果：动画中途换掉会让它的结束回调永远不触发，舞台挡住整局（下一场对质在动画期间已结束）
+        showdown: s.showdown && !s.showdown.reveal && resolved ? { ...s.showdown, reveal: { slot: resolved.slot, role: resolved.role, truth: resolved.truth } } : s.showdown,
       };
     }
     case 'showdownFocus':
       return s.showdown && !s.showdown.reveal ? { ...s, showdown: { ...s.showdown, focus: msg.slot } } : s;
     case 'error':
-      // 房间已被释放（服务器重启、空房回收）：会话随之结束，退回入口。
-      return msg.code === 'roomNotFound' ? initialSession : { ...s, tunnelLoading: false };
+      // 连接已不在房间里（房间已释放；或重连时座位已被移出、牌局已开始或房间已满）：会话随之结束，退回入口。
+      return msg.inRoom ? { ...s, tunnelLoading: false } : initialSession;
     case 'tunnelUrl':
       return { ...s, tunnelUrl: msg.url, tunnelLoading: false };
     case 'left':
       return initialSession;
+    case 'reaction':
+      return s; // 表态一闪而过、不留痕，由 App 管理铭牌上的表态，不进会话状态
   }
+}
+
+// socket 每次（重新）连上时：凭本机保存的身份自动回到保存的房间；不该自动加入时返回 null
+export function rejoinIntent(identity: Identity | null, savedRoom: string | null, linkRoom: string | null, replaced: boolean): Extract<ClientIntent, { type: 'joinRoom' }> | null {
+  if (!identity || !savedRoom) return null;
+  if (replaced) return null; // 座位已被其他标签页接管：共用的本机身份属于那个标签页，自动加入会把它踢下线
+  if (linkRoom && linkRoom !== savedRoom) return null; // 链接指定了别的房间：仅预填，不自动重连旧房间
+  return { type: 'joinRoom', roomCode: savedRoom, name: identity.name, playerId: identity.playerId, secret: identity.secret };
 }
 
 // 自己是被质疑者时：翻牌前跟上最新手牌（对质中刷新重连时，手牌在公开状态之后才到）；揭晓后记下原牌位换来的新牌
@@ -150,7 +191,7 @@ function showdownWithHand(sd: ShowdownView, hand: Card[]): ShowdownView {
 
 // 舞台动画播完：收起这场对质；若下一场对质已经开始（动画期间收到了它的状态），接着打开它
 export function closeShowdown(s: Session): Session {
-  const closed = { ...s, showdown: null };
+  const closed = { ...s, showdown: null, motions: withMotions(s.motions, s.heldMotions), heldMotions: [] };
   return { ...closed, showdown: s.publicState ? showdownFor(closed, s.publicState) : null };
 }
 
@@ -162,4 +203,41 @@ function showdownFor(s: Session, state: PublicState): ShowdownView | null {
   const mine = state.showdown.claimantId === s.playerId;
   const slots = state.players.find((p) => p.id === state.showdown!.claimantId)?.handCount ?? 0;
   return { ...state.showdown, id: s.nextLogId, slots, hand: mine ? s.hand : null, focus: null, reveal: null, newCard: null };
+}
+
+// 一批事件 → 座位动效。金币差额对照变化前的公开状态（服务器先发 events 再发 publicState），同批同座位合并，0 不显示
+function seatMotions(s: Session, entries: LogEntry[]): { motions: SeatMotion[]; stories: Record<string, Role[]> } {
+  const motions: SeatMotion[] = [];
+  const stories = { ...s.stories };
+  const coins = new Map<string, { id: number; coins: number }>();
+  const ghost = (id: number, playerId: string, role: Role) => {
+    const story = stories[playerId] ?? [];
+    if (story.includes(role)) return;
+    stories[playerId] = [...story, role];
+    const honest = playerId === s.playerId && s.hand.some((c) => c.role === role);
+    motions.push({ id, playerId, kind: 'ghost', role, honest });
+  };
+  for (const { id, event: e } of entries) {
+    if (e.type === 'coinsChanged') coins.set(e.playerId, { id, coins: e.coins });
+    else if (e.type === 'actionChosen' && e.claimedRole) ghost(id, e.actorId, e.claimedRole);
+    else if (e.type === 'blocked') ghost(id, e.blockerId, e.role);
+    else if (e.type === 'exchangeDrew') stories[e.playerId] = []; // 只宣布、被抓到没换成的交换没有这个事件
+  }
+  for (const [playerId, { id, coins: after }] of coins) {
+    const before = s.publicState?.players?.find((p) => p.id === playerId)?.coins;
+    if (before != null && after !== before) motions.push({ id, playerId, kind: 'coins', delta: after - before });
+  }
+  return { motions, stories };
+}
+
+// 同一座位同一种动效只留最新一条：还没播完的旧动效被新的替换
+function withMotions(current: SeatMotion[], added: SeatMotion[]): SeatMotion[] {
+  const latest = new Map<string, SeatMotion>();
+  for (const m of [...current, ...added]) latest.set(`${m.playerId}:${m.kind}`, m);
+  return [...latest.values()];
+}
+
+// 动效播完（animationend）后移除，免得座位换位重挂载时重放
+export function dropMotion(s: Session, id: number): Session {
+  return { ...s, motions: s.motions.filter((m) => m.id !== id) };
 }

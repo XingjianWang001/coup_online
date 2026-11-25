@@ -1,8 +1,27 @@
-import type { Role } from '@coup/shared';
-import type { ActionType } from '@coup/shared';
+import { ACTION_CLAIM, ACTION_TIMEOUT_MS, ASSASSINATE_COST, COUP_COST, DISCONNECT_GRACE_MS, needsTarget, ROLE_ORDER, STEAL_AMOUNT, WINDOW_TIMEOUT_MS } from '@coup/shared';
+import type { ActionType, Role } from '@coup/shared';
 import type { Locale } from './localization.ts';
 
-export const ROLES: readonly Role[] = ['duke', 'assassin', 'captain', 'ambassador', 'contessa'];
+export const ROLES = ROLE_ORDER;
+
+const ACTION_TIMEOUT_S = ACTION_TIMEOUT_MS / 1000;
+const WINDOW_TIMEOUT_S = WINDOW_TIMEOUT_MS / 1000;
+const DISCONNECT_GRACE_S = DISCONNECT_GRACE_MS / 1000;
+
+// 悬浮气泡里的金币图标说明；收入、外援、征税的金额引擎没有导出常量
+const ACTION_COINS: Partial<Record<ActionType, string>> = {
+  income: '+1',
+  foreignAid: '+2',
+  coup: `−${COUP_COST}`,
+  tax: '+3',
+  assassinate: `−${ASSASSINATE_COST}`,
+  steal: `+${STEAL_AMOUNT}`,
+};
+
+// 行动按钮与行动预告共用，按引擎 ACTION_CLAIM 的顺序排列；claim 是该行动要声称的角色（也决定预告里行动名的颜色）
+export const ACTIONS: readonly { type: ActionType; needsTarget: boolean; coins?: string; claim?: Role }[] = (
+  Object.keys(ACTION_CLAIM) as ActionType[]
+).map((type) => ({ type, needsTarget: needsTarget(type), coins: ACTION_COINS[type], claim: ACTION_CLAIM[type] ?? undefined }));
 
 const ROLE_NAMES: Record<Locale, Record<Role, string>> = {
   'zh-CN': { duke: '公爵', assassin: '刺客', captain: '队长', ambassador: '大使', contessa: '女伯爵' },
@@ -103,12 +122,13 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
         onlineOnly: true,
         items: [
           '每局由系统随机选择起始玩家。',
-          '行动阶段限时 60 秒；超时自动选择收入。若玩家已有至少 10 枚金币，则自动对随机合法目标发动政变。',
-          '问询窗口限时 20 秒；无论当前等待质疑还是阻挡，超时都视为所有尚未回应的玩家放弃。',
-          '有人质疑即进入对质：被质疑者在 20 秒内从自己的暗牌中选一张公开翻开，全场都能看到，被质疑者正对准哪张牌也会同步给所有人。翻出被声称的角色则质疑失败：这张牌洗回牌堆、在原位换一张新牌，质疑者失去 1 影响力；翻出其他牌则质疑成功，翻开的这张就是被质疑者失去的影响力。持有被声称的角色也可以故意翻开另一张，按质疑成功处理。超时时，持有被声称的角色就自动翻开它，否则随机翻开一张。',
-          '需要失去影响力时（政变、暗杀、质疑失败），玩家在 20 秒内私下选择翻开哪张暗牌，其他玩家只看到等待提示和最终的明牌；超时随机翻开一张。',
-          '刷新或短暂断线后，本机可凭保存的临时身份回到原座位。断线宽限为 90 秒。',
-          '宽限期内未重连会自动弃权；牌局中主动离开也会立即弃权。弃权会公开全部剩余暗牌并淘汰该玩家。',
+          `行动阶段限时 ${ACTION_TIMEOUT_S} 秒；超时自动选择收入。若玩家已有至少 10 枚金币，则自动对随机合法目标发动政变。`,
+          `问询窗口限时 ${WINDOW_TIMEOUT_S} 秒；无论当前等待质疑还是阻挡，超时都视为所有尚未回应的玩家放弃。`,
+          `有人质疑即进入对质：被质疑者在 ${WINDOW_TIMEOUT_S} 秒内从自己的暗牌中选一张公开翻开，全场都能看到，被质疑者正对准哪张牌也会同步给所有人。翻出被声称的角色则质疑失败：这张牌洗回牌堆、在原位换一张新牌，质疑者失去 1 影响力；翻出其他牌则质疑成功，翻开的这张就是被质疑者失去的影响力。持有被声称的角色也可以故意翻开另一张，按质疑成功处理。超时时，持有被声称的角色就自动翻开它，否则随机翻开一张。`,
+          `因政变、暗杀或质疑失败需要失去影响力时，玩家在 ${WINDOW_TIMEOUT_S} 秒内私下选择翻开哪张暗牌，其他玩家只看到等待提示和最终的明牌；超时随机翻开一张。`,
+          `交换时，行动者在 ${ACTION_TIMEOUT_S} 秒内私下选择保留哪些牌；超时保留原来的手牌，摸到的牌全部放回牌堆。`,
+          `刷新或短暂断线后，本机可凭保存的临时身份回到原座位。断线宽限为 ${DISCONNECT_GRACE_S} 秒。`,
+          '宽限期内未重连会自动弃权；牌局中主动离开也会立即弃权。弃权会公开全部剩余暗牌并淘汰该玩家；该玩家尚未结算的声称与行动作废，其他玩家已欠下的失去影响力照常结算。',
         ],
       },
     ],
@@ -120,7 +140,7 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
       {
         id: 'actions',
         title: 'Seven actions',
-        body: 'You may claim a Role Action (called a character action in the tabletop rulebook) without holding that Role, but another player may Challenge you.',
+        body: 'You may claim a Role Action without holding that Role, but another player may Challenge you. The tabletop rulebook calls these character actions.',
         roleReferenceBefore: true,
         items: [
           'Income: take 1 coin; it cannot be Challenged or Blocked.',
@@ -129,7 +149,7 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
           'Tax: claim Duke and take 3 coins.',
           'Assassinate: pay 3 coins and claim Assassin; the target loses 1 influence. The target may claim Contessa to Block.',
           'Steal: claim Captain and take up to 2 coins from the target. The target may claim Captain or Ambassador to Block.',
-          'Exchange: claim Ambassador, draw 2 cards, then shuffle cards back into the Deck (Court deck) until you have your original number of Hidden Cards.',
+          'Exchange: claim Ambassador, draw 2 cards, then shuffle cards back into the Deck until you have your original number of Hidden Cards.',
         ],
       },
       { id: 'claims', title: 'Claims', body: 'Tax, Assassinate, Steal, Exchange, and every Block include a Role Claim. A Claim may be truthful or a bluff.' },
@@ -139,7 +159,7 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
       { id: 'online-play', title: 'Online play', body: 'Actions and Interrogation Windows use timers; a timeout automatically chooses an Action or passes. A short disconnect can reconnect with the identity stored on that device. Leaving a Game or exceeding the grace period causes a Forfeit.', onlineOnly: true },
     ],
     full: [
-      { id: 'setup', title: 'Setup', body: 'The Deck (Court deck) has 3 copies of each of the five Roles (characters). Shuffle it, deal 2 Hidden Cards (face-down character cards) and 2 coins to every player, and leave the rest as the Deck. Choose a starting player. In the standard two-player game, the starting player begins with 1 coin while the other player still begins with 2.' },
+      { id: 'setup', title: 'Setup', body: 'The Deck, called the Court deck in the tabletop rulebook, holds 3 copies of each of the five Roles, the rulebook’s characters. Shuffle it, deal 2 face-down Hidden Cards and 2 coins to every player, and leave the rest as the Deck. Choose a starting player. In the standard two-player game, the starting player begins with 1 coin while the other player still begins with 2.' },
       { id: 'influence', title: 'Influence', body: 'Your Hidden Cards are your Influence. Do not show them unless a rule tells you to. Whenever you lose Influence, choose one to reveal; Revealed Cards stay visible and no longer count as Influence. You are eliminated when none remain. The last Player with Influence wins.' },
       { id: 'turn-flow', title: 'Turn flow', body: 'Players take turns in order. The current player must choose one action they can afford and may not pass. After an action is declared, resolve any Challenge to its Claim first, then any Block and Challenge to that Block. An action that survives these responses resolves.' },
       {
@@ -155,8 +175,8 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
       },
       {
         id: 'role-actions',
-        title: 'Role Actions (Character Actions)',
-        body: 'Claim the named Role when using one; you do not show a Hidden Card unless Challenged.',
+        title: 'Role Actions',
+        body: 'The tabletop rulebook calls these character actions. Claim the named Role when using one; you do not show a Hidden Card unless Challenged.',
         items: [
           'Duke — Tax: take 3 coins.',
           'Assassin — Assassinate: pay 3 coins; the target loses 1 influence.',
@@ -165,7 +185,7 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
           'Contessa has no Role Action.',
         ],
       },
-      { id: 'blocks', title: 'Blocks (Counteractions)', body: 'A Block cancels an Action but is itself a Role Claim. Any opponent may claim Duke to Block Foreign Aid. Only the target may claim Contessa against Assassinate, or Captain or Ambassador against Steal. Income, Coup, Tax, and Exchange cannot be Blocked.' },
+      { id: 'blocks', title: 'Blocks', body: 'The tabletop rulebook calls these counteractions. A Block cancels an Action but is itself a Role Claim. Any opponent may claim Duke to Block Foreign Aid. Only the target may claim Contessa against Assassinate, or Captain or Ambassador against Steal. Income, Coup, Tax, and Exchange cannot be Blocked.' },
       { id: 'challenges', title: 'Challenges', body: 'Any other living Player may Challenge the Role Claim in an Action or Block. The opportunity exists immediately after the Claim; once play continues, it cannot be Challenged retroactively. Whoever loses the Challenge immediately loses 1 Influence.' },
       { id: 'truthful-claim', title: 'A truthful Claim', body: 'If the challenged Player has the named Role, they show it, return it to the Deck, shuffle, and draw a replacement. The challenger loses 1 Influence, then the original Action or Block continues.' },
       { id: 'successful-challenge', title: 'A successful Challenge', body: 'If the challenged Player cannot or will not show the named Role, they lose 1 Influence. Their Action or Block fails. Any cost already paid for the failed Action is refunded; successfully Challenging a false Assassin Claim returns its 3 coins.' },
@@ -179,12 +199,13 @@ const RULES: Record<Locale, Record<RuleLevel, readonly RuleSection[]>> = {
         onlineOnly: true,
         items: [
           'The system chooses a starting player at random for each game.',
-          'The action phase lasts 60 seconds. A timeout chooses Income automatically, or a Coup against a random legal target when the player has at least 10 coins.',
-          'An Interrogation Window lasts 20 seconds. Whether it is waiting for a Challenge or a Block, a timeout passes for everyone who has not responded.',
-          'A Challenge starts a Showdown: within 20 seconds the challenged Player reveals one of their Hidden Cards for everyone to see, and the card they are pointing at is shown to all Players as they decide. Revealing the claimed Role fails the Challenge: that card is shuffled into the Deck and replaced in the same position, and the challenger loses 1 Influence. Revealing any other card makes the Challenge succeed, and the revealed card is the Influence the challenged Player loses. A Player who holds the claimed Role may still reveal the other card on purpose; the Challenge then succeeds. On timeout, the claimed Role is revealed if held, otherwise a random card.',
-          'When a Player must lose Influence (Coup, Assassination, or a failed Challenge), they privately choose which Hidden Card to reveal within 20 seconds; others see a waiting line and then the Revealed Card. A timeout reveals a random card.',
-          'After a refresh or brief disconnect, the device can use its saved temporary identity to reclaim the same seat. The disconnect grace period is 90 seconds.',
-          'Failing to reconnect within the grace period causes an automatic Forfeit. Leaving during a Game Forfeits immediately. A Forfeit reveals all remaining Hidden Cards and eliminates that Player.',
+          `The action phase lasts ${ACTION_TIMEOUT_S} seconds. A timeout chooses Income automatically, or a Coup against a random legal target when the player has at least 10 coins.`,
+          `An Interrogation Window lasts ${WINDOW_TIMEOUT_S} seconds. Whether it is waiting for a Challenge or a Block, a timeout passes for everyone who has not responded.`,
+          `A Challenge starts a Showdown: within ${WINDOW_TIMEOUT_S} seconds the challenged Player reveals one of their Hidden Cards for everyone to see, and the card they are pointing at is shown to all Players as they decide. Revealing the claimed Role fails the Challenge: that card is shuffled into the Deck and replaced in the same position, and the challenger loses 1 Influence. Revealing any other card makes the Challenge succeed, and the revealed card is the Influence the challenged Player loses. A Player who holds the claimed Role may still reveal the other card on purpose; the Challenge then succeeds. On timeout, the claimed Role is revealed if held, otherwise a random card.`,
+          `When a Player must lose Influence to a Coup, an Assassination, or a failed Challenge, they privately choose which Hidden Card to reveal within ${WINDOW_TIMEOUT_S} seconds; others see a waiting line and then the Revealed Card. A timeout reveals a random card.`,
+          `During an Exchange, the actor privately chooses which cards to keep within ${ACTION_TIMEOUT_S} seconds. A timeout keeps their original cards and returns the drawn cards to the Deck.`,
+          `After a refresh or brief disconnect, the device can use its saved temporary identity to reclaim the same seat. The disconnect grace period is ${DISCONNECT_GRACE_S} seconds.`,
+          'Failing to reconnect within the grace period causes an automatic Forfeit. Leaving during a Game Forfeits immediately. A Forfeit reveals all remaining Hidden Cards and eliminates that Player; that Player\'s unresolved Claims and Actions are void, while Influence other Players already owe is still lost.',
         ],
       },
     ],
