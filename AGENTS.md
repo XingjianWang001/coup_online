@@ -2,7 +2,13 @@
 
 @.clinerules/ponytail.md
 
-@CLAUDE.md
+## Commands
+
+CI runs `pnpm test`, `pnpm typecheck` and `pnpm build:client`. Run one package with `pnpm --filter @coup/<engine|shared|server|client> test`. `pnpm smoke` needs `pnpm dev:server` already running.
+
+Package flow: `engine` (pure rules, no I/O) → `shared` (protocol) → `server` (authoritative) and `client` (sends Intents only).
+
+Read `CODING_STANDARDS.md` before writing or reviewing tests; it holds the judgement rules that tests and types can't enforce.
 
 ## Commits
 
