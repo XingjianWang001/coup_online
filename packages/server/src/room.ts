@@ -800,6 +800,30 @@ export class Room {
     return privateState(this.game, playerId);
   }
 
+  // 控制台看的完整状态（含暗牌、牌堆、电脑性格），只读；不带重连凭证和连接 id。
+  // 分档供部署检查：busy 有真人在打（断线在宽限期内的仍算），waiting 大厅或赛后有真人在场，idle 只剩电脑在打或没人
+  consoleSnapshot() {
+    const humanPresent = [...this.players.values()].some((p) => !p.isComputer && this.isPresent(p));
+    const tier = this.humansStillPlaying() ? 'busy' : humanPresent && (!this.game || this.game.phase === 'gameOver') ? 'waiting' : 'idle';
+    return {
+      code: this.code,
+      phase: this.game?.phase ?? 'lobby',
+      tier,
+      hostId: this.hostId,
+      gameNumber: this.gameNumber,
+      players: [...this.players.values()].map((p) => ({
+        id: p.id,
+        name: p.name,
+        isComputer: p.isComputer,
+        connected: p.connected,
+        present: this.isPresent(p),
+        ...(p.strength && { strength: p.strength }),
+        ...(this.temperaments.has(p.id) && { temperament: this.temperaments.get(p.id) }),
+      })),
+      game: this.game,
+    };
+  }
+
   // 有人加入就重置空房计时，房间再次变空时重新计满 5 分钟。
   private clearEmptyTimer(): void {
     if (this.emptyTimer) clearTimeout(this.emptyTimer);

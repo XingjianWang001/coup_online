@@ -8,6 +8,6 @@ RUN pnpm fetch --frozen-lockfile
 COPY . .
 RUN pnpm install --frozen-lockfile --offline && pnpm build:client
 
-ENV NODE_ENV=production PORT=8787
-EXPOSE 8787
+ENV NODE_ENV=production PORT=8787 CONSOLE_HOST=0.0.0.0
+EXPOSE 8787 8788
 CMD ["pnpm", "--filter", "@coup/server", "start"]
