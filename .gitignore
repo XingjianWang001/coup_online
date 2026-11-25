@@ -442,12 +442,9 @@ dist/
 .agent/
 .agents/
 .claude/*
-# 共享的 Claude Code 配置：钩子、协议流审查子代理、ui-check 场景技能
+# 共享的 Claude Code 配置：钩子、ui-check 场景技能
 !.claude/settings.json
 !.claude/hooks/
-!.claude/agents/
-.claude/agents/*
-!.claude/agents/protocol-flow-reviewer.md
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/ui-scenario/
