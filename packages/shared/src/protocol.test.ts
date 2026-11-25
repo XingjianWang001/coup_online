@@ -38,6 +38,12 @@ describe('client intent protocol', () => {
     expect(parseClientIntent({ type: 'resolveExchange', keepIds: ['a', 'b'] })).toEqual({ type: 'resolveExchange', keepIds: ['a', 'b'] });
   });
 
+  it('reads a join without a valid source as one by Room Code, so older clients still join', () => {
+    expect(parseClientIntent({ type: 'joinRoom', roomCode: 'ABC123', name: 'Alice', via: 'link' })).toMatchObject({ via: 'link' });
+    expect(parseClientIntent({ type: 'joinRoom', roomCode: 'ABC123', name: 'Alice' })).toMatchObject({ via: 'code' });
+    expect(parseClientIntent({ type: 'joinRoom', roomCode: 'ABC123', name: 'Alice', via: 'qr' })).toMatchObject({ via: 'code' });
+  });
+
   it.each([
     null,
     'createRoom',

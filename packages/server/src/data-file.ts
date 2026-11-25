@@ -2,7 +2,7 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 // 运营数据（ADR 0015）：数据目录下的 JSONL 文件，一行一条，只追加。相对路径按进程工作目录解析
-const dataPath = (name: string) => join(process.env.DATA_DIR ?? 'data', name);
+export const dataPath = (name: string) => join(process.env.DATA_DIR ?? 'data', name);
 
 export async function appendRecord(name: string, record: unknown): Promise<void> {
   await mkdir(dataPath(''), { recursive: true });

@@ -25,7 +25,8 @@ export type Reaction =
 // 客户端 → 服务器 的意图
 export type ClientIntent =
   | { type: 'createRoom'; name: string }
-  | { type: 'joinRoom'; roomCode: string; name: string; playerId?: string; secret?: string }
+  // via：经加入链接还是手输房间码进房，只用于记访问（ADR 0015）。缺省或不认识时按房间码算，旧客户端照常进房
+  | { type: 'joinRoom'; roomCode: string; name: string; playerId?: string; secret?: string; via?: 'link' | 'code' }
   | { type: 'startTunnel' }
   | { type: 'startGame' }
   | { type: 'rematch' }
@@ -90,7 +91,7 @@ export function parseClientIntent(raw: unknown): ClientIntent | null {
       return isString(r.name) ? { type: 'createRoom', name: r.name } : null;
     case 'joinRoom':
       return isString(r.roomCode) && isString(r.name) && isOptionalString(r.playerId) && isOptionalString(r.secret)
-        ? { type: 'joinRoom', roomCode: r.roomCode, name: r.name, playerId: r.playerId, secret: r.secret }
+        ? { type: 'joinRoom', roomCode: r.roomCode, name: r.name, playerId: r.playerId, secret: r.secret, via: r.via === 'link' ? 'link' : 'code' }
         : null;
     case 'removeComputer':
       return isString(r.playerId) ? { type: 'removeComputer', playerId: r.playerId } : null;

@@ -59,6 +59,9 @@ importers:
       '@coup/shared':
         specifier: workspace:*
         version: link:../shared
+      ip2region:
+        specifier: 4.0.1
+        version: 4.0.1
       socket.io:
         specifier: ^4.8.1
         version: 4.8.3
@@ -834,6 +837,10 @@ packages:
   gensync@1.0.0-beta.2:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
+
+  ip2region@4.0.1:
+    resolution: {integrity: sha512-Tt0hl/UQhhgE9HFdm9IO5WPjLPHpmgqcV94+WWGTHOR5OB2lLda4Hb/PqFaq1+j1Fg+AYaOvoQUycFfXXuezKw==}
+    engines: {node: '>=22.12.0'}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -1745,6 +1752,8 @@ snapshots:
     optional: true
 
   gensync@1.0.0-beta.2: {}
+
+  ip2region@4.0.1: {}
 
   js-tokens@4.0.0: {}
 

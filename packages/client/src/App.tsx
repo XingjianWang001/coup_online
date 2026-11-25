@@ -277,6 +277,8 @@ export function App() {
       name,
       playerId: identity?.playerId,
       secret: identity?.secret,
+      // 进的正是加入链接带来的房间：服务器据此区分经链接和手输房间码的访问
+      via: pendingLinkRoom && roomCode.trim().toUpperCase() === pendingLinkRoom ? 'link' : 'code',
     });
   }
 
