@@ -518,6 +518,20 @@ input:focus-visible {
   pointer-events: none;
 }
 .board > .notice-region .notice { box-shadow: 0 8px 24px oklch(0.08 0.01 155 / 0.55); }
+/* 抽屉：从屏幕上沿滑下，到点原路滑回；滑出期间不淡、不收高度（收高度会把条剪掉），滑完再收。
+   滑出时长与 App.tsx 的 NOTICE_GAP_MS 对齐：下一条等这一条滑完才进来 */
+.board > .notice-region {
+  --notice-exit-duration: 240ms;
+  --drawer-off: translateY(calc(-100% - var(--sp-4) - 24px)); /* 连同阴影一起出屏 */
+  transition: grid-template-rows 1ms linear var(--notice-exit-duration);
+}
+.board > .notice-region .notice-region-inner { overflow: visible; }
+.board > .notice-region .notice { animation: drawer-in 320ms cubic-bezier(0.16, 1, 0.3, 1); }
+.board > .notice-region .transient-message { transition: transform var(--notice-exit-duration) cubic-bezier(0.4, 0, 1, 1); }
+.board > .notice-region.exiting .transient-message { opacity: 1; transform: var(--drawer-off); }
+@keyframes drawer-in {
+  from { transform: var(--drawer-off); }
+}
 /* 窄屏页头两端都占满：整条盖住页头，而不是压住半个按钮 */
 @media (width <= 768px) {
   .board > .notice-region {
@@ -1867,6 +1881,10 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   .notice-region.exiting .transient-message {
     transform: none;
   }
+  /* 抽屉不滑：淡入淡出 */
+  .board > .notice-region .notice { animation: fade-in 120ms linear; }
+  .board > .notice-region .transient-message { transition: opacity 120ms linear; }
+  .board > .notice-region.exiting .transient-message { opacity: 0; transform: none; }
 }
 
 /* ---------- 发牌展示：从屏幕上方的牌堆依次发牌、落定、翻开 ---------- */

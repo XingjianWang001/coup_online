@@ -14,6 +14,7 @@ import { RoomView, TransientMessage, type LatestReaction, type ReactionBubble, t
 import { ExchangeStage, LossStage, ShowdownStage } from './ShowdownStage.tsx';
 
 const REACTION_MS = 3000; // 与 style.css 里 .nameplate-text 的淡出时刻对齐
+const NOTICE_GAP_MS = 300;
 
 interface TransientErrorState {
   id: number;
@@ -97,6 +98,7 @@ export function App() {
   const [error, setError] = useState<TransientErrorState | null>(null);
   const errorIdRef = useRef(0);
   const [notice, setNotice] = useState<TransientNoticeState | null>(null);
+  const [noticeQueue, setNoticeQueue] = useState<TransientNoticeState[]>([]);
   const noticeIdRef = useRef(0);
   const [reactions, setReactions] = useState<Record<string, ReactionBubble>>({});
   const [latestReaction, setLatestReaction] = useState<LatestReaction | null>(null);
@@ -147,7 +149,8 @@ export function App() {
 
   const showNotice = (descriptor: NoticeDescriptor) => {
     noticeIdRef.current += 1;
-    setNotice({ id: noticeIdRef.current, descriptor });
+    const next = { id: noticeIdRef.current, descriptor };
+    setNoticeQueue((queue) => [...queue, next]);
   };
 
   // 会话状态由 reduceSession 推导；这里只处理副作用：身份持久化、错误与提示。
@@ -166,6 +169,7 @@ export function App() {
           break;
         case 'gameStarted':
           setError(null);
+          setNoticeQueue([]);
           showNotice({ key: 'gameStarted' });
           setReactions({});
           setLatestReaction(null);
@@ -185,11 +189,13 @@ export function App() {
         case 'events':
           setError(null);
           // 终局由桌心的胜者和戴冠座位交代，这一批不再弹提示。
-          // 同一批里先失去影响力、再被淘汰时只留后一条（后来的 showNotice 覆盖先来的）
+          // 同一批里先失去影响力、再被淘汰时只报淘汰
           if (msg.events.some((e) => e.type === 'gameOver')) break;
           for (const e of msg.events) {
-            if (e.type === 'influenceLost') showNotice({ key: 'influenceLostNotice', playerId: e.playerId });
             if (e.type === 'eliminated') showNotice({ key: 'playerEliminated', playerId: e.playerId });
+            if (e.type === 'influenceLost' && !msg.events.some((o) => o.type === 'eliminated' && o.playerId === e.playerId)) {
+              showNotice({ key: 'influenceLostNotice', playerId: e.playerId });
+            }
           }
           break;
         case 'error':
@@ -229,7 +235,18 @@ export function App() {
   }, [socket]);
 
   useAutoDismiss(error, setError);
+  // 提示条排队：发牌展示和对质舞台挡着牌桌时先不放，等它们收起；一条滑出后才放下一条，每条都停满时长。
+  // NOTICE_GAP_MS 不短于 style.css 里牌局提示条的滑出（--notice-exit-duration）
+  const noticeHeld = Boolean(showcase || showdown);
   useAutoDismiss(notice, setNotice);
+  useEffect(() => {
+    if (notice || noticeHeld || !noticeQueue.length) return;
+    const timeout = setTimeout(() => {
+      setNotice(noticeQueue[0]);
+      setNoticeQueue((queue) => queue.slice(1));
+    }, NOTICE_GAP_MS);
+    return () => clearTimeout(timeout);
+  }, [notice, noticeHeld, noticeQueue]);
 
   // 用一次往返估计客户端与服务器的时钟偏差，取最近几次中延迟最低的样本。
   useEffect(() => {
