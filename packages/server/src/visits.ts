@@ -35,6 +35,9 @@ export function visitorOf(ip: string, now: Date): string {
 // 访问（ADR 0015）：写入时把 IP 换成地区后丢掉。内置的 IPv4 + IPv6 数据库约 48 MB，启动时同步读进内存
 const regions = new IP2Region({ mappedIPv6: 'ipv4' });
 
+// 数据库里国外的国名是英文：按国家代码换成中文，和国内的市名一个语言
+const countryNames = new Intl.DisplayNames('zh-CN', { type: 'region', fallback: 'none' });
+
 // 国内到市，国外到国家。回环和内网地址（SSH 隧道经 Docker 网关进来）记为本机
 export function regionOf(ip: string): string {
   let hit;
@@ -45,7 +48,9 @@ export function regionOf(ip: string): string {
   }
   if (ip === '::1' || String(hit?.extensions?.region).startsWith('Reserved|')) return '本机';
   if (!hit?.country?.name) return '未知';
-  return hit.country.code === 'CN' ? (hit.city?.name ?? hit.subdivisions?.[0]?.name ?? hit.country.name) : hit.country.name;
+  const { code, name } = hit.country;
+  if (code === 'CN') return hit.city?.name ?? hit.subdivisions?.[0]?.name ?? name;
+  return (code && /^[A-Z]{2}$/.test(code) && countryNames.of(code)) || name; // 格式不对的代码 of() 会抛错
 }
 
 // 超过 90 天的按天文件整个删掉。文件名里的日期是北京时间，按字符串比较即可
