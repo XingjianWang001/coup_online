@@ -5,7 +5,7 @@ import { nameOf } from './narration.ts';
 import { useModalDialog } from './dialog.ts';
 import { animate, prefersReducedMotion, REVEAL_STEPS_MS } from './motion.ts';
 import type { ShowdownView } from './session.ts';
-import { translate, type Locale } from './localization.ts';
+import { translate, translateParts, type Locale } from './localization.ts';
 import { DecisionTimer, type Clock } from './clock.tsx';
 import { BigCard, RoleIcon } from './icons.tsx';
 
@@ -237,11 +237,13 @@ export function ShowdownStage(props: {
   const roleLabel = roleName(locale, view.role);
   const challenger = nameOf(state, view.challengerId);
   const claimant = nameOf(state, view.claimantId);
-  const title = mine
-    ? translate(locale, 'showdownTitleYou', { challenger })
-    : view.challengerId === props.me
-      ? translate(locale, 'showdownTitleByYou', { claimant })
-      : translate(locale, 'showdownTitle', { challenger, claimant });
+  const titleKey = mine ? 'showdownTitleYou' : view.challengerId === props.me ? 'showdownTitleByYou' : 'showdownTitle';
+  const title = translate(locale, titleKey, { challenger, claimant });
+  // 昵称是玩家自己起的，子集化的衬线不可能覆盖：标题其余是衬线，昵称回到无衬线
+  const titleParts = translateParts<ReactNode>(locale, titleKey, {
+    challenger: <span key="challenger" className="stage-name">{challenger}</span>,
+    claimant: <span key="claimant" className="stage-name">{claimant}</span>,
+  });
 
   return (
     <dialog
@@ -255,7 +257,7 @@ export function ShowdownStage(props: {
       <div className="stage-spot" />
       <div className="stage">
         <h2 className="stage-title">
-          <span>{title}</span>
+          <span>{titleParts}</span>
           <span className={`stage-claim role--${view.role}`}><RoleIcon role={view.role} />{roleLabel}</span>
         </h2>
         <div className="stage-cards">

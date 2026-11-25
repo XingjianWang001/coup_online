@@ -83,6 +83,6 @@ export default async function decisionClockScenario(ui) {
   await ui.waitFor('.controls .waiting [role="timer"]');
   await capture('rejoined', challengeDeadline);
   for (const bot of bots) bot.intent({ type: 'leaveRoom' });
-  await ui.waitFor('.notice.big');
+  await ui.waitFor('.seat.winner');
   if (await ui.evaluate("!!document.querySelector('[role=timer]')")) throw new Error('终局仍显示决策倒计时');
 }

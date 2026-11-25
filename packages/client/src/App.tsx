@@ -184,10 +184,12 @@ export function App() {
         }
         case 'events':
           setError(null);
+          // 终局由桌心的胜者和戴冠座位交代，这一批不再弹提示。
+          // 同一批里先失去影响力、再被淘汰时只留后一条（后来的 showNotice 覆盖先来的）
+          if (msg.events.some((e) => e.type === 'gameOver')) break;
           for (const e of msg.events) {
-            if (e.type === 'gameOver') showNotice({ key: 'gameEnded' });
-            if (e.type === 'eliminated') showNotice({ key: 'playerEliminated' });
-            if (e.type === 'influenceLost') showNotice({ key: 'influenceLostNotice' });
+            if (e.type === 'influenceLost') showNotice({ key: 'influenceLostNotice', playerId: e.playerId });
+            if (e.type === 'eliminated') showNotice({ key: 'playerEliminated', playerId: e.playerId });
           }
           break;
         case 'error':

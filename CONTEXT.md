@@ -220,7 +220,7 @@ _Avoid_: 邀请码、房间号
 _Avoid_: 用「牌桌」指房间
 
 **座位 Seat**
-牌桌上代表一位玩家的一块：名字、金币、牌列和铭牌。
+牌桌上代表一位玩家的一块：名字、金币、牌列和铭牌。牌局结束后，获胜者的座位戴冠、挂金环。
 
 **牌列 Card Row**
 座位里排成一行的该玩家的牌：先是暗牌（自己座位是牌面，对手座位是牌背），后是明牌。
@@ -231,11 +231,11 @@ _Avoid_: 手牌区
 _Avoid_: 名牌、气泡（气泡是悬浮看名字、看功能说明时弹出的提示）
 
 **叙述 Narration**
-桌心的一行字，说眼下这一步谁在对谁做什么；轮到自己选行动时提示轮到自己。
+桌心的一行字，说眼下这一步谁在对谁做什么；轮到自己选行动时提示轮到自己；牌局结束后写获胜者。
 _Avoid_: 叙述条、旁白
 
 **提示条 Notice**
-牌局区域顶上短暂出现、随后自动消失的一条消息，如牌局开始、质疑成败、有人出局；牌局结束后另有一条常驻的获胜者提示条。
+浮在页头那一行上、短暂出现随后自动消失的一条消息，如牌局开始、某人失去影响力、某人被淘汰；不推动牌桌和控制区。牌局结束不弹提示条，获胜者由叙述和座位交代。
 _Avoid_: 通知
 
 **控制区 Controls**
@@ -274,11 +274,11 @@ _Avoid_: 规则面板
 | 名单 | `.playerlist`（添加电脑的按钮在 `.roster-head`） | computer、announce、speech、reply、showdown-hesitation |
 | 发牌展示 | `.showcase`（点 `.showcase-overlay` 关闭） | 默认，以及其余开局的场景；dialog |
 | 牌桌 | `.table` | table、decision-clock |
-| 座位 | `.seat`（`.seat.self`、`.seat.opponent`；按玩家找用 `[data-seat="<玩家 ID>"]`） | table、motion、reaction |
+| 座位 | `.seat`（`.seat.self`、`.seat.opponent`；获胜者 `.seat.winner`；按玩家找用 `[data-seat="<玩家 ID>"]`） | table、motion、reaction、decision-clock、spectate-rematch |
 | 牌列 | `.seat .cards-row` | decision-clock、motion、after-game |
 | 铭牌 | `.nameplate`（亮起时 `.nameplate.speaking`） | reaction、announce、speech、reply、after-game、table |
 | 叙述 | `.narration` | table、decision-clock |
-| 提示条 | `.notice`（获胜者 `.notice.big`） | table、decision-clock |
+| 提示条 | `.notice` | table |
 | 控制区 | `.controls`（行动与目标按钮在 `.actions`） | block-switch、decision-clock、table、motion、spectate-rematch |
 | 决策倒计时 | `[role="timer"]` | decision-clock、table |
 | 对质舞台 | `.stage-overlay:has(.stage-spot)` | showdown-hesitation、dialog |

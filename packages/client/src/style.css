@@ -314,11 +314,6 @@ input:focus-visible {
   font-size: 15px;
 }
 
-.notice.big {
-  font-size: 20px;
-  font-weight: 700;
-  font-family: 'Noto Serif SC', 'Noto Serif', Georgia, serif;
-}
 
 /* ---------- 大厅 / 房间 ---------- */
 .entry-form {
@@ -476,15 +471,32 @@ input:focus-visible {
 
 /* ---------- 牌局 ---------- */
 .board {
-  --notice-exit-duration: 180ms;
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
-  transition: gap var(--notice-exit-duration) cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.board:has(> .notice-region.exiting) {
-  gap: 0;
+/* 提示条浮在页头那一行上，不占牌桌的位置：出现、收起都不推动座位和控制区，
+   决策倒计时里按钮不会在手指下挪动。点击穿透到下面的页头按钮 */
+.board > .notice-region {
+  position: fixed;
+  top: var(--sp-4);
+  left: 50%;
+  translate: -50% 0;
+  z-index: 20;
+  width: max-content;
+  max-width: calc(100vw - 2 * var(--sp-4));
+  pointer-events: none;
+}
+.board > .notice-region .notice { box-shadow: 0 8px 24px oklch(0.08 0.01 155 / 0.55); }
+/* 窄屏页头两端都占满：整条盖住页头，而不是压住半个按钮 */
+@media (width <= 768px) {
+  .board > .notice-region {
+    left: var(--sp-4);
+    right: var(--sp-4);
+    translate: none;
+    width: auto;
+  }
 }
 
 .board-content {
@@ -616,10 +628,18 @@ input:focus-visible {
 .seat.self > .seat-head { grid-column: 2; }
 .seat.self > .cards-row { grid-column: 4; }
 
-.seat.current {
+/* 终局时金环交给胜者，名字前戴冠 */
+.seat.current,
+.seat.winner {
   border-color: var(--gold);
   box-shadow: 0 0 0 1px var(--gold-dim);
 }
+
+.seat-crown {
+  color: var(--gold);
+  margin-inline-end: var(--sp-1);
+}
+.seat-crown svg { width: 18px; height: 18px; }
 
 /* 正在私下选牌失去影响力：与当前玩家同样醒目，但用虚线区分「在等他」与「轮到他」 */
 .seat.losing {
@@ -900,6 +920,15 @@ input:focus-visible {
   }
 }
 
+/* 触屏：点牌看名字、长按行动看气泡（RoomView 的 peek / open） */
+.card.peek:has(.card-name) .glyph { opacity: 0; }
+.card.peek .card-name { opacity: 1; }
+.card-tip-anchor.open .card-tip,
+.action-tip-anchor.open .action-tip {
+  opacity: 1;
+  translate: 0 0;
+}
+
 .card--duke       { border-color: var(--duke);       color: var(--duke); }
 .card--assassin   { border-color: var(--assassin);   color: var(--assassin); }
 .card--captain    { border-color: var(--captain);    color: var(--captain); }
@@ -951,7 +980,12 @@ input:focus-visible {
 .action-tip-anchor {
   position: relative;
   display: grid;
+  -webkit-touch-callout: none;
+  user-select: none;
 }
+
+/* 置灰的行动也能长按看费用：禁用按钮不派发指针事件，交给外层接住 */
+.action-tip-anchor > button:disabled { pointer-events: none; }
 
 .action-tip {
   --surface: oklch(0.12 0.01 155);
@@ -1241,8 +1275,8 @@ button.reaction-toggle:hover:not(:disabled) {
   min-height: 44px;
 }
 
-.log-header:hover {
-  color: var(--gold);
+.log-header:hover .log-chevron {
+  color: var(--text);
 }
 
 .log-chevron {
@@ -1798,9 +1832,6 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   .notice-region {
     transition: grid-template-rows 1ms linear 119ms;
   }
-  .board {
-    transition: gap 1ms linear 119ms;
-  }
   .notice-region .transient-message {
     transition: opacity 120ms linear;
   }
@@ -2039,6 +2070,13 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   color: var(--gold);
 }
 
+/* 等别人的决定（控制区的等待行、对质舞台上的旁观）：倒计时只是状态，不占金色，也不催 */
+.waiting .decision-timer,
+.stage-status:has(> p) .decision-timer {
+  color: var(--text-2);
+  animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .showcase-flipper.dealt { animation: fade-in 200ms linear var(--lead) both; }
   .showcase-tip { translate: none; }
@@ -2083,6 +2121,11 @@ button.post-game-reveal:not([aria-disabled]) .card { box-shadow: 0 0 14px color-
   line-height: 1.25;
   text-align: center;
   text-wrap: balance;
+}
+/* 昵称不用衬线（DESIGN.md「衬线只给名字」：玩家昵称留在无衬线） */
+.stage-name {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
+  font-weight: 700;
 }
 .stage-claim {
   display: inline-flex;
@@ -2643,7 +2686,6 @@ button.stage-slot[aria-disabled='true'] { cursor: default; }
     column-gap: var(--sp-1);
   }
   .table[data-seats='5'] .coins { flex-shrink: 0; }
-  .board:has(.table[data-seats='5']) > .notice-region .notice { padding-block: var(--sp-2); }
   .controls:has(.actions) { padding-block-start: var(--sp-2); }
 }
 
