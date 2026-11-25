@@ -14,6 +14,7 @@ import { publish, pushJoined } from './push.ts';
 import { creditsFor, readRoster } from './credits.ts';
 import { appendRecord } from './data-file.ts';
 import { pruneVisits, recordVisit } from './visits.ts';
+import { readStats } from './stats.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 // 控制台单开一个端口、默认只听本机：能连上就是运营者，不做认证（ADR 0015）。容器里改听 0.0.0.0，由 compose 只映射到宿主的 127.0.0.1
@@ -127,15 +128,29 @@ async function serveHttp(req: IncomingMessage, res: ServerResponse): Promise<voi
   if (home) recordVisit(clientAddress({ headers: req.headers, address: req.socket.remoteAddress }), { event: 'home' });
 }
 
-// 控制台：只读，看所有房间的完整状态。游戏端口上没有这条路由
+// 控制台：只读，页面、所有房间的完整状态和统计。游戏端口上没有这些路由
+const CONSOLE_PAGE = readFileSync(join(__dirname, 'console.html'));
 const consoleServer = createServer((req, res) => {
-  if (req.method !== 'GET' || req.url?.split('?')[0] !== '/api/state') {
+  const [path, query = ''] = (req.url ?? '').split('?');
+  const json = (body: unknown) => {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(body));
+  };
+  if (req.method === 'GET' && path === '/') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(CONSOLE_PAGE);
+  } else if (req.method === 'GET' && path === '/api/state') {
+    json({ rooms: [...rooms.values()].map((room) => room.consoleSnapshot()) });
+  } else if (req.method === 'GET' && path === '/api/stats') {
+    readStats(new URLSearchParams(query).get('games') === 'all').then(json, (error) => {
+      console.error('console stats error', error);
+      res.writeHead(500);
+      res.end();
+    });
+  } else {
     res.writeHead(404);
     res.end('not found');
-    return;
   }
-  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-  res.end(JSON.stringify({ rooms: [...rooms.values()].map((room) => room.consoleSnapshot()) }));
 });
 
 const io = new Server(httpServer);
@@ -306,7 +321,7 @@ prune();
 setInterval(prune, 86_400_000).unref();
 
 consoleServer.listen(CONSOLE_PORT, CONSOLE_HOST, () => {
-  console.log(`Console listening on http://${CONSOLE_HOST}:${CONSOLE_PORT}/api/state`);
+  console.log(`Console listening on http://${CONSOLE_HOST}:${CONSOLE_PORT}/`);
 });
 
 // 服务器退出时终止 cloudflared 子进程
