@@ -80,7 +80,7 @@ export default async function spectateRematchScenario(ui) {
   await sleep(1_500);
   await ui.evaluate(`document.querySelector('.controls').scrollIntoView({ block: 'end' })`);
   await ui.shot('spectate-rematch-table');
-  const over = await count('.notice.big');
+  const over = await count('.seat.winner');
   assert(!over, '截图时牌局已经结束，截不到旁观中的样子');
   assert(await rematchShown(), '真人玩家都已出局时，房主的控制区没有再来一局');
   const extra = await ui.evaluate(`document.querySelectorAll('.controls-body .waiting, .controls-body [role="timer"]').length`);

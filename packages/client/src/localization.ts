@@ -85,12 +85,15 @@ const english = {
   errorServerBusy: 'The server is full. Please try again later.',
   errorUnexpected: 'Something went wrong. Please try again.',
   gameStarted: 'Game started',
-  gameEnded: 'Game over',
-  playerEliminated: 'A player was eliminated',
+  playerEliminated: '{name} was eliminated',
+  youEliminated: 'You were eliminated',
   challengeFailed: 'Challenge failed',
   challengeSucceeded: 'Challenge succeeded',
-  influenceLostNotice: 'A player lost influence',
+  influenceLostNotice: '{name} lost influence',
+  youLostInfluence: 'You lost influence',
   winner: '{name} wins',
+  youWin: 'You win',
+  winnerMarker: 'Winner',
   yourTurn: 'Your turn',
   waitingForAction: '{name} is choosing an action',
   waitingForChallenge: 'Other players are deciding whether to challenge',
@@ -250,12 +253,15 @@ const simplifiedChinese = {
   errorServerBusy: '服务器房间已满，请稍后再试。',
   errorUnexpected: '发生错误，请重试。',
   gameStarted: '牌局开始',
-  gameEnded: '牌局结束',
-  playerEliminated: '有玩家被淘汰',
+  playerEliminated: '{name} 被淘汰',
+  youEliminated: '你被淘汰',
   challengeFailed: '质疑失败',
   challengeSucceeded: '质疑成功',
-  influenceLostNotice: '有玩家失去影响力',
+  influenceLostNotice: '{name} 失去影响力',
+  youLostInfluence: '你失去影响力',
   winner: '{name} 获胜',
+  youWin: '你获胜',
+  winnerMarker: '获胜者',
   yourTurn: '轮到你了',
   waitingForAction: '{name} 正在选择行动',
   waitingForChallenge: '其他玩家正在考虑是否质疑',
@@ -356,6 +362,8 @@ interface MessageValues {
   removeComputer: { name: string };
   computerStrength: { name: string };
   winner: { name: string };
+  playerEliminated: { name: string };
+  influenceLostNotice: { name: string };
   waitingForAction: { name: string };
   waitingForBlock: { name: string };
   waitingForShowdown: { name: string };
@@ -476,12 +484,15 @@ export function localizeServerError(locale: Locale, value: unknown): string {
   }
 }
 
-export type NoticeDescriptor = {
-  key: 'gameStarted' | 'gameEnded' | 'playerEliminated' | 'challengeFailed' | 'challengeSucceeded' | 'influenceLostNotice';
-};
+// 失去影响力 / 被淘汰点名到人；丢的是哪个角色，座位上翻开的牌已经看得到
+export type NoticeDescriptor =
+  | { key: 'gameStarted' | 'challengeFailed' | 'challengeSucceeded' }
+  | { key: 'playerEliminated' | 'influenceLostNotice'; playerId: string };
 
-export function localizeNotice(locale: Locale, notice: NoticeDescriptor): string {
-  return translate(locale, notice.key);
+export function localizeNotice(locale: Locale, notice: NoticeDescriptor, me: string | undefined, nameOf: (id: string) => string): string {
+  if (!('playerId' in notice)) return translate(locale, notice.key);
+  if (notice.playerId === me) return translate(locale, notice.key === 'playerEliminated' ? 'youEliminated' : 'youLostInfluence');
+  return translate(locale, notice.key, { name: nameOf(notice.playerId) });
 }
 
 export function localizeCoinCount(locale: Locale, count: number): string {

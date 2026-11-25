@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { ACTION_CLAIM, ASSASSINATE_COST, BLOCK_ROLES, COUP_COST, FORCED_COUP_COINS, MAX_PLAYERS, STRENGTHS, type ActionType, type Card, type LobbyPlayer, type PublicState, type Reaction, type Role, type Strength } from '@coup/shared';
 import { connect, send } from './socket.ts';
 import { actionName, ACTIONS, roleName, roleShortName } from './rules.ts';
@@ -219,15 +219,29 @@ function Segments({ segments }: { segments: Segment[] }) {
   );
 }
 
-// 悬浮看名字：自己的大牌把图标换成名字，对手的小牌弹出同色气泡（仅限有悬浮的设备）。
+// 触屏没有悬浮：点一下牌看名字，过一会儿自己收起；读屏已有 aria-label，这只是指针的便利
+const PEEK_MS = 2000;
+// 长按的门槛：短于系统长按菜单（约 500ms），长于一次普通点按
+const LONG_PRESS_MS = 400;
+
+// 悬浮看名字：自己的大牌把图标换成名字，对手的小牌弹出同色气泡；触屏改为点一下。
 // postGameRevealed：赛后揭晓的牌，全彩牌面（不置灰），以此与明牌区分（ADR 0005）
-function CardView({ role, locale, unavailable, small, postGameRevealed }: { role: Role; locale: Locale; unavailable?: boolean; small?: boolean; postGameRevealed?: boolean }) {
+// peekable=false：牌包在按钮里（赛后揭晓），点击另有用途
+function CardView({ role, locale, unavailable, small, postGameRevealed, peekable = true }: { role: Role; locale: Locale; unavailable?: boolean; small?: boolean; postGameRevealed?: boolean; peekable?: boolean }) {
   const label = roleName(locale, role);
+  const [peek, setPeek] = useState(false);
+  useEffect(() => {
+    if (!peek) return;
+    const timer = setTimeout(() => setPeek(false), PEEK_MS);
+    return () => clearTimeout(timer);
+  }, [peek]);
+  const onPointerUp = peekable ? (event: ReactPointerEvent) => event.pointerType === 'touch' && setPeek((v) => !v) : undefined;
   const card = (
     <div
-      className={`card card--${role}${unavailable ? ' unavailable' : ''}${postGameRevealed ? ' post-game-revealed' : ''}`}
+      className={`card card--${role}${unavailable ? ' unavailable' : ''}${postGameRevealed ? ' post-game-revealed' : ''}${peek && !small ? ' peek' : ''}`}
       role="img"
       aria-label={translate(locale, unavailable ? 'cardRevealed' : postGameRevealed ? 'cardPostGameRevealed' : 'cardFace', { role: label })}
+      onPointerUp={small ? undefined : onPointerUp}
     >
       <RoleIcon role={role} />
       {!small && <CardName name={label} short={roleShortName(locale, role)} />}
@@ -236,7 +250,7 @@ function CardView({ role, locale, unavailable, small, postGameRevealed }: { role
   if (!small) return card;
   // 气泡放在牌外，免得随明牌一起变暗
   return (
-    <span className="card-tip-anchor" style={{ '--tip': `var(--${role})` } as CSSProperties}>
+    <span className={`card-tip-anchor${peek ? ' open' : ''}`} style={{ '--tip': `var(--${role})` } as CSSProperties} onPointerUp={onPointerUp}>
       {card}
       <span className="card-tip" aria-hidden="true">{label}</span>
     </span>
@@ -438,7 +452,11 @@ function GameBoard(props: {
   const timer = <DecisionTimer clock={props.clock} locale={props.locale} />;
 
   const narration = describePending(state, props.locale);
-  const centerText = narration ?? (isMyTurn && state.phase === 'choosingAction' ? [translate(props.locale, 'yourTurn')] : null);
+  // 终局：胜者写在桌心，座位戴冠、挂金环；不再另起横幅
+  const winnerText = state.phase === 'gameOver'
+    ? state.winnerId === me ? translate(props.locale, 'youWin') : translate(props.locale, 'winner', { name: nameOf(state, state.winnerId) })
+    : null;
+  const centerText = narration ?? (isMyTurn && state.phase === 'choosingAction' ? [translate(props.locale, 'yourTurn')] : winnerText ? [winnerText] : null);
 
   type SeatPlayer = PublicState['players'][number];
   const seats = placeSeats(state.players, me);
@@ -475,18 +493,20 @@ function GameBoard(props: {
     // 交换选牌期间手里暂时多出抽到的牌，影响力仍是原来的张数
     const influence = state.phase === 'choosingExchange' && p.id === pending?.actorId ? (state.exchangeKeepCount ?? p.handCount) : p.handCount;
     const isTargeted = p.alive && pending?.targetId === p.id && TARGETED_PHASES.has(state.phase);
+    const isWinner = state.phase === 'gameOver' && p.id === state.winnerId;
     const coinMotion = props.motions.find((m) => m.playerId === p.id && m.kind === 'coins');
     const ghost = props.motions.find((m) => m.playerId === p.id && m.kind === 'ghost');
     return (
       <div
         key={p.id}
         data-seat={p.id}
-        className={`seat ${angle == null ? 'self' : 'opponent'}${isCurrent ? ' current' : ''}${isLosing ? ' losing' : ''}${isTargeted ? ' targeted' : ''}${p.alive ? '' : ' dead'}`}
+        className={`seat ${angle == null ? 'self' : 'opponent'}${isCurrent ? ' current' : ''}${isLosing ? ' losing' : ''}${isTargeted ? ' targeted' : ''}${isWinner ? ' winner' : ''}${p.alive ? '' : ' dead'}`}
         aria-current={isCurrent ? 'true' : undefined}
         style={angle == null ? undefined : ({ '--seat-angle': `${angle}deg` } as CSSProperties)}
       >
         <div className="seat-head">
           <span className="name">
+            {isWinner && <span className="seat-crown" role="img" aria-label={translate(props.locale, 'winnerMarker')}><CrownIcon /></span>}
             {props.computers.has(p.id) && <ComputerBadge strength={props.computers.get(p.id)!} locale={props.locale} />}
             {p.name}
             {p.id === me && <span className="visually-hidden">{translate(props.locale, 'selfMarker')}</span>}
@@ -525,7 +545,7 @@ function GameBoard(props: {
                     aria-label={translate(props.locale, revealedNow ? 'cardPostGameRevealed' : 'cardPostGameHidden', { role: roleName(props.locale, c.role) })}
                     onClick={revealedNow ? undefined : () => props.onIntent({ type: 'revealPostGameCard', cardId: c.id })}
                   >
-                    <CardView role={c.role} locale={props.locale} />
+                    <CardView role={c.role} locale={props.locale} peekable={false} />
                   </button>
                 );
               })
@@ -585,14 +605,10 @@ function GameBoard(props: {
         className="notice"
         role="status"
         ariaLive="polite"
-        render={(visibleNotice) => localizeNotice(props.locale, visibleNotice.descriptor)}
+        render={(visibleNotice) => localizeNotice(props.locale, visibleNotice.descriptor, me, (id) => nameOf(state, id))}
       />
 
       <div className="board-content">
-        {state.phase === 'gameOver' && (
-          <div className="notice big"><CrownIcon /> {translate(props.locale, 'winner', { name: nameOf(state, state.winnerId) })}</div>
-        )}
-
       <div className="table" data-seats={seats.opponents.length}>
         <div className="opponent-seats">
           {(['left', 'top', 'right'] as const).map((side) => (
@@ -729,6 +745,13 @@ function Actions(props: {
 }) {
   const sel = ACTIONS.find((a) => a.type === props.selectedAction);
   const mustCoup = props.coins >= FORCED_COUP_COINS;
+  // 触屏长按看气泡（费用 + 声称的角色）；按住时显示，松手收起，这一下不算点了行动
+  const [held, setHeld] = useState<ActionType | null>(null);
+  const press = useRef<{ timer?: ReturnType<typeof setTimeout>; shown?: boolean }>({});
+  const release = () => {
+    clearTimeout(press.current.timer);
+    setHeld(null);
+  };
   const label = (action: ActionType): string => {
     const name = actionName(props.locale, action);
     const claim = ACTION_CLAIM[action];
@@ -771,7 +794,27 @@ function Actions(props: {
               ? props.coins < ASSASSINATE_COST || mustCoup
               : mustCoup;
         return (
-          <span key={a.type} className="action-tip-anchor">
+          <span
+            key={a.type}
+            className={`action-tip-anchor${held === a.type ? ' open' : ''}`}
+            onPointerDown={(event) => {
+              if (event.pointerType !== 'touch') return;
+              press.current.shown = false;
+              press.current.timer = setTimeout(() => {
+                press.current.shown = true;
+                setHeld(a.type);
+              }, LONG_PRESS_MS);
+            }}
+            onPointerUp={release}
+            onPointerCancel={release}
+            onClickCapture={(event) => {
+              if (!press.current.shown) return;
+              press.current.shown = false;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onContextMenu={(event) => event.preventDefault()}
+          >
             <button
               disabled={disabled}
               aria-label={label(a.type)}

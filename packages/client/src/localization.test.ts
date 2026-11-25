@@ -72,9 +72,17 @@ describe('translate', () => {
   it('formats a stable transient-notice descriptor in the current locale', () => {
     const notice = { key: 'challengeSucceeded' } as const;
 
-    expect(localizeNotice('en', notice)).toBe('Challenge succeeded');
-    expect(localizeNotice('zh-CN', notice)).toBe('质疑成功');
+    expect(localizeNotice('en', notice, undefined, () => '')).toBe('Challenge succeeded');
+    expect(localizeNotice('zh-CN', notice, undefined, () => '')).toBe('质疑成功');
     expect(notice).toEqual({ key: 'challengeSucceeded' });
+  });
+
+  it('names the player in influence notices and says you for yourself', () => {
+    const names = (id: string) => (id === 'p1' ? 'Van' : 'Me');
+    expect(localizeNotice('zh-CN', { key: 'influenceLostNotice', playerId: 'p1' }, 'p2', names)).toBe('Van 失去影响力');
+    expect(localizeNotice('zh-CN', { key: 'playerEliminated', playerId: 'p1' }, 'p2', names)).toBe('Van 被淘汰');
+    expect(localizeNotice('en', { key: 'playerEliminated', playerId: 'p2' }, 'p2', names)).toBe('You were eliminated');
+    expect(localizeNotice('en', { key: 'influenceLostNotice', playerId: 'p2' }, 'p2', names)).toBe('You lost influence');
   });
 
   it('names computer players and the host controls for them in both locales', () => {
