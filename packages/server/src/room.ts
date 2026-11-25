@@ -116,6 +116,18 @@ export interface RoomEvents {
   onReaction(room: Room, reaction: { playerId: string; reaction: Reaction }): void;
   // 电脑对质时的对准：电脑没有连接，发给整个房间。真人的对准由 focusShowdownCard 返回、传输层转发给其他人
   onShowdownFocus(room: Room, focus: { slot: number | null }): void;
+  // 每局开局后恰好一次：打完或中途结束时（ADR 0015）。可选，只有 index.ts 落盘，测试不必都接
+  onGameSummary?(summary: GameSummary): void;
+}
+
+// 牌局摘要：不记昵称、房间码和玩家 ID。中途结束的没有获胜者
+export interface GameSummary {
+  startedAt: string;
+  endedAt: string;
+  humans: number;
+  computers: Strength[];
+  endedEarly: boolean;
+  winner: 'human' | 'computer' | null;
 }
 
 export interface RoomOptions {
@@ -159,6 +171,8 @@ export class Room {
   // ponytail: 离开房间的玩家不删条目；一个房间至多几位玩家、空房 5 分钟后整个回收，不值得在每条移除路径上清理
   private lastReactionAt = new Map<string, number>();
   private deadlineAt: number | null = null;
+  // 本局摘要开局时就有的部分，写出后清空：同一局不会写第二条
+  private summaryStart: Pick<GameSummary, 'startedAt' | 'humans' | 'computers'> | null = null;
   private emptyTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly computerRandom: () => number;
@@ -346,7 +360,10 @@ export class Room {
 
   private returnToLobby(): void {
     // 中途结束的牌局不算一局，也没有获胜者：皇冠清空
-    if (this.game?.phase !== 'gameOver') this.previousWinnerId = null;
+    if (this.game?.phase !== 'gameOver') {
+      this.previousWinnerId = null;
+      this.writeSummary(null);
+    }
     // 先清牌局：下面的 removePlayer 可能走到 scheduleEmptyCleanup，那里不能再看到进行中的牌局
     this.game = null;
     this.repo.delete(this.code);
@@ -377,6 +394,8 @@ export class Room {
       ...(hands && { hands: Object.fromEntries(entries.map((p, i) => [p.id, hands[i]])) }),
     });
     this.gameNumber += 1;
+    const computers = entries.filter((p) => p.isComputer);
+    this.summaryStart = { startedAt: new Date().toISOString(), humans: entries.length - computers.length, computers: computers.map((p) => p.strength!) };
     this.temperaments = new Map(entries.filter((p) => p.isComputer).map((p) => [p.id, drawTemperament(this.computerRandom, TUNINGS[p.strength!])]));
     this.gameEvents = [];
     this.heard = [];
@@ -417,7 +436,10 @@ export class Room {
 
   private afterMutation(events: GameEvent[], timerKeyBefore: string): void {
     if (!this.game) return;
-    if (this.game.winnerId) this.previousWinnerId = this.game.winnerId;
+    if (this.game.winnerId) {
+      this.previousWinnerId = this.game.winnerId;
+      this.writeSummary(this.game.winnerId);
+    }
     this.handOffOfflineHost();
     const reveal = events.some((e) => e.type === 'challengeResolved') ? REVEAL_MS : 0;
     // 时限从进入阶段起算：有人放弃回应、已淘汰者弃权等不换阶段也不换行动者的变化不重新计时
@@ -428,6 +450,13 @@ export class Room {
     }
     this.scheduleComputers(reveal);
     this.scheduleSpeech(events);
+  }
+
+  private writeSummary(winnerId: string | null): void {
+    if (!this.summaryStart) return;
+    const winner = winnerId ? (this.players.get(winnerId)?.isComputer ? 'computer' : 'human') : null;
+    this.events.onGameSummary?.({ ...this.summaryStart, endedAt: new Date().toISOString(), endedEarly: !winner, winner });
+    this.summaryStart = null;
   }
 
   private startTimer(ms: number): void {

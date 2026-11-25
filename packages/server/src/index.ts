@@ -12,6 +12,7 @@ import { ClientError, toServerError } from './errors.ts';
 import { reserveRoomCreation } from './room-limits.ts';
 import { publish, pushJoined } from './push.ts';
 import { creditsFor, readRoster } from './credits.ts';
+import { appendRecord } from './data-file.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
 // 控制台单开一个端口、默认只听本机：能连上就是运营者，不做认证（ADR 0015）。容器里改听 0.0.0.0，由 compose 只映射到宿主的 127.0.0.1
@@ -182,6 +183,8 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
         // 发给整个房间（含发送者）：自己的座位也要亮起，且只在服务器接受后才亮
         onReaction: (r, reaction) => io.to(r.code).emit('reaction', reaction),
         onShowdownFocus: (r, focus) => io.to(r.code).emit('showdownFocus', focus),
+        // 写失败只打日志，不影响牌局
+        onGameSummary: (summary) => appendRecord('games.jsonl', summary).catch((error) => console.error('game summary write error', error)),
       }, roomOptions);
       const p = room.addPlayer(raw.name, socket.id);
       reserveRoomCreation(clientAddress(socket), rooms.size);
