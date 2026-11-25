@@ -69,7 +69,7 @@ async function startServer(serverEnv = {}) {
   const port = await freePort();
   const server = launch(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: join(ROOT, 'packages/server'),
-    env: { ...process.env, ...serverEnv, PORT: String(port) },
+    env: { ...process.env, ...serverEnv, PORT: String(port), CONSOLE_PORT: String(await freePort()) }, // 控制台也换空闲端口，不和开着的开发服务器抢 8788
   });
   let log = '';
   server.stdout.on('data', (d) => (log += d));

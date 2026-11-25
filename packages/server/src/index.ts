@@ -14,6 +14,9 @@ import { publish, pushJoined } from './push.ts';
 import { creditsFor, readRoster } from './credits.ts';
 
 const PORT = Number(process.env.PORT ?? 8787);
+// 控制台单开一个端口、默认只听本机：能连上就是运营者，不做认证（ADR 0015）。容器里改听 0.0.0.0，由 compose 只映射到宿主的 127.0.0.1
+const CONSOLE_PORT = Number(process.env.CONSOLE_PORT ?? 8788);
+const CONSOLE_HOST = process.env.CONSOLE_HOST ?? '127.0.0.1';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 // 前端构建产物路径（相对 packages/server）
 const CLIENT_DIST = join(__dirname, '../../client/dist');
@@ -117,6 +120,17 @@ async function serveHttp(req: IncomingMessage, res: ServerResponse): Promise<voi
   res.writeHead(200, headers);
   res.end(readFileSync(filePath));
 }
+
+// 控制台：只读，看所有房间的完整状态。游戏端口上没有这条路由
+const consoleServer = createServer((req, res) => {
+  if (req.method !== 'GET' || req.url?.split('?')[0] !== '/api/state') {
+    res.writeHead(404);
+    res.end('not found');
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify({ rooms: [...rooms.values()].map((room) => room.consoleSnapshot()) }));
+});
 
 const io = new Server(httpServer);
 
@@ -273,6 +287,9 @@ function handleIntent(socket: Socket, raw: ClientIntent): void {
 httpServer.listen(PORT, () => {
   console.log(`Coup server listening on http://localhost:${PORT}`);
   console.log('暴露到公网: cloudflared tunnel --url http://localhost:' + PORT);
+});
+consoleServer.listen(CONSOLE_PORT, CONSOLE_HOST, () => {
+  console.log(`Console listening on http://${CONSOLE_HOST}:${CONSOLE_PORT}/api/state`);
 });
 
 // 服务器退出时终止 cloudflared 子进程

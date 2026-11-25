@@ -151,7 +151,8 @@ try {
     '-o', 'ConnectionAttempts=3',
     '-o', 'PasswordAuthentication=no', '-o', 'ServerAliveInterval=30',
     '-o', 'ServerAliveCountMax=3', '-o', 'ExitOnForwardFailure=yes',
-    '-L', '127.0.0.1:18887:127.0.0.1:8787', $target)
+    '-L', '127.0.0.1:18887:127.0.0.1:8787',
+    '-L', '127.0.0.1:18888:127.0.0.1:8788', $target)
   $tunnel = Start-Process -FilePath $sshPath -ArgumentList $tunnelArgs -NoNewWindow -PassThru
   $healthy = $false
   for ($attempt = 0; $attempt -lt 30; $attempt++) {
@@ -171,6 +172,7 @@ try {
   } else {
     Write-Host 'Deployment and local access verified: http://127.0.0.1:18887'
   }
+  Write-Host 'Console: http://127.0.0.1:18888/api/state'
   Write-Host 'Leave this window open to use the private site. Press Ctrl+C to close the tunnel.'
   while (-not $tunnel.HasExited) { Start-Sleep -Seconds 1 }
   throw "SSH tunnel exited with code $($tunnel.ExitCode)."
