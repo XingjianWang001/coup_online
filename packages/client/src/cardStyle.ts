@@ -9,7 +9,7 @@ const STYLE_KEY = 'coup.cardStyle';
 
 // 大牌的画由 style.css 按需请求，要等第一次亮牌才开始下载；选中图腾时先把五张画拉进缓存。
 // 画放在 src/ 下由 Vite 打进带哈希的 assets/，服务端对 assets/ 长期缓存，再次访问不用重下。
-const TOTEM_ART = Object.values(import.meta.glob<string>('./card-styles/totem/*.jpg', { eager: true, query: '?url', import: 'default' }));
+const TOTEM_ART = Object.values(import.meta.glob<string>('./card-styles/totem/*.webp', { eager: true, query: '?url', import: 'default' }));
 
 export function preloadCardStyle(style: CardStyle): void {
   if (style === 'totem') for (const src of TOTEM_ART) new Image().src = src;
