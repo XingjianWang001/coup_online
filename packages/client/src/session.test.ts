@@ -120,7 +120,7 @@ describe('对质', () => {
   const open = run(received('duel', 'a', 'b 质疑', 'a 开局'), holding);
 
   it('进入对质即打开舞台：被质疑者记下翻牌前的手牌，旁观者收到同步的悬停牌位', () => {
-    expect(open.showdown).toEqual({ challengerId: 'b', claimantId: 'a', role: 'duke', id: expect.any(Number), slots: 2, hand: open.hand, focus: null, reveal: null, newCard: null });
+    expect(open.showdown).toEqual({ challengerId: 'b', claimantId: 'a', role: 'duke', id: expect.any(Number), slots: 2, hand: open.hand, focus: null, reveal: null, newCard: null, suddenDeath: false });
     const watching = run(received('duel', 'b', 'b 质疑'));
     expect(watching.showdown).toMatchObject({ slots: 2, hand: null });
     expect(run([{ type: 'showdownFocus', slot: 0 }], watching).showdown?.focus).toBe(0);

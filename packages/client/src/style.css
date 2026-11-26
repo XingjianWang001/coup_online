@@ -1528,6 +1528,96 @@ button.reaction-toggle:hover:not(:disabled) {
   font-weight: 600;
 }
 
+/* 背景音乐：喇叭（只切静音）+ 音量滑块。滑块本身 44px 高，整条都是触摸区域 */
+.music-options {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.music-mute {
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.music-mute[aria-pressed='true'] {
+  color: var(--text-3);
+}
+
+.music-volume {
+  --track: 6px;
+  --thumb: 22px;
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  appearance: none;
+  cursor: pointer;
+}
+
+.music-volume:focus-visible {
+  border-color: transparent;
+  box-shadow: none;
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.music-volume::-webkit-slider-runnable-track {
+  height: var(--track);
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--gold-soft) var(--fill), var(--line) var(--fill));
+}
+
+.music-volume::-moz-range-track {
+  height: var(--track);
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.music-volume::-moz-range-progress {
+  height: var(--track);
+  border-radius: 999px;
+  background: var(--gold-soft);
+}
+
+.music-volume::-webkit-slider-thumb {
+  width: var(--thumb);
+  height: var(--thumb);
+  margin-top: calc((var(--track) - var(--thumb)) / 2);
+  border: 2px solid var(--gold);
+  border-radius: 50%;
+  background: var(--text);
+  appearance: none;
+}
+
+.music-volume::-moz-range-thumb {
+  width: var(--thumb);
+  height: var(--thumb);
+  box-sizing: border-box;
+  border: 2px solid var(--gold);
+  border-radius: 50%;
+  background: var(--text);
+}
+
+.music-credits h3 {
+  margin-top: var(--sp-2);
+}
+
+.music-credits a {
+  color: inherit;
+  text-decoration-color: var(--gold-dim);
+  text-underline-offset: 3px;
+}
+
+.music-credits a:hover {
+  color: var(--gold);
+}
+
 .panel button + button {
   margin-left: var(--sp-2);
 }

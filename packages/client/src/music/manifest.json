@@ -1,0 +1,59 @@
+{
+  "loop_seconds": 192.0,
+  "loop_start_seconds": 0.5,
+  "beat_seconds": 0.75,
+  "bar_seconds": 3.0,
+  "files": {
+    "band_a": "band_a.mp3",
+    "band_b": "band_b.mp3",
+    "brushes": "brushes.mp3",
+    "showdown_drums": "showdown_drums.mp3",
+    "trem_synth": "trem_synth.mp3",
+    "trem_vpo": "trem_vpo.mp3",
+    "victory": "victory.mp3"
+  },
+  "loops": {
+    "victory": 48.0
+  },
+  "states": {
+    "lobby": {
+      "band_a": 0.7414
+    },
+    "game": {
+      "band_a": 0.8606,
+      "brushes": 0.8606
+    },
+    "last_influence": {
+      "band_a": 0.8606,
+      "brushes": 0.8606,
+      "showdown_drums": 0.543
+    },
+    "tension": {
+      "band_a": 1.0043,
+      "brushes": 1.0043,
+      "showdown_drums": 0.6337,
+      "trem_synth": 1.0043
+    },
+    "sudden_death": {
+      "band_b": 0.9786,
+      "brushes": 0.9786,
+      "showdown_drums": 0.9786,
+      "trem_vpo": 0.9786
+    },
+    "over": {
+      "band_a": 0.7414
+    },
+    "victory": {
+      "victory": 1.0
+    }
+  },
+  "priority": [
+    "sudden_death",
+    "tension",
+    "last_influence",
+    "game",
+    "lobby",
+    "victory",
+    "over"
+  ]
+}
