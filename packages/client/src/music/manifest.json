@@ -17,31 +17,31 @@
   },
   "states": {
     "lobby": {
-      "band_a": 0.7434
+      "band_a": 0.7414
     },
     "game": {
-      "band_a": 0.8618,
-      "brushes": 0.8618
+      "band_a": 0.8606,
+      "brushes": 0.8606
     },
     "last_influence": {
-      "band_a": 0.8618,
-      "brushes": 0.8618,
-      "showdown_drums": 0.5438
+      "band_a": 0.8606,
+      "brushes": 0.8606,
+      "showdown_drums": 0.543
     },
     "tension": {
-      "band_a": 1.0055,
-      "brushes": 1.0055,
-      "showdown_drums": 0.6344,
-      "trem_synth": 1.0055
+      "band_a": 1.0043,
+      "brushes": 1.0043,
+      "showdown_drums": 0.6337,
+      "trem_synth": 1.0043
     },
     "sudden_death": {
-      "band_b": 0.9777,
-      "brushes": 0.9777,
-      "showdown_drums": 0.9777,
-      "trem_vpo": 0.9777
+      "band_b": 0.9786,
+      "brushes": 0.9786,
+      "showdown_drums": 0.9786,
+      "trem_vpo": 0.9786
     },
     "over": {
-      "band_a": 0.7434
+      "band_a": 0.7414
     },
     "victory": {
       "victory": 1.0
